@@ -12,6 +12,12 @@ and we use AI insight comments
 
 @.socratic-shell/ai-insights.md
 
+## Tool Management
+
+This project uses [proto](https://moonrepo.dev/proto) for managing development tools. Individual components include idiomatic tool version files (e.g., `.nvmrc` for Node.js projects) which proto can read automatically. Run `proto install` in any component directory to install the required tools.
+
+## Checkpointing
+
 When checkpointing:
 
 * Update tracking issue (if any)
