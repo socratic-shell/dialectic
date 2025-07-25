@@ -1,0 +1,5 @@
+[book]
+authors = ["Niko Matsakis"]
+language = "en"
+src = "md"
+title = "Dialectic"
