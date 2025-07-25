@@ -12,3 +12,10 @@
 - [Communication Protocol](./design/protocol.md)
 - [AI Assistant Guidelines](./design/ai-guidelines.md)
 - [Implementation Phases](./design/implementation-phases.md)
+
+# References
+
+<!-- Consult these references for technical specifics on how subsystems work -->
+
+- [CLI Extension Communication Guide](./references/cli-extension-communication-guide.md)
+- [VSCode Sidebar Panel Setup Guide](./references/vscode-extensions-sidebar-panel-research-report.md)
