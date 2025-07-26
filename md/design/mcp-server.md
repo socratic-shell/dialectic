@@ -13,16 +13,26 @@ The primary tool exposed by the MCP server:
 ```json
 {
   "name": "present-review",
-  "description": "Display a code review in the VSCode review panel",
+  "description": "Display a code review in the VSCode review panel. Reviews should be structured markdown with clear sections and actionable feedback.",
   "parameters": {
-    "content": "string (markdown content of the review)",
+    "content": "string (markdown content with structured review format)",
     "mode": "string (replace|update-section|append)",
     "section": "string (optional, section name for update-section mode)"
   }
 }
 ```
 
-*TODO: Flesh out parameter details, error handling, and response format.*
+### Review Structure Guidelines
+
+The tool description guides AI assistants to create well-structured reviews:
+
+1. **Brief Summary**: Suitable for commit messages
+2. **Detailed Findings**: With file references using `file:line` format
+3. **Specific Suggestions**: Actionable improvement recommendations
+
+### Code Reference Format
+
+Currently uses `file:line` format (e.g., `src/main.ts:42`). Future enhancement planned for search-based references (`search://file?query=text`) to improve resilience to code changes.
 
 ## Implementation Language
 
