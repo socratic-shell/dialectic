@@ -13,9 +13,13 @@
 - [AI Assistant Guidelines](./design/ai-guidelines.md)
 - [Implementation Phases](./design/implementation-phases.md)
 
-# References
+# Appendices
 
-<!-- Consult these references for technical specifics on how subsystems work -->
-
-- [CLI Extension Communication Guide](./references/cli-extension-communication-guide.md)
-- [VSCode Sidebar Panel Setup Guide](./references/vscode-extensions-sidebar-panel-research-report.md)
+- [References]() <!-- Consult these references for technical specifics on how subsystems work -->
+    - [Language server protocol overview](./references/lsp-overview/README.md)
+        - [Base protocol](./references/lsp-overview/base-protocol.md)
+        - [Language features](./references/lsp-overview/language-features.md)
+        - [Implementation guide](./references/lsp-overview/implementation-guide.md)
+        - [Message reference](./references/lsp-overview/message-reference.md)
+    - [CLI Extension Communication Guide](./references/cli-extension-communication-guide.md)
+    - [VSCode Sidebar Panel Setup Guide](./references/vscode-extensions-sidebar-panel-research-report.md)
