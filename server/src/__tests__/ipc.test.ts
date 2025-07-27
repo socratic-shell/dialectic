@@ -8,7 +8,8 @@ describe('IPCCommunicator', () => {
   let ipc: IPCCommunicator;
 
   beforeEach(() => {
-    ipc = new IPCCommunicator();
+    // 💡: Use test mode to avoid real socket connections in tests
+    ipc = new IPCCommunicator(true);
   });
 
   afterEach(async () => {
@@ -16,8 +17,20 @@ describe('IPCCommunicator', () => {
   });
 
   describe('initialization', () => {
-    it('should initialize without errors', async () => {
+    it('should initialize without errors in test mode', async () => {
       await expect(ipc.initialize()).resolves.not.toThrow();
+    });
+
+    it('should throw error when DIALECTIC_IPC_PATH is not set in production mode', async () => {
+      const originalPath = process.env.DIALECTIC_IPC_PATH;
+      delete process.env.DIALECTIC_IPC_PATH;
+      
+      const prodIpc = new IPCCommunicator(false);
+      await expect(prodIpc.initialize()).rejects.toThrow('DIALECTIC_IPC_PATH environment variable not set');
+      
+      if (originalPath) {
+        process.env.DIALECTIC_IPC_PATH = originalPath;
+      }
     });
 
     it('should be able to initialize multiple times', async () => {
@@ -40,7 +53,7 @@ describe('IPCCommunicator', () => {
       const result = await ipc.presentReview(params);
       
       expect(result.success).toBe(true);
-      expect(result.message).toContain('Review would be displayed');
+      expect(result.message).toContain('Review successfully displayed');
     });
 
     it('should handle update-section mode', async () => {
@@ -77,11 +90,21 @@ describe('IPCCommunicator', () => {
       
       expect(result.success).toBe(true);
     });
+
+    it('should throw error when not initialized in production mode', async () => {
+      const prodIpc = new IPCCommunicator(false);
+      const params: PresentReviewParams = {
+        content: '# Test',
+        mode: 'replace'
+      };
+
+      await expect(prodIpc.presentReview(params)).rejects.toThrow('IPC not initialized');
+    });
   });
 
   describe('error handling', () => {
     it('should handle close without initialization', async () => {
-      const freshIpc = new IPCCommunicator();
+      const freshIpc = new IPCCommunicator(true);
       await expect(freshIpc.close()).resolves.not.toThrow();
     });
 
