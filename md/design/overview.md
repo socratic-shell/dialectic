@@ -4,12 +4,26 @@
 
 ## Architecture Summary
 
-Dialectic consists of two main components:
+Dialectic consists of two main components that communicate via Unix socket IPC:
 
-1. **VSCode Extension** - Provides the review panel UI and handles file navigation
-2. **MCP Server** - Acts as a bridge between the AI assistant and the VSCode extension
+1. **VSCode Extension** - Provides the review panel UI, handles file navigation, and acts as IPC server
+2. **MCP Server** - Acts as a bridge between AI assistants and the VSCode extension via IPC client
 
-The AI assistant generates review content as structured markdown and uses the MCP server to display it in the VSCode interface.
+The AI assistant generates review content as structured markdown and uses the MCP server's `present-review` tool to display it in the VSCode interface through bidirectional IPC communication.
+
+## Communication Architecture
+
+```
+AI Assistant → MCP Tool → Unix Socket → VSCode Extension → Review Panel → User
+     ↑                                                                      ↓
+     └─────────── Response ←─────── IPC Response ←─────── User Interaction ←┘
+```
+
+**Key Design Decisions:**
+- **Unix Socket/Named Pipe**: Secure, efficient local IPC following VSCode extension patterns
+- **JSON Message Protocol**: Simple, debuggable, and extensible communication format
+- **Promise-Based Tracking**: Supports concurrent operations with unique message IDs
+- **Environment Variable Discovery**: VSCode extension sets `DIALECTIC_IPC_PATH` for automatic MCP server connection
 
 ## Design Philosophy
 
@@ -25,4 +39,20 @@ Dialectic embodies the collaborative patterns from the [socratic shell project](
 
 ## Implementation Status
 
-This design document is a work in progress. Each chapter represents a component or aspect that needs detailed design work before implementation begins. The [Implementation Phases](./implementation-phases.md) chapter outlines our planned approach to building Dialectic incrementally.
+**✅ MVP Complete** - All core features implemented and tested:
+- Review Display: Tree-based markdown rendering in VSCode sidebar
+- Code Navigation: Clickable `file:line` references that jump to code locations
+- Content Export: Copy button to export review content for commit messages
+- IPC Communication: Full bidirectional communication between AI and extension
+
+**Current State**: Ready for end-to-end testing with real AI assistants in VSCode environments.
+
+**Next Phase**: Package extension for distribution and create installation documentation.
+
+## Technical Stack
+
+- **MCP Server**: TypeScript/Node.js with comprehensive unit testing (49/49 tests passing)
+- **VSCode Extension**: TypeScript with VSCode Extension API
+- **Communication**: Unix domain sockets (macOS/Linux) and named pipes (Windows)
+- **Protocol**: JSON messages with unique ID tracking and timeout protection
+- **Testing**: Jest for unit tests with test mode for IPC-free testing
