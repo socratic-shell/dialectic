@@ -1,6 +1,6 @@
 # VSCode Extension Design
 
-*This chapter details the design and implementation of the VSCode extension component.*
+*This chapter details the design and implementation approach of the VSCode extension component.*
 
 ## Goal
 
@@ -35,7 +35,7 @@ The extension operates as both a UI component and an IPC server:
 - Provide tree-based review display with clickable navigation
 - Handle copy-to-clipboard functionality
 
-## Implementation Details
+## Implementation Approach
 
 ### Technology Stack
 - **Language**: TypeScript with VSCode Extension API
@@ -46,331 +46,50 @@ The extension operates as both a UI component and an IPC server:
 
 ### Core Components
 
-#### Extension Activation (extension.ts)
-Main entry point that sets up all extension functionality:
-```typescript
-export function activate(context: vscode.ExtensionContext) {
-  // Create the review provider
-  const reviewProvider = new ReviewProvider();
-  
-  // Register the tree data provider for custom view
-  vscode.window.createTreeView('dialecticReviews', {
-    treeDataProvider: reviewProvider,
-    showCollapseAll: true
-  });
+**Extension Activation**: Main entry point that sets up all functionality
+- Creates review provider for tree-based display
+- Registers tree view with VSCode's sidebar
+- Sets up IPC server for MCP communication
+- Registers commands and cleanup handlers
 
-  // Set up IPC server for communication with MCP server
-  const server = createIPCServer(context, reviewProvider);
-  
-  // Register commands and cleanup handlers
-  context.subscriptions.push(/* ... */);
-}
-```
+**IPC Server Implementation**: Creates platform-specific socket and handles connections
+- Generates appropriate socket paths for Unix/Windows
+- Listens for MCP server connections
+- Processes incoming review messages
+- Sets environment variables for discovery
 
-#### IPC Server Implementation
-Creates platform-specific socket and handles MCP server connections:
-```typescript
-function createIPCServer(context: vscode.ExtensionContext, reviewProvider: ReviewProvider): net.Server {
-  const socketPath = getSocketPath(context);
-  
-  // Clean up any existing socket file
-  if (fs.existsSync(socketPath)) {
-    fs.unlinkSync(socketPath);
-  }
-  
-  const server = net.createServer((socket) => {
-    socket.on('data', (data) => {
-      try {
-        const message: IPCMessage = JSON.parse(data.toString());
-        handleIPCMessage(message, socket, reviewProvider);
-      } catch (error) {
-        // Send error response for invalid JSON
-        const response: IPCResponse = {
-          id: 'unknown',
-          success: false,
-          error: 'Invalid JSON message'
-        };
-        socket.write(JSON.stringify(response));
-      }
-    });
-  });
-  
-  server.listen(socketPath);
-  
-  // Set environment variable for MCP server discovery
-  context.environmentVariableCollection.replace("DIALECTIC_IPC_PATH", socketPath);
-  
-  return server;
-}
-```
+**Review Provider**: Implements VSCode's TreeDataProvider interface
+- Manages review content and tree structure
+- Handles dynamic content updates (replace/append/update-section)
+- Provides clickable navigation for code references
+- Supports copy-to-clipboard functionality
 
-#### Platform-Specific Socket Paths
-```typescript
-function getSocketPath(context: vscode.ExtensionContext): string {
-  const storageUri = context.storageUri || context.globalStorageUri;
-  const socketDir = storageUri.fsPath;
-  
-  // Ensure directory exists
-  if (!fs.existsSync(socketDir)) {
-    fs.mkdirSync(socketDir, { recursive: true });
-  }
-  
-  // Platform-specific socket naming
-  if (process.platform === 'win32') {
-    return `\\\\.\\pipe\\dialectic-${Date.now()}`;
-  } else {
-    return path.join(socketDir, 'dialectic.sock');
-  }
-}
-```
+### Design Patterns
 
-#### Message Processing
-```typescript
-function handleIPCMessage(message: IPCMessage, socket: net.Socket, reviewProvider: ReviewProvider): void {
-  let response: IPCResponse;
-  
-  try {
-    switch (message.type) {
-      case 'present-review':
-        // Update the review provider with new content
-        reviewProvider.updateReview(
-          message.payload.content, 
-          message.payload.mode, 
-          message.payload.section
-        );
-        response = {
-          id: message.id,
-          success: true
-        };
-        break;
-      default:
-        response = {
-          id: message.id,
-          success: false,
-          error: `Unknown message type: ${message.type}`
-        };
-    }
-  } catch (error) {
-    response = {
-      id: message.id,
-      success: false,
-      error: error instanceof Error ? error.message : String(error)
-    };
-  }
-  
-  socket.write(JSON.stringify(response));
-}
-```
+**Tree-Based UI**: Hierarchical display matching markdown structure
+- Headers become expandable sections
+- Content items become clickable navigation points
+- Icons differentiate between content types
+- Automatic refresh when content updates
 
-### Review Provider Implementation (reviewProvider.ts)
+**Platform Compatibility**: Handles different operating systems
+- Unix domain sockets for macOS/Linux
+- Named pipes for Windows
+- Automatic cleanup and resource management
 
-#### Tree Data Provider
-Implements VSCode's TreeDataProvider interface for hierarchical review display:
-```typescript
-export class ReviewProvider implements vscode.TreeDataProvider<ReviewItem> {
-  private _onDidChangeTreeData: vscode.EventEmitter<ReviewItem | undefined | null | void> = 
-    new vscode.EventEmitter<ReviewItem | undefined | null | void>();
-  readonly onDidChangeTreeData: vscode.Event<ReviewItem | undefined | null | void> = 
-    this._onDidChangeTreeData.event;
-
-  private reviewContent: string = '';
-  private reviewItems: ReviewItem[] = [];
-
-  getTreeItem(element: ReviewItem): vscode.TreeItem {
-    return element;
-  }
-
-  getChildren(element?: ReviewItem): Thenable<ReviewItem[]> {
-    if (!element) {
-      return Promise.resolve(this.reviewItems);
-    }
-    return Promise.resolve(element.children || []);
-  }
-}
-```
-
-#### Dynamic Content Updates
-```typescript
-updateReview(content: string, mode: 'replace' | 'update-section' | 'append' = 'replace', section?: string): void {
-  switch (mode) {
-    case 'replace':
-      this.reviewContent = content;
-      break;
-    case 'append':
-      this.reviewContent += '\n\n' + content;
-      break;
-    case 'update-section':
-      if (section) {
-        // MVP implementation: append with section header
-        this.reviewContent += `\n\n## ${section}\n${content}`;
-      } else {
-        this.reviewContent += '\n\n' + content;
-      }
-      break;
-  }
-  
-  // Re-parse content and refresh tree view
-  this.reviewItems = this.parseMarkdownToTree(this.reviewContent);
-  this.refresh();
-}
-```
-
-#### Markdown Parsing for Tree Structure
-```typescript
-private parseMarkdownToTree(markdown: string): ReviewItem[] {
-  const lines = markdown.split('\n');
-  const items: ReviewItem[] = [];
-  let currentSection: ReviewItem | null = null;
-
-  for (const line of lines) {
-    if (line.startsWith('# ')) {
-      const item = new ReviewItem(
-        line.substring(2),
-        vscode.TreeItemCollapsibleState.Expanded,
-        'title'
-      );
-      items.push(item);
-      currentSection = item;
-    } else if (line.startsWith('## ')) {
-      const item = new ReviewItem(
-        line.substring(3),
-        vscode.TreeItemCollapsibleState.Expanded,
-        'section'
-      );
-      items.push(item);
-      currentSection = item;
-    } else if (line.startsWith('### ')) {
-      const item = new ReviewItem(
-        line.substring(4),
-        vscode.TreeItemCollapsibleState.Collapsed,
-        'subsection'
-      );
-      if (currentSection) {
-        if (!currentSection.children) {
-          currentSection.children = [];
-        }
-        currentSection.children.push(item);
-      }
-    } else if (line.trim().startsWith('- ') || (line.trim() && !line.startsWith('#'))) {
-      const content = line.trim().startsWith('- ') ? line.trim().substring(2) : line.trim();
-      const item = this.createContentItem(content);
-      if (currentSection) {
-        if (!currentSection.children) {
-          currentSection.children = [];
-        }
-        currentSection.children.push(item);
-      }
-    }
-  }
-
-  return items;
-}
-```
-
-#### Clickable Code Navigation
-```typescript
-private createContentItem(content: string): ReviewItem {
-  // Check for file:line references
-  const fileRefMatch = content.match(/\(([^:)]+):(\d+)\)/);
-  
-  const item = new ReviewItem(
-    content,
-    vscode.TreeItemCollapsibleState.None,
-    'content'
-  );
-
-  if (fileRefMatch) {
-    const fileName = fileRefMatch[1];
-    const lineNumber = parseInt(fileRefMatch[2]) - 1; // VSCode uses 0-based line numbers
-    
-    // Make it clickable by adding a command
-    item.command = {
-      command: 'vscode.open',
-      title: 'Open File',
-      arguments: [
-        vscode.Uri.file(vscode.workspace.workspaceFolders?.[0]?.uri.fsPath + '/' + fileName),
-        {
-          selection: new vscode.Range(lineNumber, 0, lineNumber, 0)
-        }
-      ]
-    };
-    
-    item.tooltip = `Click to open ${fileName}:${lineNumber + 1}`;
-  }
-
-  return item;
-}
-```
-
-#### Copy to Clipboard Functionality
-```typescript
-copyReviewToClipboard(): void {
-  vscode.env.clipboard.writeText(this.reviewContent).then(() => {
-    vscode.window.showInformationMessage('Review copied to clipboard!');
-  });
-}
-```
-
-### Review Item Implementation
-```typescript
-class ReviewItem extends vscode.TreeItem {
-  public children?: ReviewItem[];
-  public itemType: 'title' | 'section' | 'subsection' | 'content';
-
-  constructor(
-    public readonly label: string,
-    public readonly collapsibleState: vscode.TreeItemCollapsibleState,
-    itemType: 'title' | 'section' | 'subsection' | 'content'
-  ) {
-    super(label, collapsibleState);
-
-    this.itemType = itemType;
-    this.tooltip = this.label;
-    
-    // Set different icons based on item type
-    switch (itemType) {
-      case 'title':
-        this.iconPath = new vscode.ThemeIcon('file-text');
-        break;
-      case 'section':
-        this.iconPath = new vscode.ThemeIcon('symbol-namespace');
-        break;
-      case 'subsection':
-        this.iconPath = new vscode.ThemeIcon('symbol-method');
-        break;
-      case 'content':
-        this.iconPath = new vscode.ThemeIcon('symbol-string');
-        break;
-    }
-  }
-}
-```
+**Event-Driven Updates**: Reactive UI updates
+- Tree view refreshes when content changes
+- Immediate visual feedback for user actions
+- Proper event handling for VSCode integration
 
 ## User Interface Design
 
 ### Sidebar Integration
-The extension adds a top-level sidebar view (like Explorer, Search, Source Control):
-```json
-// package.json contribution
-"views": {
-  "dialecticReviews": [
-    {
-      "id": "dialecticReviews",
-      "name": "Code Reviews",
-      "when": "true"
-    }
-  ]
-},
-"viewsContainers": {
-  "activitybar": [
-    {
-      "id": "dialecticReviews",
-      "title": "Dialectic Reviews",
-      "icon": "$(file-text)"
-    }
-  ]
-}
-```
+The extension adds a top-level sidebar view similar to Explorer or Source Control:
+- Dedicated activity bar icon
+- Collapsible tree structure
+- Context menus and commands
+- Integrated with VSCode's theming system
 
 ### Tree View Structure
 ```
@@ -386,87 +105,58 @@ The extension adds a top-level sidebar view (like Explorer, Search, Source Contr
     └── 🔤 Chose bcrypt over other hashing algorithms
 ```
 
-### Command Integration
-```json
-// package.json commands
-"commands": [
-  {
-    "command": "dialectic.showReview",
-    "title": "Show Review",
-    "icon": "$(eye)"
-  },
-  {
-    "command": "dialectic.copyReview",
-    "title": "Copy Review",
-    "icon": "$(copy)"
-  }
-]
-```
+### Interactive Features
+- **Clickable References**: `file:line` patterns become navigation links
+- **Copy Functionality**: Button to export review content
+- **Expand/Collapse**: Tree sections can be expanded or collapsed
+- **Tooltips**: Hover information for navigation hints
+
+## Message Processing
+
+### IPC Message Handling
+The extension processes incoming messages from the MCP server:
+- **JSON Parsing**: Validates and parses incoming messages
+- **Message Routing**: Handles different message types appropriately
+- **Error Responses**: Sends structured error responses for invalid messages
+- **Success Confirmation**: Acknowledges successful operations
+
+### Content Updates
+Supports three update modes for dynamic review management:
+- **Replace**: Complete content replacement (most common)
+- **Append**: Add content to end (for incremental reviews)
+- **Update-Section**: Smart section updates (MVP: append with header)
+
+### Navigation Implementation
+Converts markdown references to VSCode commands:
+- **Pattern Detection**: Identifies `file:line` references in content
+- **Command Creation**: Generates VSCode navigation commands
+- **Error Handling**: Graceful handling of invalid file references
+- **User Feedback**: Clear tooltips and visual indicators
 
 ## Error Handling and Robustness
 
 ### IPC Error Recovery
-```typescript
-socket.on('error', (error) => {
-  console.error('IPC socket error:', error);
-  // Continue operation - extension remains functional even if IPC fails
-});
+- **Connection Failures**: Continues operation even if IPC fails
+- **Malformed Messages**: Proper error responses for invalid JSON
+- **Socket Cleanup**: Automatic resource cleanup on extension deactivation
 
-socket.on('close', () => {
-  console.log('MCP server disconnected from IPC');
-  // Socket cleanup handled automatically
-});
-```
+### User Experience
+- **Clear Error Messages**: Specific guidance for common issues
+- **Graceful Degradation**: Extension remains functional during errors
+- **Visual Feedback**: Loading states and operation confirmations
 
-### Malformed Message Handling
-```typescript
-socket.on('data', (data) => {
-  try {
-    const message: IPCMessage = JSON.parse(data.toString());
-    handleIPCMessage(message, socket, reviewProvider);
-  } catch (error) {
-    console.error('Failed to parse IPC message:', error);
-    const response: IPCResponse = {
-      id: 'unknown',
-      success: false,
-      error: 'Invalid JSON message'
-    };
-    socket.write(JSON.stringify(response));
-  }
-});
-```
-
-### Resource Cleanup
-```typescript
-context.subscriptions.push({
-  dispose: () => {
-    server.close();
-    if (fs.existsSync(socketPath)) {
-      fs.unlinkSync(socketPath);
-    }
-  }
-});
-```
-
-## Performance Considerations
-
-### Efficient Tree Updates
-- Only re-parse markdown when content actually changes
-- Use VSCode's built-in tree view virtualization for large reviews
-- Minimize DOM updates through proper event handling
-
-### Memory Management
-- Automatic cleanup of socket connections
-- Efficient string processing for markdown parsing
-- Proper disposal of VSCode API resources
+### Resource Management
+- **Memory Efficiency**: Proper disposal of VSCode API resources
+- **Socket Lifecycle**: Clean creation and destruction of IPC sockets
+- **Event Cleanup**: Proper removal of event listeners
 
 ## Testing and Validation
 
 ### Manual Testing Workflow
 1. Install extension in VSCode
-2. Open terminal and verify `DIALECTIC_IPC_PATH` environment variable is set
-3. Run MCP server and verify connection establishment
-4. Test review display, navigation, and copy functionality
+2. Verify environment variable setup in terminal
+3. Test MCP server connection and communication
+4. Validate review display, navigation, and copy functionality
 
 ### Integration Points
 - **VSCode API**: Tree view registration and command handling
@@ -474,22 +164,45 @@ context.subscriptions.push({
 - **Clipboard**: System clipboard integration
 - **Editor**: File navigation and selection
 
+## Implementation Files
+
+**Core Implementation:**
+- `extension/src/extension.ts` - Main activation logic and IPC server setup
+- `extension/src/reviewProvider.ts` - Tree view implementation and content management
+- `extension/package.json` - Extension manifest and VSCode integration
+
+**Configuration:**
+- `extension/tsconfig.json` - TypeScript configuration
+- `extension/.vscodeignore` - Files to exclude from extension package
+
+## Performance Considerations
+
+### Efficient Tree Updates
+- Only re-parse markdown when content actually changes
+- Use VSCode's built-in tree view virtualization
+- Minimize DOM updates through proper event handling
+
+### Memory Management
+- Automatic cleanup of socket connections
+- Efficient string processing for markdown parsing
+- Proper disposal of VSCode API resources
+
 ## Future Enhancements
 
 ### Advanced UI Features
-- **Review History**: Maintain and navigate between previous review versions
+- **Review History**: Navigate between previous review versions
 - **Diff View**: Show changes between review iterations
 - **Search**: Find specific content within large reviews
-- **Themes**: Support for custom review styling
+- **Custom Themes**: Support for personalized review styling
 
 ### Enhanced Navigation
 - **Smart References**: Support for search-based code references
-- **Multi-File**: Handle references across multiple files simultaneously
+- **Multi-File**: Handle references across multiple files
 - **Context Preview**: Show code context without leaving review panel
 
 ### Collaboration Features
 - **Comments**: Add inline comments to review sections
-- **Sharing**: Export reviews in various formats (PDF, HTML, etc.)
-- **Integration**: Connect with external review tools and workflows
+- **Sharing**: Export reviews in various formats
+- **Integration**: Connect with external review tools
 
-The extension provides a solid foundation for AI-driven code reviews while maintaining simplicity and focus on the core user experience.
+The extension provides a solid foundation for AI-driven code reviews while maintaining simplicity and focus on the core user experience. The design emphasizes reliability, performance, and seamless integration with VSCode's existing workflows.
