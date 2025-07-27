@@ -10,27 +10,11 @@
   "categories": [
     "Other"
   ],
-  "activationEvents": [],
+  "activationEvents": [
+    "*"
+  ],
   "main": "./out/extension.js",
   "contributes": {
-    "viewsContainers": {
-      "activitybar": [
-        {
-          "id": "dialecticContainer",
-          "title": "Dialectic Reviews",
-          "icon": "$(comment-discussion)"
-        }
-      ]
-    },
-    "views": {
-      "dialecticContainer": [
-        {
-          "id": "dialecticReviews",
-          "name": "Reviews",
-          "icon": "$(comment-discussion)"
-        }
-      ]
-    },
     "commands": [
       {
         "command": "dialectic.showReview",
@@ -43,16 +27,7 @@
         "category": "Dialectic",
         "icon": "$(copy)"
       }
-    ],
-    "menus": {
-      "view/title": [
-        {
-          "command": "dialectic.copyReview",
-          "when": "view == dialecticReviews",
-          "group": "navigation"
-        }
-      ]
-    }
+    ]
   },
   "scripts": {
     "vscode:prepublish": "npm run compile",
