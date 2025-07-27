@@ -37,6 +37,34 @@ export class ReviewProvider implements vscode.TreeDataProvider<ReviewItem> {
         });
     }
 
+    // 💡: Update review content from MCP server via IPC
+    updateReview(content: string, mode: 'replace' | 'update-section' | 'append' = 'replace', section?: string): void {
+        switch (mode) {
+            case 'replace':
+                this.reviewContent = content;
+                break;
+            case 'append':
+                this.reviewContent += '\n\n' + content;
+                break;
+            case 'update-section':
+                if (section) {
+                    // 💡: For MVP, just append with section header
+                    // Future enhancement could implement smart section replacement
+                    this.reviewContent += `\n\n## ${section}\n${content}`;
+                } else {
+                    // Fallback to append if no section specified
+                    this.reviewContent += '\n\n' + content;
+                }
+                break;
+        }
+        
+        // 💡: Parse the updated content and refresh the tree view
+        this.reviewItems = this.parseMarkdownToTree(this.reviewContent);
+        this.refresh();
+        
+        console.log('Review updated via IPC:', mode, section ? `(section: ${section})` : '');
+    }
+
     private loadDummyReview(): void {
         this.reviewContent = `# Add user authentication system
 
