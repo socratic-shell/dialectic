@@ -2,7 +2,7 @@ import * as vscode from 'vscode';
 import * as net from 'net';
 import * as path from 'path';
 import * as fs from 'fs';
-import { ReviewProvider } from './reviewProvider';
+import { ReviewWebviewProvider } from './reviewWebview';
 
 // 💡: Types for IPC communication with MCP server
 interface IPCMessage {
@@ -30,23 +30,17 @@ export function activate(context: vscode.ExtensionContext) {
     outputChannel.appendLine('Dialectic extension is now active');
     console.log('Dialectic extension is now active');
 
-    // Create the review provider
-    const reviewProvider = new ReviewProvider();
-    
-    // Register the tree data provider for our custom view
-    vscode.window.createTreeView('dialecticReviews', {
-        treeDataProvider: reviewProvider,
-        showCollapseAll: true
-    });
+    // Create the webview review provider
+    const reviewProvider = new ReviewWebviewProvider(context);
 
-    console.log('TreeView registered successfully');
+    console.log('Webview provider created successfully');
 
     // 💡: Set up IPC server for communication with MCP server
     const server = createIPCServer(context, reviewProvider, outputChannel);
     
     // Register commands
     const showReviewCommand = vscode.commands.registerCommand('dialectic.showReview', () => {
-        reviewProvider.showDummyReview();
+        reviewProvider.showReview();
     });
 
     const copyReviewCommand = vscode.commands.registerCommand('dialectic.copyReview', () => {
@@ -60,7 +54,7 @@ export function activate(context: vscode.ExtensionContext) {
     });
 }
 
-function createIPCServer(context: vscode.ExtensionContext, reviewProvider: ReviewProvider, outputChannel: vscode.OutputChannel): net.Server {
+function createIPCServer(context: vscode.ExtensionContext, reviewProvider: ReviewWebviewProvider, outputChannel: vscode.OutputChannel): net.Server {
     const socketPath = getSocketPath(context);
     outputChannel.appendLine(`Setting up IPC server at: ${socketPath}`);
     
@@ -133,7 +127,7 @@ function getSocketPath(context: vscode.ExtensionContext): string {
     }
 }
 
-function handleIPCMessage(message: IPCMessage, socket: net.Socket, reviewProvider: ReviewProvider, outputChannel: vscode.OutputChannel): void {
+function handleIPCMessage(message: IPCMessage, socket: net.Socket, reviewProvider: ReviewWebviewProvider, outputChannel: vscode.OutputChannel): void {
     outputChannel.appendLine(`Processing IPC message: ${message.type} (${message.id})`);
     console.log('Received IPC message:', message.type, message.id);
     
