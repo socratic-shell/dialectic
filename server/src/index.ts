@@ -49,7 +49,7 @@ class DialecticMCPServer {
       return {
         tools: [
           {
-            name: 'present-review',
+            name: 'present_review',
             description: [
               'Display a code review in the VSCode review panel.',
               'Reviews should be structured markdown with clear sections and actionable feedback.'
@@ -97,13 +97,23 @@ class DialecticMCPServer {
     this.server.setRequestHandler(CallToolRequestSchema, async (request) => {
       const { name, arguments: args } = request.params;
 
-      if (name === 'present-review') {
+      if (name === 'present_review') {
+        await this.ipc.sendLog('info', `Received present_review tool call with ${Object.keys(args || {}).length} parameters`);
+        
         try {
           // Validate and extract parameters
           const params = validatePresentReviewParams(args);
+          await this.ipc.sendLog('debug', `Parameters validated successfully: mode=${params.mode}, content length=${params.content.length}`);
           
           // Forward to VSCode extension via IPC
+          await this.ipc.sendLog('info', 'Forwarding review to VSCode extension via IPC...');
           const result = await this.ipc.presentReview(params);
+          
+          if (result.success) {
+            await this.ipc.sendLog('info', 'Review successfully displayed in VSCode');
+          } else {
+            await this.ipc.sendLog('error', `Failed to display review: ${result.message || 'Unknown error'}`);
+          }
           
           return {
             content: [
@@ -116,6 +126,9 @@ class DialecticMCPServer {
             ],
           };
         } catch (error) {
+          const errorMessage = error instanceof Error ? error.message : String(error);
+          await this.ipc.sendLog('error', `Tool call failed: ${errorMessage}`);
+          
           return {
             content: [
               {
@@ -134,12 +147,16 @@ class DialecticMCPServer {
 
   async start(): Promise<void> {
     // 💡: Initialize IPC communication with VSCode extension
+    await this.ipc.sendLog('info', 'Dialectic MCP Server starting up...');
     await this.ipc.initialize();
+    await this.ipc.sendLog('info', 'IPC communication initialized successfully');
     
     // 💡: Start MCP server with stdio transport for AI assistant communication
     const transport = new StdioServerTransport();
+    await this.ipc.sendLog('info', 'Starting MCP server with stdio transport');
     await this.server.connect(transport);
     
+    await this.ipc.sendLog('info', 'Dialectic MCP Server is ready and listening for tool calls');
     console.error('Dialectic MCP Server started successfully');
   }
 }

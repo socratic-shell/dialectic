@@ -3,7 +3,7 @@
 
 import { createConnection, Socket } from 'net';
 import { randomUUID } from 'crypto';
-import { PresentReviewParams, PresentReviewResult, IPCMessage, IPCResponse } from './types.js';
+import { PresentReviewParams, PresentReviewResult, IPCMessage, IPCResponse, LogParams } from './types.js';
 
 /**
  * Handles IPC communication between MCP server and VSCode extension
@@ -83,14 +83,46 @@ export class IPCCommunicator {
 
     // 💡: Create message with unique ID for response tracking
     const message: IPCMessage = {
-      type: 'present-review',
+      type: 'present_review',
       payload: params,
       id: randomUUID(),
     };
 
-    console.error('Sending present-review message:', JSON.stringify(message, null, 2));
+    console.error('Sending present_review message:', JSON.stringify(message, null, 2));
 
     return this.sendMessage(message);
+  }
+
+  /**
+   * Send a log message to the VSCode extension for unified logging
+   */
+  async sendLog(level: 'info' | 'error' | 'debug', message: string): Promise<void> {
+    if (this.testMode) {
+      // 💡: In test mode, just log to console
+      console.error(`[${level.toUpperCase()}] ${message}`);
+      return;
+    }
+
+    if (!this.socket) {
+      // 💡: If IPC not available, fall back to console logging
+      console.error(`[${level.toUpperCase()}] ${message}`);
+      return;
+    }
+
+    // 💡: Create log message with unique ID
+    const logMessage: IPCMessage = {
+      type: 'log',
+      payload: { level, message },
+      id: randomUUID(),
+    };
+
+    try {
+      await this.sendMessage(logMessage);
+    } catch (error) {
+      // 💡: If log message fails, fall back to console
+      console.error(`[${level.toUpperCase()}] ${message}`);
+      console.error('Failed to send log via IPC:', error);
+    }
   }
 
   private async sendMessage(message: IPCMessage): Promise<PresentReviewResult> {

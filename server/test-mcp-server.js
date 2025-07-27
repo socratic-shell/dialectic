@@ -52,7 +52,7 @@ async function testMCPServer() {
     id: 2,
     method: 'tools/call',
     params: {
-      name: 'present-review',
+      name: 'present_review',
       arguments: {
         content: '# Test Review\n\nThis is a test review from the MCP server test script.',
         mode: 'replace'

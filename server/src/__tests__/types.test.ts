@@ -5,7 +5,8 @@ import {
   PresentReviewParams, 
   PresentReviewResult, 
   IPCMessage, 
-  IPCResponse 
+  IPCResponse,
+  LogParams
 } from '../types';
 
 describe('Type Definitions', () => {
@@ -79,7 +80,7 @@ describe('Type Definitions', () => {
   describe('IPCMessage', () => {
     it('should accept valid IPC message', () => {
       const message: IPCMessage = {
-        type: 'present-review',
+        type: 'present_review',
         payload: {
           content: 'Test review',
           mode: 'replace'
@@ -87,20 +88,39 @@ describe('Type Definitions', () => {
         id: 'test-id-123'
       };
 
-      expect(message.type).toBe('present-review');
-      expect(message.payload.content).toBe('Test review');
+      expect(message.type).toBe('present_review');
+      if (message.type === 'present_review') {
+        const payload = message.payload as PresentReviewParams;
+        expect(payload.content).toBe('Test review');
+      }
       expect(message.id).toBe('test-id-123');
     });
 
     it('should enforce type constraints', () => {
-      // This should compile - type is constrained to 'present-review'
+      // This should compile - type is constrained to 'present_review'
       const message: IPCMessage = {
-        type: 'present-review',
+        type: 'present_review',
         payload: { content: 'test', mode: 'replace' },
         id: 'test'
       };
 
-      expect(message.type).toBe('present-review');
+      expect(message.type).toBe('present_review');
+    });
+
+    it('should accept log messages', () => {
+      const logMessage: IPCMessage = {
+        type: 'log',
+        payload: { level: 'info', message: 'Test log message' },
+        id: 'log-test-123'
+      };
+
+      expect(logMessage.type).toBe('log');
+      if (logMessage.type === 'log') {
+        const payload = logMessage.payload as LogParams;
+        expect(payload.level).toBe('info');
+        expect(payload.message).toBe('Test log message');
+      }
+      expect(logMessage.id).toBe('log-test-123');
     });
   });
 
@@ -138,7 +158,7 @@ describe('Type Definitions', () => {
       };
 
       const message: IPCMessage = {
-        type: 'present-review',
+        type: 'present_review',
         payload: params,
         id: 'test'
       };
@@ -149,7 +169,7 @@ describe('Type Definitions', () => {
     it('should maintain type safety across interfaces', () => {
       // This test ensures that our types work together correctly
       const createMessage = (params: PresentReviewParams): IPCMessage => ({
-        type: 'present-review',
+        type: 'present_review',
         payload: params,
         id: 'generated-id'
       });

@@ -27,14 +27,25 @@ export interface PresentReviewResult {
 }
 
 /**
+ * Parameters for log messages sent via IPC
+ */
+export interface LogParams {
+  /** Log level */
+  level: 'info' | 'error' | 'debug';
+  
+  /** Log message content */
+  message: string;
+}
+
+/**
  * IPC message sent from MCP server to VSCode extension
  */
 export interface IPCMessage {
   /** Message type identifier */
-  type: 'present-review';
+  type: 'present_review' | 'log';
   
   /** Message payload */
-  payload: PresentReviewParams;
+  payload: PresentReviewParams | LogParams;
   
   /** Unique message ID for response tracking */
   id: string;
