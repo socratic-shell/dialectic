@@ -40,10 +40,10 @@ Dialectic embodies the collaborative patterns from the [socratic shell project](
 ## Implementation Status
 
 **✅ MVP Complete** - All core features implemented and tested:
-- Review Display: Tree-based markdown rendering in VSCode sidebar
-- Code Navigation: Clickable `file:line` references that jump to code locations
-- Content Export: Copy button to export review content for commit messages
-- IPC Communication: Full bidirectional communication between AI and extension
+- **Review Display**: Tree-based markdown rendering in VSCode sidebar
+- **Code Navigation**: Clickable `file:line` references that jump to code locations
+- **Content Export**: Copy button to export review content for commit messages
+- **IPC Communication**: Full bidirectional communication between AI and extension
 
 **Current State**: Ready for end-to-end testing with real AI assistants in VSCode environments.
 
@@ -56,3 +56,35 @@ Dialectic embodies the collaborative patterns from the [socratic shell project](
 - **Communication**: Unix domain sockets (macOS/Linux) and named pipes (Windows)
 - **Protocol**: JSON messages with unique ID tracking and timeout protection
 - **Testing**: Jest for unit tests with test mode for IPC-free testing
+
+## Component Responsibilities
+
+### MCP Server (`server/`)
+- Exposes `present-review` tool to AI assistants
+- Validates parameters and handles errors gracefully
+- Manages IPC client connection to VSCode extension
+- Supports concurrent operations with Promise-based tracking
+- See `server/src/index.ts` for main server implementation
+
+### VSCode Extension (`extension/`)
+- Creates IPC server and sets environment variables
+- Provides tree-based review display in sidebar
+- Handles clickable navigation to code locations
+- Manages copy-to-clipboard functionality
+- See `extension/src/extension.ts` for activation logic
+
+### Shared Types (`server/src/types.ts`)
+- Defines communication protocol interfaces
+- Ensures type safety across IPC boundary
+- Prevents protocol mismatches during development
+
+## Key Implementation Files
+
+- `server/src/index.ts` - Main MCP server with tool handlers
+- `server/src/ipc.ts` - IPC client communication logic
+- `server/src/validation.ts` - Parameter validation and error handling
+- `extension/src/extension.ts` - VSCode extension activation and IPC server
+- `extension/src/reviewProvider.ts` - Tree view implementation and markdown parsing
+- `server/src/__tests__/` - Comprehensive unit test suite
+
+For detailed implementation specifics, refer to the source code and inline comments marked with `💡` that explain non-obvious design decisions.
