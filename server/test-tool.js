@@ -19,7 +19,7 @@ const testMessages = [
     id: 2,
     method: 'tools/call',
     params: {
-      name: 'present-review',
+      name: 'present_review',
       arguments: {
         content: '# Test Review\n\n## Summary\nThis is a test review to verify the MCP server is working.\n\n## Details\n- File: `test.js:15`\n- Issue: Missing error handling\n- Suggestion: Add try-catch block',
         mode: 'replace'
