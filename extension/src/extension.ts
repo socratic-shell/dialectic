@@ -2,6 +2,7 @@ import * as vscode from 'vscode';
 import * as net from 'net';
 import * as path from 'path';
 import * as fs from 'fs';
+import * as crypto from 'crypto';
 import { ReviewWebviewProvider } from './reviewWebview';
 
 // 💡: Types for IPC communication with MCP server
@@ -110,20 +111,12 @@ function createIPCServer(context: vscode.ExtensionContext, reviewProvider: Revie
 }
 
 function getSocketPath(context: vscode.ExtensionContext): string {
-    // 💡: Use workspace-specific storage to avoid conflicts between projects
-    const storageUri = context.storageUri || context.globalStorageUri;
-    const socketDir = storageUri.fsPath;
-    
-    // Ensure directory exists
-    if (!fs.existsSync(socketDir)) {
-        fs.mkdirSync(socketDir, { recursive: true });
-    }
-    
-    // 💡: Platform-specific socket naming (Windows uses named pipes)
+    // 💡: Use UUID-based filename to avoid path length limits and ensure uniqueness
     if (process.platform === 'win32') {
-        return `\\\\.\\pipe\\dialectic-${Date.now()}`;
+        return `\\\\.\\pipe\\dialectic-${crypto.randomUUID()}`;
     } else {
-        return path.join(socketDir, 'dialectic.sock');
+        // Use /tmp with UUID for short, unique socket path
+        return `/tmp/dialectic-${crypto.randomUUID()}.sock`;
     }
 }
 

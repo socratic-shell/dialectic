@@ -167,10 +167,10 @@ export class ReviewWebviewProvider {
      * Process HTML to make file:line references clickable
      */
     private processFileReferences(html: string): string {
-        // 💡: Find patterns like (src/main.rs:42) and make them clickable
+        // 💡: Find patterns like [`src/main.rs:42`][] (rustdoc-style) and make them clickable
         return html.replace(
-            /\(([^:)]+):(\d+)\)/g,
-            '<a href="#" class="file-ref" data-file="$1" data-line="$2">($1:$2)</a>'
+            /<code>\[([^:\]]+):(\d+)\]<\/code>\[\]/g,
+            '<a href="#" class="file-ref" data-file="$1" data-line="$2"><code>[$1:$2][]</code></a>'
         );
     }
 
@@ -327,17 +327,17 @@ export class ReviewWebviewProvider {
 The application needed secure user authentication to protect user data and enable personalized features. This implements a JWT-based authentication system with secure password hashing.
 
 ## Changes Made
-- Added authentication middleware (src/auth/middleware.ts:23)
-- Created user login/signup endpoints (src/routes/auth.ts:45) 
-- Updated user model with password hashing (src/models/user.ts:67)
-- Added JWT token generation and validation (src/utils/jwt.ts:12)
+- Added authentication middleware [\`src/auth/middleware.ts:23\`][]
+- Created user login/signup endpoints [\`src/routes/auth.ts:45\`][] 
+- Updated user model with password hashing [\`src/models/user.ts:67\`][]
+- Added JWT token generation and validation [\`src/utils/jwt.ts:12\`][]
 
 ## Implementation Details
 
-### Authentication Flow (src/auth/middleware.ts:23)
+### Authentication Flow [\`src/auth/middleware.ts:23\`][]
 The middleware intercepts requests and validates JWT tokens. If the token is valid, the user object is attached to the request for downstream handlers to use.
 
-### Password Security (src/models/user.ts:67)
+### Password Security [\`src/models/user.ts:67\`][]
 Passwords are hashed using bcrypt with a salt factor of 12. The plaintext password is never stored in the database.
 
 ## Design Decisions

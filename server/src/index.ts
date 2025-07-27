@@ -52,7 +52,8 @@ class DialecticMCPServer {
             name: 'present_review',
             description: [
               'Display a code review in the VSCode review panel.',
-              'Reviews should be structured markdown with clear sections and actionable feedback.'
+              'Reviews should be structured markdown with clear sections and actionable feedback.',
+              'Use [`filename:line`][] format for file references (rustdoc-style).'
             ].join(' '),
             inputSchema: {
               type: 'object',
@@ -64,7 +65,8 @@ class DialecticMCPServer {
                     '1) Brief summary suitable for commit message,',
                     '2) Detailed findings with file references,',
                     '3) Specific suggestions for improvement.',
-                    'Use `file:line` format for code references (e.g., `src/main.ts:42`).'
+                    'Use [`filename:line`][] format for file references.',
+                    'Example: "Updated authentication in [`src/auth.rs:45`][]"'
                   ].join(' '),
                 },
                 mode: {
