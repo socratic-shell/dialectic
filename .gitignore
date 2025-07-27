@@ -1,3 +1,6 @@
 book
 playground
 
+# npm package files
+*.tgz
+
