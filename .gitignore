@@ -4,3 +4,4 @@ playground
 # npm package files
 *.tgz
 
+dist/
