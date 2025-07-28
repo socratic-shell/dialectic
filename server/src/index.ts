@@ -43,6 +43,7 @@ class DialecticMCPServer {
   }
 
   private setupToolHandlers(): void {
+    // ANCHOR: tool_definition
     // 💡: Register the present-review tool that AI assistants can call
     // to display code reviews in the VSCode extension
     this.server.setRequestHandler(ListToolsRequestSchema, async () => {
@@ -98,7 +99,9 @@ class DialecticMCPServer {
         ],
       };
     });
+    // ANCHOR_END: tool_definition
 
+    // ANCHOR: tool_handler
     // 💡: Handle present-review tool calls by forwarding to VSCode extension via IPC
     this.server.setRequestHandler(CallToolRequestSchema, async (request) => {
       const { name, arguments: args } = request.params;
@@ -118,6 +121,7 @@ class DialecticMCPServer {
           if (result.success) {
             await this.ipc.sendLog('info', 'Review successfully displayed in VSCode');
           } else {
+    // ANCHOR_END: tool_handler
             await this.ipc.sendLog('error', `Failed to display review: ${result.message || 'Unknown error'}`);
           }
           

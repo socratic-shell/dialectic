@@ -1,6 +1,7 @@
 // 💡: Shared types between MCP server and VSCode extension to ensure type safety
 // across the IPC communication boundary and prevent protocol mismatches
 
+// ANCHOR: present_review_params
 /**
  * Parameters for the present-review MCP tool
  */
@@ -17,7 +18,9 @@ export interface PresentReviewParams {
   /** Base directory path for resolving relative file references */
   baseUri?: string;
 }
+// ANCHOR_END: present_review_params
 
+// ANCHOR: present_review_result
 /**
  * Response from the present-review tool
  */
@@ -28,6 +31,7 @@ export interface PresentReviewResult {
   /** Optional message about the operation */
   message?: string;
 }
+// ANCHOR_END: present_review_result
 
 /**
  * Parameters for log messages sent via IPC

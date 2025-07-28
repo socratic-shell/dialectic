@@ -10,16 +10,16 @@ The `present_review` tool is the primary interface between AI assistants and the
 
 The tool is registered with the MCP server and exposed to AI assistants:
 
-```rust,no_run,noplayground
-{{#include ../../server/src/index.ts:46:97}}
+```typescript
+{{#include ../../server/src/index.ts:tool_definition}}
 ```
 
 ## Parameters
 
 The tool accepts parameters defined by the `PresentReviewParams` interface:
 
-```typescript,no_run,noplayground
-{{#include ../../server/src/types.ts:6:18}}
+```typescript
+{{#include ../../server/src/types.ts:present_review_params}}
 ```
 
 ### Parameter Details
@@ -62,16 +62,16 @@ The tool accepts parameters defined by the `PresentReviewParams` interface:
 
 The tool returns a `PresentReviewResult`:
 
-```typescript,no_run,noplayground
-{{#include ../../server/src/types.ts:20:27}}
+```typescript
+{{#include ../../server/src/types.ts:present_review_result}}
 ```
 
 ## Implementation Flow
 
 When an AI assistant calls the tool, the following sequence occurs:
 
-```rust,no_run,noplayground
-{{#include ../../server/src/index.ts:102:112}}
+```typescript
+{{#include ../../server/src/index.ts:tool_handler}}
 ```
 
 1. **Parameter Validation**: Input parameters are validated against the schema
