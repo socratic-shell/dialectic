@@ -29,7 +29,7 @@ AI assistants excel at providing narrative explanations rather than mechanical s
 The `[filename:line][]` format was chosen to align with AI assistant natural language patterns:
 
 ```markdown
-The authentication flow starts in [src/auth.ts:23][] and validates tokens using [src/utils/jwt.ts:45][].
+The authentication flow starts in [`src/auth.ts:23`][] and validates tokens using [`src/utils/jwt.ts:45`][].
 ```
 
 **Design rationale:**
