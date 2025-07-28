@@ -9,6 +9,8 @@ Call `present_review` after making significant code changes when:
 
 **Don't** call for minor fixes, work-in-progress changes, or every individual file modification.
 
+**File Resolution**: If file references don't work, include the `baseUri` parameter with the project directory path to help resolve relative file paths correctly.
+
 ## Review Structure
 
 ### Write as Code Tours
