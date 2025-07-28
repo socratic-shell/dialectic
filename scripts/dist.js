@@ -118,7 +118,7 @@ function main() {
   
   // Install VSCode extension
   console.log('\\n📥 Installing VSCode extension...');
-  if (!run(\`code --install-extension \${vsixFile}\`)) {
+  if (!run(\`code --install-extension "\${__dirname}/\${vsixFile}"\`)) {
     console.error('❌ Failed to install VSCode extension');
     console.error('Make sure VSCode is installed and the "code" command is available');
     process.exit(1);
@@ -126,7 +126,7 @@ function main() {
   
   // Install MCP server globally
   console.log('\\n📥 Installing MCP server...');
-  if (!run(\`npm install -g \${tgzFile}\`)) {
+  if (!run(\`npm install -g "\${__dirname}/\${tgzFile}"\`)) {
     console.error('❌ Failed to install MCP server');
     console.error('Make sure Node.js and npm are installed');
     process.exit(1);
