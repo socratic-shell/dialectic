@@ -16,7 +16,7 @@ export interface PresentReviewParams {
   section?: string;
   
   /** Base directory path for resolving relative file references */
-  baseUri?: string;
+  baseUri: string;
 }
 // ANCHOR_END: present_review_params
 

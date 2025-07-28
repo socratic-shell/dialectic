@@ -72,7 +72,7 @@ class DialecticMCPServer {
                 },
                 baseUri: {
                   type: 'string',
-                  description: 'Base directory path for resolving relative file references. Defaults to current working directory.',
+                  description: 'Base directory path for resolving relative file references (required).',
                 },
                 mode: {
                   type: 'string',
@@ -93,7 +93,7 @@ class DialecticMCPServer {
                   ].join(' '),
                 },
               },
-              required: ['content'],
+              required: ['content', 'baseUri'],
             },
           } satisfies Tool,
         ],

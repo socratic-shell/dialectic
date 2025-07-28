@@ -12,13 +12,15 @@ describe('validatePresentReviewParams', () => {
   describe('valid parameters', () => {
     it('should accept minimal valid parameters', () => {
       const result = validatePresentReviewParams({
-        content: 'Test review content'
+        content: 'Test review content',
+        baseUri: '/test/project'
       });
 
       expect(result).toEqual({
         content: 'Test review content',
         mode: 'replace',
         section: undefined,
+        baseUri: '/test/project',
       });
     });
 
@@ -26,13 +28,15 @@ describe('validatePresentReviewParams', () => {
       const result = validatePresentReviewParams({
         content: '# Review\n\nContent here',
         mode: 'update-section',
-        section: 'Summary'
+        section: 'Summary',
+        baseUri: '/test/project'
       });
 
       expect(result).toEqual({
         content: '# Review\n\nContent here',
         mode: 'update-section',
         section: 'Summary',
+        baseUri: '/test/project',
       });
     });
 
@@ -40,11 +44,13 @@ describe('validatePresentReviewParams', () => {
       const result = validatePresentReviewParams({
         content: '  Test content  ',
         mode: 'update-section',
-        section: '  Section Name  '
+        section: '  Section Name  ',
+        baseUri: '  /test/project  '
       });
 
       expect(result.content).toBe('Test content');
       expect(result.section).toBe('Section Name');
+      expect(result.baseUri).toBe('/test/project');
     });
 
     it('should accept all valid modes', () => {
@@ -52,8 +58,8 @@ describe('validatePresentReviewParams', () => {
       
       modes.forEach(mode => {
         const params = mode === 'update-section' 
-          ? { content: 'test', mode, section: 'test' }
-          : { content: 'test', mode };
+          ? { content: 'test', mode, section: 'test', baseUri: "/test/project" }
+          : { content: 'test', mode, baseUri: "/test/project" };
           
         const result = validatePresentReviewParams(params);
         expect(result.mode).toBe(mode);
@@ -86,6 +92,45 @@ describe('validatePresentReviewParams', () => {
     });
   });
 
+  describe('invalid baseUri parameter', () => {
+    it('should reject missing baseUri', () => {
+      expect(() => validatePresentReviewParams({
+        content: 'test content'
+      })).toThrow('Missing required parameter: baseUri');
+    });
+
+    it('should reject null baseUri', () => {
+      expect(() => validatePresentReviewParams({
+        content: 'test content',
+        baseUri: null
+      })).toThrow('Missing required parameter: baseUri');
+    });
+
+    it('should reject non-string baseUri', () => {
+      expect(() => validatePresentReviewParams({
+        content: 'test content',
+        baseUri: 123
+      })).toThrow('Invalid baseUri: expected string');
+      
+      expect(() => validatePresentReviewParams({
+        content: 'test content',
+        baseUri: {}
+      })).toThrow('Invalid baseUri: expected string');
+    });
+
+    it('should reject empty baseUri', () => {
+      expect(() => validatePresentReviewParams({
+        content: 'test content',
+        baseUri: ''
+      })).toThrow('Invalid baseUri: cannot be empty');
+      
+      expect(() => validatePresentReviewParams({
+        content: 'test content',
+        baseUri: '   '
+      })).toThrow('Invalid baseUri: cannot be empty');
+    });
+  });
+
   describe('invalid content parameter', () => {
     it('should reject missing content', () => {
       expect(() => validatePresentReviewParams({}))
@@ -93,12 +138,12 @@ describe('validatePresentReviewParams', () => {
     });
 
     it('should reject null content', () => {
-      expect(() => validatePresentReviewParams({ content: null }))
+      expect(() => validatePresentReviewParams({ content: null, baseUri: "/test/project" }))
         .toThrow('Missing required parameter: content');
     });
 
     it('should reject non-string content', () => {
-      expect(() => validatePresentReviewParams({ content: 123 }))
+      expect(() => validatePresentReviewParams({ content: 123, baseUri: "/test/project" }))
         .toThrow('Invalid content: expected string');
       
       expect(() => validatePresentReviewParams({ content: {} }))
@@ -106,10 +151,10 @@ describe('validatePresentReviewParams', () => {
     });
 
     it('should reject empty content', () => {
-      expect(() => validatePresentReviewParams({ content: '' }))
+      expect(() => validatePresentReviewParams({ content: '', baseUri: "/test/project" }))
         .toThrow('Invalid content: cannot be empty');
       
-      expect(() => validatePresentReviewParams({ content: '   ' }))
+      expect(() => validatePresentReviewParams({ content: '   ', baseUri: "/test/project" }))
         .toThrow('Invalid content: cannot be empty');
     });
   });
@@ -150,25 +195,27 @@ describe('validatePresentReviewParams', () => {
       expect(() => validatePresentReviewParams({
         content: 'test',
         mode: 'update-section',
-        section: ''
+        section: '', baseUri: '/test/project'
       })).toThrow('Invalid section: cannot be empty');
       
       expect(() => validatePresentReviewParams({
         content: 'test',
         mode: 'update-section',
-        section: '   '
+        section: '   ', baseUri: '/test/project'
       })).toThrow('Invalid section: cannot be empty');
     });
 
     it('should not require section for other modes', () => {
       expect(() => validatePresentReviewParams({
         content: 'test',
-        mode: 'replace'
+        mode: 'replace',
+        baseUri: '/test/project'
       })).not.toThrow();
       
       expect(() => validatePresentReviewParams({
         content: 'test',
-        mode: 'append'
+        mode: 'append',
+        baseUri: '/test/project'
       })).not.toThrow();
     });
   });
