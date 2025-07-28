@@ -35,8 +35,8 @@ The tool accepts parameters defined by the `PresentReviewParams` interface:
   Added user authentication with secure session handling.
   
   ## Key Changes
-  - Login endpoint ([src/auth.ts:23][])
-  - User model updates ([src/models/user.ts:45][])
+  - Login endpoint ([`src/auth.ts:23`][])
+  - User model updates ([`src/models/user.ts:45`][])
   ```
 
 **`mode` (required)**
@@ -87,7 +87,7 @@ When an AI assistant calls the tool, the following sequence occurs:
 {
   "name": "present_review",
   "arguments": {
-    "content": "# Code Review\n\nImplemented user authentication system.\n\n## Changes\n- Added login endpoint ([src/auth.ts:23][])\n- Updated user model ([src/models/user.ts:45][])",
+    "content": "# Code Review\n\nImplemented user authentication system.\n\n## Changes\n- Added login endpoint ([`src/auth.ts:23`][])\n- Updated user model ([`src/models/user.ts:45`][])",
     "mode": "replace"
   }
 }
@@ -99,7 +99,7 @@ When an AI assistant calls the tool, the following sequence occurs:
 {
   "name": "present_review", 
   "arguments": {
-    "content": "\n## Security Considerations\n\nThe authentication system uses bcrypt for password hashing ([src/auth.ts:67][]).",
+    "content": "\n## Security Considerations\n\nThe authentication system uses bcrypt for password hashing ([`src/auth.ts:67`][]).",
     "mode": "append"
   }
 }
@@ -111,7 +111,7 @@ When an AI assistant calls the tool, the following sequence occurs:
 {
   "name": "present_review",
   "arguments": {
-    "content": "## Updated Implementation Details\n\nRefactored the login flow to use JWT tokens ([src/auth.ts:89][]).",
+    "content": "## Updated Implementation Details\n\nRefactored the login flow to use JWT tokens ([`src/auth.ts:89`][]).",
     "mode": "update-section",
     "section": "Implementation Details"
   }
@@ -123,9 +123,9 @@ When an AI assistant calls the tool, the following sequence occurs:
 File references should use the rustdoc-style format: `[filename:line][]`
 
 **Supported formats:**
-- `[src/auth.ts:23][]` - Links to line 23 in src/auth.ts
-- `[README.md:1][]` - Links to line 1 in README.md
-- `[package.json:15][]` - Links to line 15 in package.json
+- `[`src/auth.ts:23`][]` - Links to line 23 in src/auth.ts
+- `[`README.md:1`][]` - Links to line 1 in README.md
+- `[`package.json:15`][]` - Links to line 15 in package.json
 
 **Processing:**
 1. References are converted to clickable links in the review panel

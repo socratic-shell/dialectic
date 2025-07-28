@@ -66,7 +66,7 @@ A core ruler preprocesses markdown source to convert `[filename:line][]` referen
 
 ```javascript
 md.core.ruler.before('normalize', 'file_references', function(state) {
-    // Convert [src/auth.ts:23][] → [src/auth.ts:23](src/auth.ts:23)
+    // Convert [`src/auth.ts:23`][] → [`src/auth.ts:23`](src/auth.ts:23)
     state.src = state.src.replace(
         /\[([^\]]+:\d+)\]\[\]/g, 
         '[$1]($1)'
