@@ -74,6 +74,7 @@ function createInstallScript() {
 
 // 💡: Install script for Dialectic distribution
 // Handles both VSCode extension and MCP server installation
+// Supports --qcli flag to automatically configure Q CLI
 
 const { execSync } = require('child_process');
 const fs = require('fs');
@@ -97,6 +98,9 @@ function findFile(pattern) {
 }
 
 function main() {
+  const args = process.argv.slice(2);
+  const useQCli = args.includes('--qcli');
+  
   console.log('🚀 Installing Dialectic...');
   
   // Find the packaged files
@@ -132,21 +136,49 @@ function main() {
     process.exit(1);
   }
   
+  // Configure Q CLI if requested
+  if (useQCli) {
+    console.log('\\n⚙️  Configuring Q CLI...');
+    if (!run('q mcp add dialectic dialectic-mcp-server')) {
+      console.error('❌ Failed to configure Q CLI');
+      console.error('Make sure Q CLI is installed and available');
+      console.log('You can manually add the MCP server with:');
+      console.log('  q mcp add dialectic dialectic-mcp-server');
+      process.exit(1);
+    }
+    console.log('✅ Q CLI configured successfully!');
+  }
+  
   console.log('\\n✅ Installation complete!');
-  console.log('\\n📋 Next steps:');
-  console.log('1. Restart VSCode to activate the extension');
-  console.log('2. Add this to your Q CLI MCP configuration:');
-  console.log('');
-  console.log('   {');
-  console.log('     "mcpServers": {');
-  console.log('       "dialectic": {');
-  console.log('         "command": "dialectic-mcp-server",');
-  console.log('         "args": []');
-  console.log('       }');
-  console.log('     }');
-  console.log('   }');
-  console.log('');
+  
+  if (!useQCli) {
+    console.log('\\n📋 Next steps:');
+    console.log('1. Restart VSCode to activate the extension');
+    console.log('2. Add this to your Q CLI MCP configuration:');
+    console.log('');
+    console.log('   q mcp add dialectic dialectic-mcp-server');
+    console.log('');
+    console.log('   Or manually configure:');
+    console.log('   {');
+    console.log('     "mcpServers": {');
+    console.log('       "dialectic": {');
+    console.log('         "command": "dialectic-mcp-server",');
+    console.log('         "args": []');
+    console.log('       }');
+    console.log('     }');
+    console.log('   }');
+    console.log('');
+  } else {
+    console.log('\\n📋 Next steps:');
+    console.log('1. Restart VSCode to activate the extension');
+    console.log('2. Q CLI is already configured - you can start using Dialectic!');
+    console.log('');
+  }
+  
   console.log('3. Test by asking your AI assistant to present a code review');
+  console.log('');
+  console.log('💡 Tip: Use --qcli flag to automatically configure Q CLI:');
+  console.log('   node install.js --qcli');
 }
 
 if (require.main === module) {
@@ -171,6 +203,14 @@ node install.js
 
 This will install both the VSCode extension and MCP server.
 
+### Automatic Q CLI Configuration
+
+\`\`\`bash
+node install.js --qcli
+\`\`\`
+
+This will also automatically configure the Q CLI MCP server for you.
+
 ## Contents
 
 - \`dialectic-*.vsix\` - VSCode extension package
@@ -194,6 +234,12 @@ npm install -g dialectic-mcp-server-*.tgz
 
 ## Configuration
 
+### Automatic (Recommended)
+\`\`\`bash
+q mcp add dialectic dialectic-mcp-server
+\`\`\`
+
+### Manual
 Add to your Q CLI MCP configuration:
 
 \`\`\`json
