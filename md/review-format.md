@@ -14,17 +14,17 @@ Reviews are structured as commit-ready markdown documents with a brief summary f
 
 ## Changes Made
 [Logical walkthrough of what was modified/added]
-- Added authentication system (src/auth.ts:23)
-- Updated user model to support login (src/models/user.ts:45)  
-- Integrated auth middleware (src/server.ts:67)
+- Added authentication system ([`src/auth.ts:23`][])
+- Updated user model to support login ([`src/models/user.ts:45`][])  
+- Integrated auth middleware ([`src/server.ts:67`][])
 
 ## Implementation Details
 [More detailed explanations of key components and their interactions]
 
-### Authentication Flow (src/auth.ts:23)
+### Authentication Flow ([`src/auth.ts:23`][])
 [How the authentication process works...]
 
-### User Model Updates (src/models/user.ts:45)
+### User Model Updates ([`src/models/user.ts:45`][])
 [What changes were made and why...]
 
 ## Design Decisions
@@ -33,9 +33,9 @@ Reviews are structured as commit-ready markdown documents with a brief summary f
 
 ## Code References
 
-Code references use the format `file:line` and will be converted to VSCode bookmarks:
-- `src/auth.ts:23` - Links to line 23 in the auth module
-- `README.md:1` - Links to the top of the README
+Code references use the format `[`file:line`][]` and will be converted to clickable links:
+- `[`src/auth.ts:23`][]` - Links to line 23 in the auth module
+- `[`README.md:1`][]` - Links to the top of the README
 
 *TODO: Define conventions for referencing ranges, functions, and classes.*
 
