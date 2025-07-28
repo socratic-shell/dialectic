@@ -3,6 +3,9 @@
   "version": "0.1.0",
   "description": "MCP server for Dialectic code review system",
   "main": "dist/index.js",
+  "bin": {
+    "dialectic-mcp-server": "dist/index.js"
+  },
   "type": "module",
   "scripts": {
     "build": "tsc",

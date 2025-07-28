@@ -8,6 +8,8 @@ vsc-extension-quickstart.md
 **/.eslintrc.json
 **/*.map
 **/*.ts
-node_modules/**
+# Exclude devDependencies but keep runtime dependencies
+node_modules/@types/**
+node_modules/typescript/**
 **/.DS_Store
 ../**
