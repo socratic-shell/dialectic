@@ -32,7 +32,7 @@ export function activate(context: vscode.ExtensionContext) {
     console.log('Dialectic extension is now active');
 
     // Create the webview review provider
-    const reviewProvider = new ReviewWebviewProvider(context);
+    const reviewProvider = new ReviewWebviewProvider(context, outputChannel);
 
     console.log('Webview provider created successfully');
 
@@ -44,8 +44,9 @@ export function activate(context: vscode.ExtensionContext) {
         reviewProvider.showReview();
     });
 
+    // 💡: Copy review command is now handled via webview postMessage
     const copyReviewCommand = vscode.commands.registerCommand('dialectic.copyReview', () => {
-        reviewProvider.copyReviewToClipboard();
+        vscode.window.showInformationMessage('Use the Copy Review button in the review panel');
     });
 
     context.subscriptions.push(showReviewCommand, copyReviewCommand, {
@@ -129,9 +130,14 @@ function handleIPCMessage(message: IPCMessage, socket: net.Socket, reviewProvide
     try {
         switch (message.type) {
             case 'present_review':
-                // 💡: Update the review provider with new content
-                const reviewPayload = message.payload as { content: string; mode: 'replace' | 'update-section' | 'append'; section?: string };
-                reviewProvider.updateReview(reviewPayload.content, reviewPayload.mode, reviewPayload.section);
+                // 💡: Update the review provider with new content and optional baseUri
+                const reviewPayload = message.payload as { 
+                    content: string; 
+                    mode: 'replace' | 'update-section' | 'append'; 
+                    section?: string;
+                    baseUri?: string;
+                };
+                reviewProvider.updateReview(reviewPayload.content, reviewPayload.mode, reviewPayload.baseUri);
                 response = {
                     id: message.id,
                     success: true

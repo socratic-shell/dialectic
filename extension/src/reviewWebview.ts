@@ -1,14 +1,64 @@
-// 💡: Webview-based review provider that renders markdown as HTML using VSCode's built-in renderer
-// Replaces the tree-based approach with a more readable HTML presentation
+// 💡: Webview-based review provider using markdown-it for secure, extensible markdown rendering
+// Follows VSCode extension best practices with custom link handling and proper CSP
 
 import * as vscode from 'vscode';
+import * as crypto from 'crypto';
+import * as MarkdownIt from 'markdown-it';
+import * as DOMPurify from 'dompurify';
+import { JSDOM } from 'jsdom';
 
 export class ReviewWebviewProvider {
     private panel: vscode.WebviewPanel | undefined;
     private reviewContent: string = '';
+    private baseUri: vscode.Uri | undefined;
+    private md: MarkdownIt;
 
-    constructor(private context: vscode.ExtensionContext) {
+    constructor(
+        private context: vscode.ExtensionContext,
+        private outputChannel: vscode.OutputChannel
+    ) {
+        this.md = this.setupMarkdownRenderer();
         this.loadDummyReview();
+    }
+
+    /**
+     * Configure markdown-it with custom renderer for file references
+     */
+    private setupMarkdownRenderer(): MarkdownIt {
+        const md = new MarkdownIt({
+            html: true,
+            linkify: true,
+            typographer: true
+        });
+
+        // 💡: Custom renderer rule for file reference links [`filename:line`][]
+        const defaultRender = md.renderer.rules.link_open || function(tokens: any, idx: any, options: any, env: any, self: any) {
+            return self.renderToken(tokens, idx, options);
+        };
+
+        md.renderer.rules.link_open = (tokens: any, idx: any, options: any, env: any, self: any) => {
+            const token = tokens[idx];
+            const href = token.attrGet('href');
+            
+            // Handle dialectic: URI scheme for file references
+            if (href && href.startsWith('dialectic:')) {
+                const fileRef = href.substring('dialectic:'.length); // Remove dialectic: prefix
+                token.attrSet('href', '#');
+                token.attrSet('data-file-ref', fileRef);
+                token.attrSet('class', 'file-ref');
+                this.outputChannel.appendLine(`Processed dialectic file reference: ${fileRef}`);
+            }
+            
+            return defaultRender(tokens, idx, options, env, self);
+        };
+
+        // 💡: Handle reference-style links by preprocessing
+        md.core.ruler.before('normalize', 'file_references', (state: any) => {
+            // Convert [`filename:line`][] to [filename:line](dialectic:filename:line)
+            state.src = state.src.replace(/\[`([^:`]+:\d+)`\]\[\]/g, '[$1](dialectic:$1)');
+        });
+
+        return md;
     }
 
     /**
@@ -43,14 +93,30 @@ export class ReviewWebviewProvider {
             );
         }
 
-        // Update the webview content
+        // Update content
         this.updateWebviewContent();
     }
 
     /**
-     * Update review content from MCP server via IPC
+     * Update review content and refresh webview
      */
-    public updateReview(content: string, mode: 'replace' | 'update-section' | 'append' = 'replace', section?: string): void {
+    public updateReview(content: string, mode: 'replace' | 'update-section' | 'append' = 'replace', baseUri?: string): void {
+        // 💡: Handle baseUri for file resolution
+        if (baseUri) {
+            const newBaseUri = vscode.Uri.file(baseUri);
+            
+            // Check for baseUri changes on non-replace operations
+            if (mode !== 'replace' && this.baseUri && !this.baseUri.fsPath.startsWith(newBaseUri.fsPath)) {
+                vscode.window.showErrorMessage(
+                    `Cannot ${mode} review: Base directory changed from ${this.baseUri.fsPath} to ${newBaseUri.fsPath}. Use replace mode instead.`
+                );
+                return;
+            }
+            
+            this.baseUri = newBaseUri;
+            this.outputChannel.appendLine(`Review base URI set to: ${this.baseUri.fsPath}`);
+        }
+
         switch (mode) {
             case 'replace':
                 this.reviewContent = content;
@@ -59,35 +125,13 @@ export class ReviewWebviewProvider {
                 this.reviewContent += '\n\n' + content;
                 break;
             case 'update-section':
-                if (section) {
-                    // 💡: For MVP, just append with section header
-                    // Future enhancement could implement smart section replacement
-                    this.reviewContent += `\n\n## ${section}\n${content}`;
-                } else {
-                    // Fallback to append if no section specified
-                    this.reviewContent += '\n\n' + content;
-                }
+                // For now, treat as replace - could implement section updating later
+                this.reviewContent = content;
                 break;
         }
 
-        // Update webview if it's open
-        if (this.panel) {
-            this.updateWebviewContent();
-        } else {
-            // Auto-show the review when content is updated
-            this.showReview();
-        }
-
-        console.log('Review updated via IPC:', mode, section ? `(section: ${section})` : '');
-    }
-
-    /**
-     * Copy review content to clipboard
-     */
-    public copyReviewToClipboard(): void {
-        vscode.env.clipboard.writeText(this.reviewContent).then(() => {
-            vscode.window.showInformationMessage('Review copied to clipboard!');
-        });
+        // 💡: Always show the panel when content is updated
+        this.showReview();
     }
 
     /**
@@ -99,11 +143,11 @@ export class ReviewWebviewProvider {
                 await this.openFileAtLine(message.file, message.line);
                 break;
             case 'copyReview':
-                this.copyReviewToClipboard();
+                await vscode.env.clipboard.writeText(this.reviewContent);
+                vscode.window.showInformationMessage('Review copied to clipboard');
                 break;
             case 'ready':
-                // Webview is ready, we can send initial content
-                console.log('Webview ready');
+                this.outputChannel.appendLine('Webview ready');
                 break;
         }
     }
@@ -113,20 +157,55 @@ export class ReviewWebviewProvider {
      */
     private async openFileAtLine(fileName: string, lineNumber: number): Promise<void> {
         try {
-            // 💡: Resolve file path relative to workspace
-            const workspaceFolder = vscode.workspace.workspaceFolders?.[0];
-            if (!workspaceFolder) {
-                vscode.window.showErrorMessage('No workspace folder found');
+            let fileUri: vscode.Uri | undefined;
+
+            // 💡: Try baseUri first if available
+            if (this.baseUri) {
+                const candidateUri = vscode.Uri.joinPath(this.baseUri, fileName);
+                try {
+                    await vscode.workspace.fs.stat(candidateUri);
+                    fileUri = candidateUri;
+                    this.outputChannel.appendLine(`Found file using baseUri: ${fileUri.fsPath}`);
+                } catch {
+                    this.outputChannel.appendLine(`File not found at baseUri: ${candidateUri.fsPath}`);
+                }
+            }
+
+            // 💡: Fall back to workspace folder search if baseUri didn't work
+            if (!fileUri) {
+                const workspaceFolders = vscode.workspace.workspaceFolders;
+                if (!workspaceFolders) {
+                    vscode.window.showErrorMessage('No workspace folder open and no base URI provided');
+                    return;
+                }
+
+                // Look for the file in all workspace folders
+                for (const folder of workspaceFolders) {
+                    const candidateUri = vscode.Uri.joinPath(folder.uri, fileName);
+                    try {
+                        await vscode.workspace.fs.stat(candidateUri);
+                        fileUri = candidateUri;
+                        this.outputChannel.appendLine(`Found file in workspace: ${fileUri.fsPath}`);
+                        break;
+                    } catch {
+                        // File not found in this folder, continue searching
+                    }
+                }
+            }
+
+            if (!fileUri) {
+                const baseInfo = this.baseUri ? ` (base: ${this.baseUri.fsPath})` : '';
+                vscode.window.showErrorMessage(`File not found: ${fileName}${baseInfo}`);
                 return;
             }
 
-            const filePath = vscode.Uri.joinPath(workspaceFolder.uri, fileName);
-            const document = await vscode.workspace.openTextDocument(filePath);
+            // Open the document
+            const document = await vscode.workspace.openTextDocument(fileUri);
             
-            // 💡: Convert to 0-based line number and create selection
+            // Convert to 0-based line number and create selection
             const line = Math.max(0, lineNumber - 1);
             const selection = new vscode.Range(line, 0, line, 0);
-            
+
             await vscode.window.showTextDocument(document, {
                 selection,
                 viewColumn: vscode.ViewColumn.One
@@ -145,45 +224,62 @@ export class ReviewWebviewProvider {
         }
 
         try {
-            // 💡: Use VSCode's markdown renderer to convert markdown to HTML
-            const renderedHtml = await vscode.commands.executeCommand(
-                'markdown.api.render',
-                this.reviewContent
-            ) as string;
+            this.outputChannel.appendLine('=== MARKDOWN INPUT ===');
+            this.outputChannel.appendLine(this.reviewContent);
 
-            // 💡: Process the HTML to make file:line references clickable
-            const processedHtml = this.processFileReferences(renderedHtml);
+            // 💡: Use markdown-it to render markdown to HTML with custom file reference handling
+            const renderedHtml = this.md.render(this.reviewContent);
 
-            // 💡: Create complete HTML document with styling and scripts
-            this.panel.webview.html = this.getWebviewContent(processedHtml);
+            this.outputChannel.appendLine('=== RENDERED HTML ===');
+            this.outputChannel.appendLine(renderedHtml);
+
+            // 💡: Sanitize HTML for security using DOMPurify
+            const sanitizedHtml = this.sanitizeHtml(renderedHtml);
+
+            this.outputChannel.appendLine('=== SANITIZED HTML ===');
+            this.outputChannel.appendLine(sanitizedHtml);
+
+            // 💡: Create complete HTML document with proper CSP and styling
+            this.panel.webview.html = this.getWebviewContent(sanitizedHtml);
         } catch (error) {
-            console.error('Failed to render markdown:', error);
+            this.outputChannel.appendLine(`Failed to render markdown: ${error}`);
             // Fallback to plain text
             this.panel.webview.html = this.getWebviewContent(`<pre>${this.reviewContent}</pre>`);
         }
     }
 
     /**
-     * Process HTML to make file:line references clickable
+     * Sanitize HTML using DOMPurify for security
      */
-    private processFileReferences(html: string): string {
-        // 💡: Find patterns like [`src/main.rs:42`][] (rustdoc-style) and make them clickable
-        return html.replace(
-            /<code>\[([^:\]]+):(\d+)\]<\/code>\[\]/g,
-            '<a href="#" class="file-ref" data-file="$1" data-line="$2"><code>[$1:$2][]</code></a>'
-        );
+    private sanitizeHtml(html: string): string {
+        // 💡: Create JSDOM window for DOMPurify
+        const window = new JSDOM('').window;
+        const purify = DOMPurify(window as any);
+        
+        // 💡: Configure DOMPurify to allow our custom data attributes
+        return purify.sanitize(html, {
+            ADD_ATTR: ['data-file-ref'],
+            ADD_TAGS: ['a']
+        });
     }
 
     /**
-     * Generate the complete HTML content for the webview
+     * Generate the complete HTML content for the webview with proper CSP
      */
-    private getWebviewContent(renderedMarkdown: string): string {
+    private getWebviewContent(content: string): string {
+        // 💡: Generate nonce for CSP security
+        const nonce = crypto.randomBytes(16).toString('base64');
+        
         return `<!DOCTYPE html>
 <html lang="en">
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Code Review</title>
+    <meta http-equiv="Content-Security-Policy" 
+          content="default-src 'none'; 
+                   style-src ${this.panel!.webview.cspSource} 'unsafe-inline'; 
+                   script-src 'nonce-${nonce}';">
+    <title>Dialectic Code Review</title>
     <style>
         body {
             font-family: var(--vscode-font-family);
@@ -199,16 +295,6 @@ export class ReviewWebviewProvider {
             color: var(--vscode-foreground);
             margin-top: 24px;
             margin-bottom: 16px;
-        }
-        
-        h1 {
-            border-bottom: 1px solid var(--vscode-panel-border);
-            padding-bottom: 8px;
-        }
-        
-        h2 {
-            border-bottom: 1px solid var(--vscode-panel-border);
-            padding-bottom: 4px;
         }
         
         code {
@@ -231,17 +317,12 @@ export class ReviewWebviewProvider {
         .file-ref {
             color: var(--vscode-textLink-foreground);
             text-decoration: none;
-            font-family: var(--vscode-editor-font-family);
-            background-color: var(--vscode-badge-background);
-            padding: 2px 6px;
-            border-radius: 3px;
-            font-size: 0.9em;
+            border-bottom: 1px dotted var(--vscode-textLink-foreground);
         }
         
         .file-ref:hover {
             color: var(--vscode-textLink-activeForeground);
-            background-color: var(--vscode-badge-foreground);
-            color: var(--vscode-badge-background);
+            border-bottom: 1px solid var(--vscode-textLink-activeForeground);
         }
         
         .copy-button {
@@ -260,44 +341,46 @@ export class ReviewWebviewProvider {
         .copy-button:hover {
             background-color: var(--vscode-button-hoverBackground);
         }
-        
-        ul, ol {
-            padding-left: 24px;
-        }
-        
-        li {
-            margin-bottom: 4px;
-        }
-        
-        blockquote {
-            border-left: 4px solid var(--vscode-textBlockQuote-border);
-            background-color: var(--vscode-textBlockQuote-background);
-            margin: 16px 0;
-            padding: 8px 16px;
-        }
     </style>
 </head>
 <body>
     <button class="copy-button" onclick="copyReview()">Copy Review</button>
-    <div id="content">
-        ${renderedMarkdown}
+    <div class="content">
+        ${content}
     </div>
     
-    <script>
+    <script nonce="${nonce}">
         const vscode = acquireVsCodeApi();
         
-        // Handle file reference clicks
+        // Handle file reference clicks using data attributes
         document.addEventListener('click', (event) => {
-            if (event.target.classList.contains('file-ref')) {
+            const target = event.target.closest('a');
+            if (!target) return;
+            
+            const fileRef = target.getAttribute('data-file-ref');
+            if (fileRef) {
                 event.preventDefault();
-                const file = event.target.getAttribute('data-file');
-                const line = parseInt(event.target.getAttribute('data-line'));
-                
-                vscode.postMessage({
-                    command: 'openFile',
-                    file: file,
-                    line: line
-                });
+                const match = fileRef.match(/^([^:]+):(\\d+)$/);
+                if (match) {
+                    const file = match[1];
+                    const line = parseInt(match[2]);
+                    
+                    console.log('[Webview] File reference clicked:', file, line);
+                    
+                    vscode.postMessage({
+                        command: 'openFile',
+                        file: file,
+                        line: line
+                    });
+                }
+                return;
+            }
+            
+            // Handle regular links
+            const href = target.getAttribute('href');
+            if (href && href !== '#') {
+                console.log('[Webview] Regular link clicked:', href);
+                // Could open in external browser or handle differently
             }
         });
         
@@ -328,16 +411,16 @@ The application needed secure user authentication to protect user data and enabl
 
 ## Changes Made
 - Added authentication middleware [\`src/auth/middleware.ts:23\`][]
-- Created user login/signup endpoints [\`src/routes/auth.ts:45\`][] 
+- Created user login/signup endpoints [here](src/routes/auth.ts:45) 
 - Updated user model with password hashing [\`src/models/user.ts:67\`][]
-- Added JWT token generation and validation [\`src/utils/jwt.ts:12\`][]
+- Added JWT token generation and validation [in utils](src/utils/jwt.ts:12)
 
 ## Implementation Details
 
 ### Authentication Flow [\`src/auth/middleware.ts:23\`][]
 The middleware intercepts requests and validates JWT tokens. If the token is valid, the user object is attached to the request for downstream handlers to use.
 
-### Password Security [\`src/models/user.ts:67\`][]
+### Password Security [check this](src/models/user.ts:67)
 Passwords are hashed using bcrypt with a salt factor of 12. The plaintext password is never stored in the database.
 
 ## Design Decisions

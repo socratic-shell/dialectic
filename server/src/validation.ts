@@ -61,10 +61,25 @@ export function validatePresentReviewParams(args: any): PresentReviewParams {
     }
   }
 
+  // Validate baseUri parameter if provided
+  let baseUri: string | undefined;
+  if (args.baseUri !== undefined && args.baseUri !== null) {
+    if (typeof args.baseUri !== 'string') {
+      throw new ValidationError('Invalid baseUri: expected string');
+    }
+    
+    if (args.baseUri.trim().length === 0) {
+      throw new ValidationError('Invalid baseUri: cannot be empty');
+    }
+    
+    baseUri = args.baseUri.trim();
+  }
+
   return {
     content: args.content.trim(),
     mode,
     section: args.section?.trim(),
+    baseUri,
   };
 }
 

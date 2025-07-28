@@ -69,6 +69,10 @@ class DialecticMCPServer {
                     'Example: "Updated authentication in [`src/auth.rs:45`][]"'
                   ].join(' '),
                 },
+                baseUri: {
+                  type: 'string',
+                  description: 'Base directory path for resolving relative file references. Defaults to current working directory.',
+                },
                 mode: {
                   type: 'string',
                   enum: ['replace', 'update-section', 'append'],

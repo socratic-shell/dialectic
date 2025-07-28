@@ -13,6 +13,9 @@ export interface PresentReviewParams {
   
   /** Optional section name for update-section mode */
   section?: string;
+  
+  /** Base directory path for resolving relative file references */
+  baseUri?: string;
 }
 
 /**

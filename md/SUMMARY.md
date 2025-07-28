@@ -4,22 +4,49 @@
 - [Installation](./installation.md)
 - [Quick Start](./quick-start.md)
 
-# Design & Implementation
-- [Overview](./design/overview.md)
-- [MCP Server Design](./design/mcp-server.md)
-- [VSCode Extension Design](./design/extension.md)
-- [Review Format Specification](./design/review-format.md)
-- [Communication Protocol](./design/protocol.md)
-- [AI Assistant Guidelines](./design/ai-guidelines.md)
-- [Implementation Phases](./design/implementation-phases.md)
+# Architecture
 
-# Appendices
+- [System Overview](./architecture/overview.md)
+- [MCP Server](./architecture/mcp-server.md)
+- [VSCode Extension](./architecture/extension.md)
+- [Communication Protocol](./architecture/protocol.md)
+- [Security Model](./architecture/security.md)
 
-- [References]() <!-- Consult these references for technical specifics on how subsystems work -->
-    - [Language server protocol overview](./references/lsp-overview/README.md)
-        - [Base protocol](./references/lsp-overview/base-protocol.md)
-        - [Language features](./references/lsp-overview/language-features.md)
-        - [Implementation guide](./references/lsp-overview/implementation-guide.md)
-        - [Message reference](./references/lsp-overview/message-reference.md)
-    - [CLI Extension Communication Guide](./references/cli-extension-communication-guide.md)
-    - [VSCode Sidebar Panel Setup Guide](./references/vscode-extensions-sidebar-panel-research-report.md)
+# Technical Implementation
+
+- [Markdown Rendering Pipeline](./technical/markdown-rendering.md)
+- [File Reference System](./technical/file-references.md)
+- [IPC Communication](./technical/ipc.md)
+- [Error Handling](./technical/error-handling.md)
+
+# User Guide
+
+- [Writing Reviews](./guide/writing-reviews.md)
+- [File Reference Syntax](./guide/file-references.md)
+- [Troubleshooting](./guide/troubleshooting.md)
+
+# AI Integration
+
+- [AI Assistant Guidelines](./ai/guidelines.md)
+- [Tool Usage Examples](./ai/examples.md)
+- [Best Practices](./ai/best-practices.md)
+
+# Development
+
+- [Contributing](./development/contributing.md)
+- [Testing](./development/testing.md)
+- [Release Process](./development/releases.md)
+
+# References
+
+- [Research Reports]()
+    - [Markdown to HTML in VSCode Extensions](./references/markdown-to-html-in-vscode.md)
+    - [VSCode Extension Communication Patterns](./references/cli-extension-communication-guide.md)
+    - [VSCode Sidebar Panel Research](./references/vscode-extensions-sidebar-panel-research-report.md)
+    - [Language Server Protocol Overview](./references/lsp-overview/README.md)
+        - [Base Protocol](./references/lsp-overview/base-protocol.md)
+        - [Language Features](./references/lsp-overview/language-features.md)
+        - [Implementation Guide](./references/lsp-overview/implementation-guide.md)
+        - [Message Reference](./references/lsp-overview/message-reference.md)
+- [API Reference](./references/api.md)
+- [Configuration Reference](./references/configuration.md)
