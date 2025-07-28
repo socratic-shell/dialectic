@@ -52,11 +52,10 @@ The tool accepts parameters defined by the `PresentReviewParams` interface:
 - **Description**: Section name for `update-section` mode
 - **Usage**: Allows updating specific parts of a review without replacing everything
 
-**`baseUri` (optional)**
+**`baseUri` (required)**
 - **Type**: `string`  
 - **Description**: Base directory path for resolving relative file references
-- **Default**: Current workspace root
-- **Usage**: Ensures file references resolve correctly in different workspace contexts
+- **Usage**: Ensures file references resolve correctly as clickable links in VSCode
 
 ## Response Format
 
