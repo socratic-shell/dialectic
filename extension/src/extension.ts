@@ -7,7 +7,7 @@ import { ReviewWebviewProvider } from './reviewWebview';
 
 // 💡: Types for IPC communication with MCP server
 interface IPCMessage {
-    type: 'present_review' | 'log';
+    type: 'present_review' | 'log' | 'get_selection';
     payload: {
         content: string;
         mode: 'replace' | 'update-section' | 'append';
@@ -15,7 +15,7 @@ interface IPCMessage {
     } | {
         level: 'info' | 'error' | 'debug';
         message: string;
-    };
+    } | {};
     id: string;
 }
 
@@ -23,6 +23,7 @@ interface IPCResponse {
     id: string;
     success: boolean;
     error?: string;
+    data?: any;
 }
 
 export function activate(context: vscode.ExtensionContext) {
@@ -152,6 +153,56 @@ function handleIPCMessage(message: IPCMessage, socket: net.Socket, reviewProvide
                     id: message.id,
                     success: true
                 };
+                break;
+            case 'get_selection':
+                // 💡: Get current selection from active editor
+                const activeEditor = vscode.window.activeTextEditor;
+                
+                if (!activeEditor) {
+                    response = {
+                        id: message.id,
+                        success: true,
+                        data: {
+                            selectedText: null,
+                            message: 'No active editor found'
+                        }
+                    };
+                } else {
+                    const selection = activeEditor.selection;
+                    
+                    if (selection.isEmpty) {
+                        response = {
+                            id: message.id,
+                            success: true,
+                            data: {
+                                selectedText: null,
+                                filePath: activeEditor.document.fileName,
+                                documentLanguage: activeEditor.document.languageId,
+                                isUntitled: activeEditor.document.isUntitled,
+                                message: 'No text selected in active editor'
+                            }
+                        };
+                    } else {
+                        const selectedText = activeEditor.document.getText(selection);
+                        const startLine = selection.start.line + 1; // Convert to 1-based
+                        const endLine = selection.end.line + 1;
+                        
+                        response = {
+                            id: message.id,
+                            success: true,
+                            data: {
+                                selectedText,
+                                filePath: activeEditor.document.fileName,
+                                startLine,
+                                endLine,
+                                lineNumber: startLine === endLine ? startLine : undefined,
+                                documentLanguage: activeEditor.document.languageId,
+                                isUntitled: activeEditor.document.isUntitled,
+                                message: `Selected ${selectedText.length} characters from ${startLine === endLine ? `line ${startLine}` : `lines ${startLine}-${endLine}`}`
+                            }
+                        };
+                    }
+                }
                 break;
             default:
                 response = {

@@ -96,6 +96,19 @@ class DialecticMCPServer {
               required: ['content', 'baseUri'],
             },
           } satisfies Tool,
+          {
+            name: 'get_selection',
+            description: [
+              'Get the currently selected text from any active editor in VSCode.',
+              'Works with source files, review panels, and any other text editor.',
+              'Returns null if no text is selected or no active editor is found.'
+            ].join(' '),
+            inputSchema: {
+              type: 'object',
+              properties: {},
+              additionalProperties: false,
+            },
+          } satisfies Tool,
         ],
       };
     });
@@ -144,6 +157,40 @@ class DialecticMCPServer {
               {
                 type: 'text',
                 text: `Error presenting review: ${error instanceof Error ? error.message : String(error)}`,
+              },
+            ],
+            isError: true,
+          };
+        }
+      }
+
+      if (name === 'get_selection') {
+        await this.ipc.sendLog('info', 'Received get_selection tool call');
+        
+        try {
+          // Get current selection from VSCode extension via IPC
+          await this.ipc.sendLog('info', 'Requesting current selection from VSCode extension...');
+          const result = await this.ipc.getSelection();
+          
+          await this.ipc.sendLog('info', `Selection retrieved: ${result.selectedText ? 'text selected' : 'no selection'}`);
+          
+          return {
+            content: [
+              {
+                type: 'text',
+                text: JSON.stringify(result, null, 2),
+              },
+            ],
+          };
+        } catch (error) {
+          const errorMessage = error instanceof Error ? error.message : String(error);
+          await this.ipc.sendLog('error', `Get selection failed: ${errorMessage}`);
+          
+          return {
+            content: [
+              {
+                type: 'text',
+                text: `Error getting selection: ${error instanceof Error ? error.message : String(error)}`,
               },
             ],
             isError: true,

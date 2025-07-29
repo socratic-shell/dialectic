@@ -3,7 +3,7 @@
 
 import { createConnection, Socket } from 'net';
 import { randomUUID } from 'crypto';
-import { PresentReviewParams, PresentReviewResult, IPCMessage, IPCResponse, LogParams } from './types.js';
+import { PresentReviewParams, PresentReviewResult, IPCMessage, IPCResponse, LogParams, GetSelectionResult } from './types.js';
 
 /**
  * Handles IPC communication between MCP server and VSCode extension
@@ -11,7 +11,7 @@ import { PresentReviewParams, PresentReviewResult, IPCMessage, IPCResponse, LogP
 export class IPCCommunicator {
   private socket: Socket | null = null;
   private pendingRequests = new Map<string, {
-    resolve: (result: PresentReviewResult) => void;
+    resolve: (result: any) => void;
     reject: (error: Error) => void;
   }>();
   private testMode: boolean = false;
@@ -93,6 +93,42 @@ export class IPCCommunicator {
     return this.sendMessage(message);
   }
 
+  async getSelection(): Promise<GetSelectionResult> {
+    if (this.testMode) {
+      // 💡: In test mode, simulate no selection
+      console.error('Get selection called (test mode)');
+      return {
+        selectedText: null,
+        message: 'No selection available (test mode)',
+      };
+    }
+
+    if (!this.socket) {
+      throw new Error('IPC not initialized. Call initialize() first.');
+    }
+
+    // 💡: Create message with unique ID for response tracking
+    const message: IPCMessage = {
+      type: 'get_selection',
+      payload: {},
+      id: randomUUID(),
+    };
+
+    console.error('Sending get_selection message:', JSON.stringify(message, null, 2));
+
+    const result = await this.sendMessage(message);
+    
+    // 💡: For get_selection, we expect the data in the response
+    if (result.success && 'data' in result) {
+      return (result as any).data as GetSelectionResult;
+    } else {
+      return {
+        selectedText: null,
+        message: result.message || 'Failed to get selection',
+      };
+    }
+  }
+
   /**
    * Send a log message to the VSCode extension for unified logging
    */
@@ -125,7 +161,7 @@ export class IPCCommunicator {
     }
   }
 
-  private async sendMessage(message: IPCMessage): Promise<PresentReviewResult> {
+  private async sendMessage(message: IPCMessage): Promise<any> {
     // 💡: Send message and wait for response using Promise-based approach
     return new Promise((resolve, reject) => {
       if (!this.socket) {
@@ -161,10 +197,16 @@ export class IPCCommunicator {
     this.pendingRequests.delete(response.id);
 
     if (response.success) {
-      pending.resolve({ 
-        success: true,
-        message: 'Review successfully displayed in VSCode'
-      });
+      // 💡: For get_selection responses, return the data directly
+      if (response.data) {
+        pending.resolve(response.data as any);
+      } else {
+        // 💡: For present_review responses, return success message
+        pending.resolve({ 
+          success: true,
+          message: 'Operation completed successfully'
+        });
+      }
     } else {
       pending.resolve({
         success: false,
