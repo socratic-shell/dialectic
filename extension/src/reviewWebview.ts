@@ -4,6 +4,8 @@
 import * as vscode from 'vscode';
 import * as crypto from 'crypto';
 import * as MarkdownIt from 'markdown-it';
+import { parseDialecticUrl, DialecticUrl } from './dialecticUrl';
+import { searchInFile, getBestSearchResult, formatSearchResults } from './searchEngine';
 
 export class ReviewWebviewProvider {
     private panel: vscode.WebviewPanel | undefined;
@@ -50,11 +52,10 @@ export class ReviewWebviewProvider {
             
             // Handle dialectic: URI scheme for file references
             if (href && href.startsWith('dialectic:')) {
-                const fileRef = href.substring('dialectic:'.length); // Remove dialectic: prefix
                 token.attrSet('href', 'javascript:void(0)');
-                token.attrSet('data-file-ref', fileRef);
+                token.attrSet('data-dialectic-url', href);
                 token.attrSet('class', 'file-ref');
-                this.outputChannel.appendLine(`Processed dialectic file reference: ${fileRef}`);
+                this.outputChannel.appendLine(`Processed dialectic URL: ${href}`);
             }
             
             return defaultRender(tokens, idx, options, env, self);
@@ -62,8 +63,8 @@ export class ReviewWebviewProvider {
 
         // 💡: Handle reference-style links by preprocessing
         md.core.ruler.before('normalize', 'file_references', (state: any) => {
-            // Convert [`filename:line`][] to [filename:line](dialectic:filename:line)
-            state.src = state.src.replace(/\[`([^:`]+:\d+)`\]\[\]/g, '[$1](dialectic:$1)');
+            // Convert [`filename:line`][] to [filename:line](dialectic:filename?line=line)
+            state.src = state.src.replace(/\[`([^:`]+):(\d+)`\]\[\]/g, '[$1:$2](dialectic:$1?line=$2)');
         });
 
         return md;
@@ -148,7 +149,7 @@ export class ReviewWebviewProvider {
     private async handleWebviewMessage(message: any): Promise<void> {
         switch (message.command) {
             case 'openFile':
-                await this.openFileAtLine(message.file, message.line);
+                await this.openDialecticUrl(message.dialecticUrl);
                 break;
             case 'copyReview':
                 await vscode.env.clipboard.writeText(this.reviewContent);
@@ -161,79 +162,194 @@ export class ReviewWebviewProvider {
     }
 
     /**
-     * Open a file at a specific line number
+     * Open a file using dialectic URL format with search and line support
      */
-    private async openFileAtLine(fileName: string, lineNumber: number): Promise<void> {
+    private async openDialecticUrl(dialecticUrlString: string): Promise<void> {
         try {
-            let fileUri: vscode.Uri | undefined;
-
-            // 💡: Try baseUri first if available
-            if (this.baseUri) {
-                const candidateUri = vscode.Uri.joinPath(this.baseUri, fileName);
-                try {
-                    await vscode.workspace.fs.stat(candidateUri);
-                    fileUri = candidateUri;
-                    this.outputChannel.appendLine(`Found file using baseUri: ${fileUri.fsPath}`);
-                } catch {
-                    this.outputChannel.appendLine(`File not found at baseUri: ${candidateUri.fsPath}`);
-                }
-            }
-
-            // 💡: Fall back to workspace folder search if baseUri didn't work
-            if (!fileUri) {
-                const workspaceFolders = vscode.workspace.workspaceFolders;
-                if (!workspaceFolders) {
-                    vscode.window.showErrorMessage('No workspace folder open and no base URI provided');
-                    return;
-                }
-
-                // Look for the file in all workspace folders
-                for (const folder of workspaceFolders) {
-                    const candidateUri = vscode.Uri.joinPath(folder.uri, fileName);
-                    try {
-                        await vscode.workspace.fs.stat(candidateUri);
-                        fileUri = candidateUri;
-                        this.outputChannel.appendLine(`Found file in workspace: ${fileUri.fsPath}`);
-                        break;
-                    } catch {
-                        // File not found in this folder, continue searching
-                    }
-                }
-            }
-
-            if (!fileUri) {
-                const baseInfo = this.baseUri ? ` (base: ${this.baseUri.fsPath})` : '';
-                vscode.window.showErrorMessage(`File not found: ${fileName}${baseInfo}`);
+            // 💡: Parse the dialectic URL to extract components
+            const dialecticUrl = parseDialecticUrl(dialecticUrlString);
+            if (!dialecticUrl) {
+                vscode.window.showErrorMessage(`Invalid dialectic URL: ${dialecticUrlString}`);
                 return;
             }
 
-            // Open the document
+            this.outputChannel.appendLine(`Opening dialectic URL: ${dialecticUrlString}`);
+            this.outputChannel.appendLine(`Parsed: path=${dialecticUrl.path}, regex=${dialecticUrl.regex}, line=${JSON.stringify(dialecticUrl.line)}`);
+
+            // 💡: Find the file using existing file resolution logic
+            const fileUri = await this.resolveFileUri(dialecticUrl.path);
+            if (!fileUri) {
+                const baseInfo = this.baseUri ? ` (base: ${this.baseUri.fsPath})` : '';
+                vscode.window.showErrorMessage(`File not found: ${dialecticUrl.path}${baseInfo}`);
+                return;
+            }
+
+            // 💡: Open the document first
             const document = await vscode.workspace.openTextDocument(fileUri);
-            
-            // Convert to 0-based line number and create selection
-            const line = Math.max(0, lineNumber - 1);
-            const selection = new vscode.Range(line, 0, line, 0);
+
+            let targetLine = 1;
+            let targetColumn = 1;
+
+            // 💡: Handle regex if specified
+            if (dialecticUrl.regex) {
+                try {
+                    const searchResults = await searchInFile(fileUri, {
+                        regexPattern: dialecticUrl.regex,
+                        lineConstraint: dialecticUrl.line
+                    });
+
+                    this.outputChannel.appendLine(`Regex search results:\n${formatSearchResults(searchResults)}`);
+
+                    const bestResult = getBestSearchResult(searchResults);
+                    if (bestResult) {
+                        targetLine = bestResult.line;
+                        targetColumn = bestResult.column;
+                        this.outputChannel.appendLine(`Using regex result: line ${targetLine}, column ${targetColumn}`);
+                    } else {
+                        vscode.window.showWarningMessage(`Regex pattern "${dialecticUrl.regex}" not found in ${dialecticUrl.path}`);
+                        // 💡: Fall back to line parameter if regex fails
+                        if (dialecticUrl.line) {
+                            targetLine = dialecticUrl.line.startLine;
+                            targetColumn = dialecticUrl.line.startColumn || 1;
+                        }
+                    }
+                } catch (error) {
+                    this.outputChannel.appendLine(`Regex search failed: ${error}`);
+                    vscode.window.showErrorMessage(`Regex search failed: ${error}`);
+                    // 💡: Fall back to line parameter if regex fails
+                    if (dialecticUrl.line) {
+                        targetLine = dialecticUrl.line.startLine;
+                        targetColumn = dialecticUrl.line.startColumn || 1;
+                    }
+                }
+            } else if (dialecticUrl.line) {
+                // 💡: No regex, just use line parameter
+                targetLine = dialecticUrl.line.startLine;
+                targetColumn = dialecticUrl.line.startColumn || 1;
+            }
+
+            // 💡: Convert to 0-based for VSCode API and create selection
+            const line = Math.max(0, targetLine - 1);
+            const column = Math.max(0, targetColumn - 1);
+            const selection = new vscode.Range(line, column, line, column);
 
             const editor = await vscode.window.showTextDocument(document, {
                 selection,
                 viewColumn: vscode.ViewColumn.One
             });
             
-            // 💡: Apply highlight decoration to the target line
-            // This provides visual feedback beyond just cursor position
-            const lineRange = new vscode.Range(line, 0, line, 0);
-            editor.setDecorations(this.lineHighlightDecoration, [lineRange]);
-            
-            // 💡: Remove highlight after 3 seconds for subtle, non-intrusive feedback
-            setTimeout(() => {
-                // Check if editor is still active before clearing decorations
-                if (vscode.window.activeTextEditor === editor) {
-                    editor.setDecorations(this.lineHighlightDecoration, []);
-                }
-            }, 3000);
+            // 💡: Apply highlight decoration using the appropriate ranges
+            const decorationRanges = this.createDecorationRanges(document, dialecticUrl.line, targetLine, targetColumn);
+            if (decorationRanges.length > 0) {
+                editor.setDecorations(this.lineHighlightDecoration, decorationRanges);
+                
+                // 💡: Remove highlight after 3 seconds
+                setTimeout(() => {
+                    if (vscode.window.activeTextEditor === editor) {
+                        editor.setDecorations(this.lineHighlightDecoration, []);
+                    }
+                }, 3000);
+            }
+
         } catch (error) {
-            vscode.window.showErrorMessage(`Failed to open ${fileName}:${lineNumber} - ${error}`);
+            this.outputChannel.appendLine(`Failed to open dialectic URL: ${error}`);
+            vscode.window.showErrorMessage(`Failed to open ${dialecticUrlString} - ${error}`);
         }
+    }
+
+    /**
+     * Create decoration ranges based on line specification
+     */
+    private createDecorationRanges(document: vscode.TextDocument, lineSpec?: import('./dialecticUrl').LineSpec, targetLine?: number, targetColumn?: number): vscode.Range[] {
+        if (lineSpec) {
+            const ranges: vscode.Range[] = [];
+            
+            switch (lineSpec.type) {
+                case 'single':
+                    // 💡: Highlight the entire line
+                    const singleLine = Math.max(0, lineSpec.startLine - 1);
+                    ranges.push(new vscode.Range(singleLine, 0, singleLine, document.lineAt(singleLine).text.length));
+                    break;
+                    
+                case 'single-with-column':
+                    // 💡: Highlight from the specified column to end of line
+                    const lineWithCol = Math.max(0, lineSpec.startLine - 1);
+                    const startCol = Math.max(0, (lineSpec.startColumn || 1) - 1);
+                    ranges.push(new vscode.Range(lineWithCol, startCol, lineWithCol, document.lineAt(lineWithCol).text.length));
+                    break;
+                    
+                case 'range':
+                    // 💡: Highlight all lines in the range
+                    const startLine = Math.max(0, lineSpec.startLine - 1);
+                    const endLine = Math.min(document.lineCount - 1, (lineSpec.endLine || lineSpec.startLine) - 1);
+                    for (let i = startLine; i <= endLine; i++) {
+                        ranges.push(new vscode.Range(i, 0, i, document.lineAt(i).text.length));
+                    }
+                    break;
+                    
+                case 'range-with-columns':
+                    // 💡: Highlight precise character range
+                    const preciseStartLine = Math.max(0, lineSpec.startLine - 1);
+                    const preciseEndLine = Math.min(document.lineCount - 1, (lineSpec.endLine || lineSpec.startLine) - 1);
+                    const preciseStartCol = Math.max(0, (lineSpec.startColumn || 1) - 1);
+                    const preciseEndCol = lineSpec.endColumn ? Math.max(0, lineSpec.endColumn - 1) : document.lineAt(preciseEndLine).text.length;
+                    
+                    if (preciseStartLine === preciseEndLine) {
+                        // Same line - single range
+                        ranges.push(new vscode.Range(preciseStartLine, preciseStartCol, preciseEndLine, preciseEndCol));
+                    } else {
+                        // Multiple lines - highlight from start column to end of first line, 
+                        // full middle lines, and start of last line to end column
+                        ranges.push(new vscode.Range(preciseStartLine, preciseStartCol, preciseStartLine, document.lineAt(preciseStartLine).text.length));
+                        for (let i = preciseStartLine + 1; i < preciseEndLine; i++) {
+                            ranges.push(new vscode.Range(i, 0, i, document.lineAt(i).text.length));
+                        }
+                        ranges.push(new vscode.Range(preciseEndLine, 0, preciseEndLine, preciseEndCol));
+                    }
+                    break;
+            }
+            
+            return ranges;
+        } else if (targetLine !== undefined) {
+            // 💡: Fall back to single line highlighting for search results
+            const line = Math.max(0, targetLine - 1);
+            const startCol = targetColumn ? Math.max(0, targetColumn - 1) : 0;
+            return [new vscode.Range(line, startCol, line, document.lineAt(line).text.length)];
+        }
+        
+        return [];
+    }
+    private async resolveFileUri(fileName: string): Promise<vscode.Uri | undefined> {
+        // 💡: Try baseUri first if available
+        if (this.baseUri) {
+            const candidateUri = vscode.Uri.joinPath(this.baseUri, fileName);
+            try {
+                await vscode.workspace.fs.stat(candidateUri);
+                this.outputChannel.appendLine(`Found file using baseUri: ${candidateUri.fsPath}`);
+                return candidateUri;
+            } catch {
+                this.outputChannel.appendLine(`File not found at baseUri: ${candidateUri.fsPath}`);
+            }
+        }
+
+        // 💡: Fall back to workspace folder search
+        const workspaceFolders = vscode.workspace.workspaceFolders;
+        if (!workspaceFolders) {
+            return undefined;
+        }
+
+        for (const folder of workspaceFolders) {
+            const candidateUri = vscode.Uri.joinPath(folder.uri, fileName);
+            try {
+                await vscode.workspace.fs.stat(candidateUri);
+                this.outputChannel.appendLine(`Found file in workspace: ${candidateUri.fsPath}`);
+                return candidateUri;
+            } catch {
+                // File not found in this folder, continue searching
+            }
+        }
+
+        return undefined;
     }
 
     /**
@@ -374,22 +490,16 @@ export class ReviewWebviewProvider {
             const target = event.target.closest('a');
             if (!target) return;
             
-            const fileRef = target.getAttribute('data-file-ref');
-            if (fileRef) {
+            const dialecticUrl = target.getAttribute('data-dialectic-url');
+            if (dialecticUrl) {
                 event.preventDefault();
-                const match = fileRef.match(/^([^:]+):(\\d+)$/);
-                if (match) {
-                    const file = match[1];
-                    const line = parseInt(match[2]);
-                    
-                    console.log('[Webview] File reference clicked:', file, line);
-                    
-                    vscode.postMessage({
-                        command: 'openFile',
-                        file: file,
-                        line: line
-                    });
-                }
+                
+                console.log('[Webview] Dialectic URL clicked:', dialecticUrl);
+                
+                vscode.postMessage({
+                    command: 'openFile',
+                    dialecticUrl: dialecticUrl
+                });
                 return;
             }
             
@@ -436,16 +546,16 @@ The application needed secure user authentication to protect user data and enabl
 
 ## Changes Made
 - Added authentication middleware [\`src/auth/middleware.ts:23\`][]
-- Created user login/signup endpoints [here](src/routes/auth.ts:45) 
+- Created user login/signup endpoints [here](dialectic:src/routes/auth.ts?line=45) 
 - Updated user model with password hashing [\`src/models/user.ts:67\`][]
-- Added JWT token generation and validation [in utils](src/utils/jwt.ts:12)
+- Added JWT token generation and validation [in utils](dialectic:src/utils/jwt.ts?regex=generateToken)
 
 ## Implementation Details
 
 ### Authentication Flow [\`src/auth/middleware.ts:23\`][]
 The middleware intercepts requests and validates JWT tokens. If the token is valid, the user object is attached to the request for downstream handlers to use.
 
-### Password Security [check this](src/models/user.ts:67)
+### Password Security [check this](dialectic:src/models/user.ts?regex=hashPassword&line=60-80)
 Passwords are hashed using bcrypt with a salt factor of 12. The plaintext password is never stored in the database.
 
 ## Design Decisions

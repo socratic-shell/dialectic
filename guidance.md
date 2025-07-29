@@ -19,9 +19,15 @@ Let the user decide whether to proceed with the review. This keeps them in contr
 
 ## Review Structure
 
-Write as guided code tours using [`filename:line`][] references that render as clickable links in VSCode. This format aligns with rustdoc conventions and enables direct navigation to specific code locations.
+Write as guided code tours using `dialectic:` scheme references that render as clickable links in VSCode. Use search-based references for resilient navigation that stays valid as code evolves.
 
-**Why this format matters:** VSCode recognizes this syntax and creates clickable links that jump directly to the referenced line. This transforms reviews from static documentation into interactive code exploration tools.
+**Reference Formats:**
+- `dialectic:src/auth.ts?regex=validateToken` - Regex pattern for function/variable names
+- `dialectic:src/auth.ts?line=42` - Navigate to specific line
+- `dialectic:src/auth.ts?regex=handleError&line=100-200` - Regex search within line range
+- [`filename:line`][] - Legacy format (auto-converted to dialectic: scheme)
+
+**Why this format matters:** The `dialectic:` scheme creates resilient references that remain valid as code changes. Regex-based references are powerful enough to handle both simple literal matches and complex patterns.
 
 Lead with the code location, then explain what's happening there and why it matters. Order sections to follow the logical flow of operations, not file order.
 
@@ -40,16 +46,16 @@ Enhanced registration with email validation and structured error responses for b
 This section includes key decisions that I made along the way or places I was unsure.
 You may wish to review these or double check my logic!
 
-* [`src/auth.ts:46`][] -- I chose to use an Elliptical Key 
-* [`src/auth.ts:78`][] -- I opted to use a max of 3 threads for processing to not overload the CPU
-* [`src/auth.ts:80`][] -- I included a customized response for `FileNotFound` errors, as you requested
+* [Email validation logic](dialectic:src/auth.ts?regex=validateEmail) -- I chose to use regex validation instead of a library
+* [Thread pool sizing](dialectic:src/auth.ts?regex=maxThreads) -- I opted to use a max of 3 threads for processing to not overload the CPU
+* [Error response format](dialectic:src/auth.ts?regex=FileNotFound) -- I included a customized response for `FileNotFound` errors, as you requested
 
 ## Code Tour
 
-### Input Validation [`src/auth.ts:34`][]
+### Input Validation [here](dialectic:src/auth.ts?regex=validateInput)
 Validates email format and password strength before processing. Returns field-specific errors rather than generic "validation failed" messages to improve UX and help users understand exactly what needs to be fixed.
 
-### Error Handling [`src/auth.ts:67`][]  
+### Error Handling [check this](dialectic:src/auth.ts?regex=handleDatabaseError)
 Database operations wrapped in try-catch with specific handling for constraint violations and connection issues. Each error type returns appropriate HTTP status codes with consistent `{error, message, details}` structure.
 
 ## Next Steps
