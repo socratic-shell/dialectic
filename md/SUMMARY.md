@@ -1,5 +1,7 @@
 # Summary
 
+<!-- Claude: consult chapters in this file for deeper background on topics as needed -->
+
 - [Introduction](./introduction.md) <!-- 💡: Project overview, problem statement, and relationship to socratic shell ecosystem -->
 
 # User Guide <!-- 💡: End-user documentation for people using Dialectic in their AI development workflow -->
@@ -7,8 +9,7 @@
 - [Installation](./installation.md) <!-- 💡: Step-by-step setup for both VSCode extension and MCP server components -->
 - [Quick start](./quick-start.md) <!-- 💡: Basic workflow example showing AI assistant → review display → navigation cycle -->
 - [Review format](./review-format.md) <!-- 💡: Explains file:line syntax, reference-style links [file:line][], and markdown conventions AI assistants should follow -->
-- [Troubleshooting](./troubleshooting.md) <!-- 💡: Common issues like IPC connection failures, extension not loading, markdown not rendering -->
-- [Frequently asked questions](./faq.md) <!-- 💡: Anticipated user questions about the expected workflow, purpose, comparisons with other tools, etc -->
+- [Frequently asked questions](./faq.md) <!-- 💡: Anticipated user questions about common errors, expected workflow, purpose, comparisons with other tools, etc -->
 
 # Development and contribution guide <!-- 💡: Technical documentation for contributors and people wanting to understand system internals -->
 
