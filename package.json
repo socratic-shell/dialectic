@@ -5,6 +5,7 @@
   "private": true,
   "scripts": {
     "setup": "node scripts/setup.js",
+    "setup-dev": "node scripts/setup-dev.js",
     "build": "npm run build:server && npm run build:extension",
     "build:server": "cd server && npm run build",
     "build:extension": "cd extension && npm run compile",
