@@ -10,6 +10,7 @@ export class ReviewWebviewProvider {
     private reviewContent: string = '';
     private baseUri: vscode.Uri | undefined;
     private md: MarkdownIt;
+    private lineHighlightDecoration: vscode.TextEditorDecorationType;
 
     constructor(
         private context: vscode.ExtensionContext,
@@ -17,6 +18,15 @@ export class ReviewWebviewProvider {
     ) {
         this.md = this.setupMarkdownRenderer();
         this.loadDummyReview();
+        
+        // 💡: Create decoration type for highlighting target lines
+        // Uses theme-aware colors that work in both light and dark themes
+        this.lineHighlightDecoration = vscode.window.createTextEditorDecorationType({
+            backgroundColor: new vscode.ThemeColor('editor.findMatchHighlightBackground'),
+            isWholeLine: true,
+            overviewRulerColor: new vscode.ThemeColor('editorOverviewRuler.findMatchForeground'),
+            overviewRulerLane: vscode.OverviewRulerLane.Center
+        });
     }
 
     /**
@@ -204,10 +214,23 @@ export class ReviewWebviewProvider {
             const line = Math.max(0, lineNumber - 1);
             const selection = new vscode.Range(line, 0, line, 0);
 
-            await vscode.window.showTextDocument(document, {
+            const editor = await vscode.window.showTextDocument(document, {
                 selection,
                 viewColumn: vscode.ViewColumn.One
             });
+            
+            // 💡: Apply highlight decoration to the target line
+            // This provides visual feedback beyond just cursor position
+            const lineRange = new vscode.Range(line, 0, line, 0);
+            editor.setDecorations(this.lineHighlightDecoration, [lineRange]);
+            
+            // 💡: Remove highlight after 3 seconds for subtle, non-intrusive feedback
+            setTimeout(() => {
+                // Check if editor is still active before clearing decorations
+                if (vscode.window.activeTextEditor === editor) {
+                    editor.setDecorations(this.lineHighlightDecoration, []);
+                }
+            }, 3000);
         } catch (error) {
             vscode.window.showErrorMessage(`Failed to open ${fileName}:${lineNumber} - ${error}`);
         }
@@ -392,6 +415,14 @@ export class ReviewWebviewProvider {
     </script>
 </body>
 </html>`;
+    }
+
+    /**
+     * Dispose of resources
+     */
+    public dispose(): void {
+        this.lineHighlightDecoration.dispose();
+        this.panel?.dispose();
     }
 
     /**
