@@ -8,8 +8,9 @@ vsc-extension-quickstart.md
 **/.eslintrc.json
 **/*.map
 **/*.ts
-# Exclude devDependencies but keep runtime dependencies
-node_modules/@types/**
-node_modules/typescript/**
+# Webpack bundles everything, so exclude all node_modules
+node_modules/**
+# Exclude webpack config and other build files
+webpack.config.js
 **/.DS_Store
 ../**
