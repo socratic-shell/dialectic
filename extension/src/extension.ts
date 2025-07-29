@@ -49,7 +49,7 @@ export function activate(context: vscode.ExtensionContext) {
         vscode.window.showInformationMessage('Use the Copy Review button in the review panel');
     });
 
-    context.subscriptions.push(showReviewCommand, copyReviewCommand, {
+    context.subscriptions.push(showReviewCommand, copyReviewCommand, reviewProvider, {
         dispose: () => {
             server.close();
         }
