@@ -41,7 +41,7 @@ export class ReviewWebviewProvider {
             // Handle dialectic: URI scheme for file references
             if (href && href.startsWith('dialectic:')) {
                 const fileRef = href.substring('dialectic:'.length); // Remove dialectic: prefix
-                token.attrSet('href', '#');
+                token.attrSet('href', 'javascript:void(0)');
                 token.attrSet('data-file-ref', fileRef);
                 token.attrSet('class', 'file-ref');
                 this.outputChannel.appendLine(`Processed dialectic file reference: ${fileRef}`);
