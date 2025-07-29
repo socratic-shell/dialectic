@@ -5,3 +5,4 @@ playground
 *.tgz
 
 dist/
+node_modules

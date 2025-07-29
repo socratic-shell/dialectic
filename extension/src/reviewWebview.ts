@@ -4,8 +4,6 @@
 import * as vscode from 'vscode';
 import * as crypto from 'crypto';
 import * as MarkdownIt from 'markdown-it';
-import * as DOMPurify from 'dompurify';
-import { JSDOM } from 'jsdom';
 
 export class ReviewWebviewProvider {
     private panel: vscode.WebviewPanel | undefined;
@@ -249,18 +247,14 @@ export class ReviewWebviewProvider {
     }
 
     /**
-     * Sanitize HTML using DOMPurify for security
+     * Sanitize HTML for security
      */
     private sanitizeHtml(html: string): string {
-        // 💡: Create JSDOM window for DOMPurify
-        const window = new JSDOM('').window;
-        const purify = DOMPurify(window as any);
-        
-        // 💡: Configure DOMPurify to allow our custom data attributes
-        return purify.sanitize(html, {
-            ADD_ATTR: ['data-file-ref'],
-            ADD_TAGS: ['a']
-        });
+        // 💡: Basic HTML sanitization for VSCode webview context
+        // Remove potentially dangerous content while preserving our markdown-generated HTML
+        return html.replace(/<script\b[^<]*(?:(?!<\/script>)<[^<]*)*<\/script>/gi, '')
+                  .replace(/javascript:/gi, '')
+                  .replace(/on\w+="[^"]*"/gi, '');
     }
 
     /**
