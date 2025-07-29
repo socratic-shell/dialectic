@@ -185,7 +185,9 @@ function handleIPCMessage(message: IPCMessage, socket: net.Socket, reviewProvide
                     } else {
                         const selectedText = activeEditor.document.getText(selection);
                         const startLine = selection.start.line + 1; // Convert to 1-based
+                        const startColumn = selection.start.character + 1; // Convert to 1-based
                         const endLine = selection.end.line + 1;
+                        const endColumn = selection.end.character + 1;
                         
                         response = {
                             id: message.id,
@@ -194,11 +196,13 @@ function handleIPCMessage(message: IPCMessage, socket: net.Socket, reviewProvide
                                 selectedText,
                                 filePath: activeEditor.document.fileName,
                                 startLine,
+                                startColumn,
                                 endLine,
+                                endColumn,
                                 lineNumber: startLine === endLine ? startLine : undefined,
                                 documentLanguage: activeEditor.document.languageId,
                                 isUntitled: activeEditor.document.isUntitled,
-                                message: `Selected ${selectedText.length} characters from ${startLine === endLine ? `line ${startLine}` : `lines ${startLine}-${endLine}`}`
+                                message: `Selected ${selectedText.length} characters from ${startLine === endLine ? `line ${startLine}, columns ${startColumn}-${endColumn}` : `lines ${startLine}:${startColumn} to ${endLine}:${endColumn}`}`
                             }
                         };
                     }

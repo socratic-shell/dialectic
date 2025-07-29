@@ -58,8 +58,14 @@ export interface GetSelectionResult {
   /** Starting line number (1-based) */
   startLine?: number;
   
+  /** Starting column number (1-based) */
+  startColumn?: number;
+  
   /** Ending line number (1-based) */
   endLine?: number;
+  
+  /** Ending column number (1-based) */
+  endColumn?: number;
   
   /** Single line number if selection is on one line */
   lineNumber?: number;

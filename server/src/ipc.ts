@@ -118,15 +118,9 @@ export class IPCCommunicator {
 
     const result = await this.sendMessage(message);
     
-    // 💡: For get_selection, we expect the data in the response
-    if (result.success && 'data' in result) {
-      return (result as any).data as GetSelectionResult;
-    } else {
-      return {
-        selectedText: null,
-        message: result.message || 'Failed to get selection',
-      };
-    }
+    // 💡: The handleResponse method resolves with response.data directly for get_selection
+    // So result IS the GetSelectionResult, not a wrapper containing it
+    return result as GetSelectionResult;
   }
 
   /**
