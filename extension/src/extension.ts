@@ -40,6 +40,9 @@ export function activate(context: vscode.ExtensionContext) {
     // 💡: Set up IPC server for communication with MCP server
     const server = createIPCServer(context, reviewProvider, outputChannel);
     
+    // 💡: Set up universal selection detection for interactive code review
+    setupSelectionDetection(context, outputChannel);
+    
     // Register commands
     const showReviewCommand = vscode.commands.registerCommand('dialectic.showReview', () => {
         reviewProvider.showReview();
@@ -224,6 +227,88 @@ function handleIPCMessage(message: IPCMessage, socket: net.Socket, reviewProvide
     }
     
     socket.write(JSON.stringify(response));
+}
+
+// 💡: Set up universal selection detection for interactive code review
+function setupSelectionDetection(context: vscode.ExtensionContext, outputChannel: vscode.OutputChannel): void {
+    outputChannel.appendLine('Setting up universal selection detection...');
+    
+    // 💡: Track current selection state
+    let currentSelection: {
+        editor: vscode.TextEditor;
+        selection: vscode.Selection;
+    } | null = null;
+    
+    // 💡: Listen for selection changes to track current selection
+    const selectionListener = vscode.window.onDidChangeTextEditorSelection((event) => {
+        if (event.selections.length > 0 && !event.selections[0].isEmpty) {
+            const selection = event.selections[0];
+            const selectedText = event.textEditor.document.getText(selection);
+            
+            outputChannel.appendLine(`Selection detected: "${selectedText}" in ${event.textEditor.document.fileName}`);
+            
+            // Store current selection state
+            currentSelection = {
+                editor: event.textEditor,
+                selection: selection
+            };
+        } else {
+            currentSelection = null;
+            outputChannel.appendLine('Selection cleared');
+        }
+    });
+    
+    // 💡: Register Code Action Provider for "Socratic Shell" section
+    const codeActionProvider = vscode.languages.registerCodeActionsProvider(
+        '*', // All file types
+        {
+            provideCodeActions(document, range, context) {
+                // Only show when there's a non-empty selection
+                if (!range.isEmpty) {
+                    const action = new vscode.CodeAction(
+                        'Ask Socratic Shell',
+                        vscode.CodeActionKind.QuickFix
+                    );
+                    action.command = {
+                        command: 'dialectic.chatAboutSelection',
+                        title: 'Ask Socratic Shell'
+                    };
+                    action.isPreferred = true; // Show at top of list
+                    
+                    outputChannel.appendLine('Code action provided for selection');
+                    return [action];
+                }
+                return [];
+            }
+        },
+        {
+            providedCodeActionKinds: [vscode.CodeActionKind.QuickFix]
+        }
+    );
+    
+    // 💡: Register command for when user clicks the code action
+    const chatIconCommand = vscode.commands.registerCommand('dialectic.chatAboutSelection', () => {
+        if (currentSelection) {
+            const selectedText = currentSelection.editor.document.getText(currentSelection.selection);
+            const filePath = currentSelection.editor.document.fileName;
+            const startLine = currentSelection.selection.start.line + 1;
+            const startColumn = currentSelection.selection.start.character + 1;
+            const endLine = currentSelection.selection.end.line + 1;
+            const endColumn = currentSelection.selection.end.character + 1;
+            
+            outputChannel.appendLine(`CHAT ICON CLICKED!`);
+            outputChannel.appendLine(`Selected: "${selectedText}"`);
+            outputChannel.appendLine(`Location: ${filePath}:${startLine}:${startColumn}-${endLine}:${endColumn}`);
+            
+            // TODO: In future phases, this will inject message into Q chat terminal
+            vscode.window.showInformationMessage(`Chat about: "${selectedText}" (see Output panel for details)`);
+        } else {
+            outputChannel.appendLine('Chat action triggered but no current selection found');
+        }
+    });
+    
+    context.subscriptions.push(selectionListener, codeActionProvider, chatIconCommand);
+    outputChannel.appendLine('Selection detection with Code Actions setup complete');
 }
 
 export function deactivate() {}
