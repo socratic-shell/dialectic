@@ -39,10 +39,10 @@ export function activate(context: vscode.ExtensionContext) {
 
     // 💡: Set up IPC server for communication with MCP server
     const server = createIPCServer(context, reviewProvider, outputChannel);
-    
+
     // 💡: Set up universal selection detection for interactive code review
     setupSelectionDetection(context, outputChannel);
-    
+
     // Register commands
     const showReviewCommand = vscode.commands.registerCommand('dialectic.showReview', () => {
         reviewProvider.showReview();
@@ -63,17 +63,17 @@ export function activate(context: vscode.ExtensionContext) {
 function createIPCServer(context: vscode.ExtensionContext, reviewProvider: ReviewWebviewProvider, outputChannel: vscode.OutputChannel): net.Server {
     const socketPath = getSocketPath(context);
     outputChannel.appendLine(`Setting up IPC server at: ${socketPath}`);
-    
+
     // 💡: Clean up any existing socket file
     if (fs.existsSync(socketPath)) {
         outputChannel.appendLine('Cleaning up existing socket file');
         fs.unlinkSync(socketPath);
     }
-    
+
     const server = net.createServer((socket) => {
         outputChannel.appendLine('MCP server connected via IPC');
         console.log('MCP server connected via IPC');
-        
+
         socket.on('data', (data) => {
             try {
                 const message: IPCMessage = JSON.parse(data.toString());
@@ -91,7 +91,7 @@ function createIPCServer(context: vscode.ExtensionContext, reviewProvider: Revie
                 socket.write(JSON.stringify(response));
             }
         });
-        
+
         socket.on('error', (error) => {
             const errorMsg = `IPC socket error: ${error}`;
             outputChannel.appendLine(errorMsg);
@@ -103,15 +103,15 @@ function createIPCServer(context: vscode.ExtensionContext, reviewProvider: Revie
             console.log('MCP server disconnected from IPC');
         });
     });
-    
+
     server.listen(socketPath);
     outputChannel.appendLine(`IPC server listening on: ${socketPath}`);
     console.log('IPC server listening on:', socketPath);
-    
+
     // 💡: Set environment variable so MCP server can find the socket
     context.environmentVariableCollection.replace("DIALECTIC_IPC_PATH", socketPath);
     outputChannel.appendLine(`Set DIALECTIC_IPC_PATH environment variable to: ${socketPath}`);
-    
+
     return server;
 }
 
@@ -128,16 +128,16 @@ function getSocketPath(context: vscode.ExtensionContext): string {
 function handleIPCMessage(message: IPCMessage, socket: net.Socket, reviewProvider: ReviewWebviewProvider, outputChannel: vscode.OutputChannel): void {
     outputChannel.appendLine(`Processing IPC message: ${message.type} (${message.id})`);
     console.log('Received IPC message:', message.type, message.id);
-    
+
     let response: IPCResponse;
-    
+
     try {
         switch (message.type) {
             case 'present_review':
                 // 💡: Update the review provider with new content and optional baseUri
-                const reviewPayload = message.payload as { 
-                    content: string; 
-                    mode: 'replace' | 'update-section' | 'append'; 
+                const reviewPayload = message.payload as {
+                    content: string;
+                    mode: 'replace' | 'update-section' | 'append';
                     section?: string;
                     baseUri?: string;
                 };
@@ -160,7 +160,7 @@ function handleIPCMessage(message: IPCMessage, socket: net.Socket, reviewProvide
             case 'get_selection':
                 // 💡: Get current selection from active editor
                 const activeEditor = vscode.window.activeTextEditor;
-                
+
                 if (!activeEditor) {
                     response = {
                         id: message.id,
@@ -172,7 +172,7 @@ function handleIPCMessage(message: IPCMessage, socket: net.Socket, reviewProvide
                     };
                 } else {
                     const selection = activeEditor.selection;
-                    
+
                     if (selection.isEmpty) {
                         response = {
                             id: message.id,
@@ -191,7 +191,7 @@ function handleIPCMessage(message: IPCMessage, socket: net.Socket, reviewProvide
                         const startColumn = selection.start.character + 1; // Convert to 1-based
                         const endLine = selection.end.line + 1;
                         const endColumn = selection.end.character + 1;
-                        
+
                         response = {
                             id: message.id,
                             success: true,
@@ -225,28 +225,28 @@ function handleIPCMessage(message: IPCMessage, socket: net.Socket, reviewProvide
             error: error instanceof Error ? error.message : String(error)
         };
     }
-    
+
     socket.write(JSON.stringify(response));
 }
 
 // 💡: Set up universal selection detection for interactive code review
 function setupSelectionDetection(context: vscode.ExtensionContext, outputChannel: vscode.OutputChannel): void {
     outputChannel.appendLine('Setting up universal selection detection...');
-    
+
     // 💡: Track current selection state
     let currentSelection: {
         editor: vscode.TextEditor;
         selection: vscode.Selection;
     } | null = null;
-    
+
     // 💡: Listen for selection changes to track current selection
     const selectionListener = vscode.window.onDidChangeTextEditorSelection((event) => {
         if (event.selections.length > 0 && !event.selections[0].isEmpty) {
             const selection = event.selections[0];
             const selectedText = event.textEditor.document.getText(selection);
-            
+
             outputChannel.appendLine(`Selection detected: "${selectedText}" in ${event.textEditor.document.fileName}`);
-            
+
             // Store current selection state
             currentSelection = {
                 editor: event.textEditor,
@@ -257,7 +257,7 @@ function setupSelectionDetection(context: vscode.ExtensionContext, outputChannel
             outputChannel.appendLine('Selection cleared');
         }
     });
-    
+
     // 💡: Register Code Action Provider for "Socratic Shell" section
     const codeActionProvider = vscode.languages.registerCodeActionsProvider(
         '*', // All file types
@@ -274,7 +274,7 @@ function setupSelectionDetection(context: vscode.ExtensionContext, outputChannel
                         title: 'Ask Socratic Shell'
                     };
                     action.isPreferred = true; // Show at top of list
-                    
+
                     outputChannel.appendLine('Code action provided for selection');
                     return [action];
                 }
@@ -285,7 +285,7 @@ function setupSelectionDetection(context: vscode.ExtensionContext, outputChannel
             providedCodeActionKinds: [vscode.CodeActionKind.QuickFix]
         }
     );
-    
+
     // 💡: Register command for when user clicks the code action
     const chatIconCommand = vscode.commands.registerCommand('dialectic.chatAboutSelection', () => {
         if (currentSelection) {
@@ -295,20 +295,89 @@ function setupSelectionDetection(context: vscode.ExtensionContext, outputChannel
             const startColumn = currentSelection.selection.start.character + 1;
             const endLine = currentSelection.selection.end.line + 1;
             const endColumn = currentSelection.selection.end.character + 1;
-            
+
             outputChannel.appendLine(`CHAT ICON CLICKED!`);
             outputChannel.appendLine(`Selected: "${selectedText}"`);
             outputChannel.appendLine(`Location: ${filePath}:${startLine}:${startColumn}-${endLine}:${endColumn}`);
-            
-            // TODO: In future phases, this will inject message into Q chat terminal
-            vscode.window.showInformationMessage(`Chat about: "${selectedText}" (see Output panel for details)`);
+
+            // 💡: Phase 4 & 5: Find Q chat terminal and inject formatted message
+            const targetTerminal = findQChatTerminal(outputChannel);
+            if (targetTerminal) {
+                const formattedMessage = formatSelectionMessage(selectedText, filePath, startLine, startColumn, endLine, endColumn);
+                targetTerminal.sendText(formattedMessage, false); // false = don't execute, just insert text
+                targetTerminal.show(); // Bring terminal into focus
+                outputChannel.appendLine(`Message injected into terminal: ${targetTerminal.name}`);
+            } else {
+                outputChannel.appendLine('No suitable Q chat terminal found');
+                vscode.window.showWarningMessage('No suitable terminal found. Please ensure you have either: 1) Only one terminal open, or 2) A terminal named "Socratic Shell" or "AI".');
+            }
         } else {
             outputChannel.appendLine('Chat action triggered but no current selection found');
         }
     });
-    
+
     context.subscriptions.push(selectionListener, codeActionProvider, chatIconCommand);
     outputChannel.appendLine('Selection detection with Code Actions setup complete');
 }
 
-export function deactivate() {}
+// 💡: Phase 4 - Simplified terminal detection logic
+function findQChatTerminal(outputChannel: vscode.OutputChannel): vscode.Terminal | null {
+    const terminals = vscode.window.terminals;
+    outputChannel.appendLine(`Found ${terminals.length} open terminals`);
+
+    if (terminals.length === 0) {
+        outputChannel.appendLine('No terminals found');
+        return null;
+    }
+
+    // 💡: Simple case - exactly one terminal
+    if (terminals.length === 1) {
+        const terminal = terminals[0];
+        outputChannel.appendLine(`Using single terminal: ${terminal.name}`);
+        return terminal;
+    }
+
+    // 💡: Multiple terminals - look for "Socratic Shell" or "AI" named terminal
+    const targetTerminal = terminals.find(terminal => {
+        const name = terminal.name.toLowerCase();
+        return name.includes('socratic shell') || name.includes('ai');
+    });
+
+    if (targetTerminal) {
+        outputChannel.appendLine(`Found target terminal: ${targetTerminal.name}`);
+        return targetTerminal;
+    }
+
+    // 💡: Multiple terminals, no clear choice - could present user with options in future
+    outputChannel.appendLine('Multiple terminals found, but none named "Socratic Shell" or "AI"');
+    return null;
+}
+
+// 💡: Phase 5 - Format selection context for Q chat injection
+function formatSelectionMessage(
+    selectedText: string,
+    filePath: string,
+    startLine: number,
+    startColumn: number,
+    endLine: number,
+    endColumn: number
+): string {
+    // 💡: Create a formatted message that provides context to the AI
+    const relativePath = vscode.workspace.asRelativePath(filePath);
+    const location = startLine === endLine
+        ? `${relativePath}:${startLine}:${startColumn}-${endColumn}`
+        : `${relativePath}:${startLine}:${startColumn}-${endLine}:${endColumn}`;
+
+    // 💡: Format as a natural message that user can continue typing after
+    // 💡: Show just first 30 chars with escaped newlines for concise terminal display
+    const escapedText = selectedText.replace(/\n/g, '\\n');
+    const truncatedText = escapedText.length > 30
+        ? escapedText.substring(0, 30) + '...'
+        : escapedText;
+
+    const message = `<context>looking at this code from ${location} <content>${truncatedText}</content></context> `;
+
+    return message;
+}
+
+export function deactivate() { }
