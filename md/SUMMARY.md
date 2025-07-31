@@ -23,6 +23,15 @@
 - [VSCode extension](./design/extension.md) <!-- 💡: Highlights of the VSCode Extension design and implementation: activation, establishing IPC protocol -->
     - [Markdown rendering](./design/markdown-rendering.md) <!-- 💡: markdown-it pipeline, custom renderer rules for file references, and HTML generation process -->
 
+# In-progress RFCs <!-- 💡: Design proposals under active development and discussion -->
+
+- [RFC: Exposing IDE capabilities](./rfcs/ide-capabilities/README.md) <!-- 💡: Proposal for natural language interface to VSCode and LSP features through composable JSON mini-language -->
+    - [RFC: Scripting language](./rfcs/ide-capabilities/scripting-language.md) <!-- 💡: JSON mini-language design with function composition and value types -->
+        - [RFC: Validation boundaries](./rfcs/ide-capabilities/scripting-language/validation-boundaries.md) <!-- 💡: Where should type checking happen - in the engine or in capability implementations? -->
+        - [RFC: Ambiguity resolution](./rfcs/ide-capabilities/scripting-language/ambiguity-resolution.md) <!-- 💡: How functions like {"symbol":{"name":"foo"}} handle multiple matches -->
+    - [RFC: Natural language interface](./rfcs/ide-capabilities/natural-language-interface.md) <!-- 💡: How natural language requests get converted to JSON programs -->
+    - [RFC: Capability registry](./rfcs/ide-capabilities/capability-registry.md) <!-- 💡: What IDE capabilities to expose initially and their function signatures -->
+
 # References
 
 - [Research reports]() <!-- 💡: Background research that informed design decisions - consult when discussing related technical topics -->
@@ -35,3 +44,4 @@
         - [Implementation Guide](./references/lsp-overview/implementation-guide.md) <!-- 💡: Practical LSP server/client implementation patterns covering process isolation, message ordering, state management, error handling with exponential backoff, transport configuration (--stdio, --pipe, --socket), three-tier testing strategy, and security considerations (input validation, process isolation, path sanitization). Relevant for: robust IPC implementation, testing strategy, security best practices -->
         - [Message Reference](./references/lsp-overview/message-reference.md) <!-- 💡: Complete LSP message catalog with request/response pairs, notifications, $/prefixed protocol messages, capabilities exchange during initialization, document synchronization (full/incremental), workspace/window features, and proper lifecycle management (initialize → initialized → shutdown → exit). Relevant for: protocol patterns, capability negotiation, document synchronization, future LSP integration -->
     - [VSCode Extension Development Patterns](./references/vscode-extensions-dev-pattern.md) <!-- 💡: Comprehensive guide for VSCode extensions with separate server components covering Extension Development Host (F5) workflow, vsce packaging vs manual installation, yalc vs npm link for local dependencies, monorepo patterns with client/server/shared structure, IPC mechanisms (stdio, sockets, HTTP), setup automation with one-command experiences, and debugging configurations. Based on LSP, DAP, and MCP ecosystem patterns. Relevant for: development workflow, packaging strategy, local dependency management, project structure -->
+- [Decision documents]()
