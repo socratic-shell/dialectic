@@ -46,9 +46,16 @@ export function parseDialecticUrl(url: string): DialecticUrl | null {
     
     // 💡: Parse query parameters if present
     if (queryString) {
-        // 💡: Handle common URL encoding issues - replace spaces with %20
-        // This accommodates AI-generated links that often contain unescaped spaces
-        const encodedQueryString = queryString.replace(/ /g, '%20');
+        // 💡: Handle common URL encoding issues in AI-generated regex patterns
+        // Replace characters that commonly appear in regex but break URL parsing
+        const encodedQueryString = queryString
+            .replace(/ /g, '%20')      // spaces
+            .replace(/\(/g, '%28')     // opening parenthesis
+            .replace(/\)/g, '%29')     // closing parenthesis
+            .replace(/\[/g, '%5B')     // opening bracket
+            .replace(/\]/g, '%5D')     // closing bracket
+            .replace(/\{/g, '%7B')     // opening brace
+            .replace(/\}/g, '%7D');    // closing brace
         const params = new URLSearchParams(encodedQueryString);
         
         // Handle regex parameter

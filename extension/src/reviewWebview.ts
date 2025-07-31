@@ -191,6 +191,7 @@ export class ReviewWebviewProvider {
             let targetColumn = 1;
 
             // 💡: Handle regex if specified
+            let bestSearchResult: import('./searchEngine').SearchResult | undefined;
             if (dialecticUrl.regex) {
                 try {
                     const searchResults = await searchInFile(fileUri, {
@@ -202,6 +203,7 @@ export class ReviewWebviewProvider {
 
                     const bestResult = getBestSearchResult(searchResults);
                     if (bestResult) {
+                        bestSearchResult = bestResult; // Store for decoration
                         targetLine = bestResult.line;
                         targetColumn = bestResult.column;
                         this.outputChannel.appendLine(`Using regex result: line ${targetLine}, column ${targetColumn}`);
@@ -239,7 +241,7 @@ export class ReviewWebviewProvider {
             });
             
             // 💡: Apply highlight decoration using the appropriate ranges
-            const decorationRanges = this.createDecorationRanges(document, dialecticUrl.line, targetLine, targetColumn);
+            const decorationRanges = this.createDecorationRanges(document, dialecticUrl.line, targetLine, targetColumn, bestSearchResult);
             if (decorationRanges.length > 0) {
                 editor.setDecorations(this.lineHighlightDecoration, decorationRanges);
                 
@@ -258,9 +260,23 @@ export class ReviewWebviewProvider {
     }
 
     /**
-     * Create decoration ranges based on line specification
+     * Create decoration ranges based on line specification or search result
      */
-    private createDecorationRanges(document: vscode.TextDocument, lineSpec?: import('./dialecticUrl').LineSpec, targetLine?: number, targetColumn?: number): vscode.Range[] {
+    private createDecorationRanges(
+        document: vscode.TextDocument, 
+        lineSpec?: import('./dialecticUrl').LineSpec, 
+        targetLine?: number, 
+        targetColumn?: number,
+        searchResult?: import('./searchEngine').SearchResult
+    ): vscode.Range[] {
+        // 💡: If we have a search result, highlight the exact match
+        if (searchResult) {
+            const line = Math.max(0, searchResult.line - 1); // Convert to 0-based
+            const startCol = searchResult.matchStart;
+            const endCol = searchResult.matchEnd;
+            return [new vscode.Range(line, startCol, line, endCol)];
+        }
+        
         if (lineSpec) {
             const ranges: vscode.Range[] = [];
             

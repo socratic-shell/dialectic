@@ -21,6 +21,7 @@ export interface SearchOptions {
 
 /**
  * Search for text within a file, optionally constrained to specific lines
+ * Supports multi-line regex patterns using VSCode's position mapping APIs
  * 
  * Parameter combinations:
  * - regex=pattern -> search entire file
@@ -29,19 +30,16 @@ export interface SearchOptions {
  */
 export async function searchInFile(fileUri: vscode.Uri, options: SearchOptions): Promise<SearchResult[]> {
     try {
-        // 💡: Read file content using VSCode workspace API for consistency
+        // 💡: Use VSCode's TextDocument API for position mapping and content access
         const document = await vscode.workspace.openTextDocument(fileUri);
-        const fileContent = document.getText();
-        const lines = fileContent.split('\n');
-        
-        const results: SearchResult[] = [];
         const { regexPattern, lineConstraint, caseSensitive = false } = options;
         
-        // 💡: Determine search bounds based on line constraint
-        const searchBounds = getSearchBounds(lines.length, lineConstraint);
+        // 💡: Get search content based on line constraints
+        const searchContent = getSearchContent(document, lineConstraint);
+        const searchStartOffset = searchContent.startOffset;
         
-        // 💡: Create regex with appropriate flags
-        const flags = caseSensitive ? 'g' : 'gi';
+        // 💡: Create regex with multiline support
+        const flags = caseSensitive ? 'gm' : 'gim';  // Added 'm' flag for multiline
         let regex: RegExp;
         try {
             regex = new RegExp(regexPattern, flags);
@@ -50,39 +48,42 @@ export async function searchInFile(fileUri: vscode.Uri, options: SearchOptions):
         }
         
         console.log(`[SearchEngine] Searching with regex: /${regexPattern}/${flags}`);
-        console.log(`[SearchEngine] Search bounds: lines ${searchBounds.startLine}-${searchBounds.endLine}`);
+        console.log(`[SearchEngine] Search content length: ${searchContent.text.length} chars, offset: ${searchStartOffset}`);
         
-        // 💡: Search within the determined bounds
-        for (let i = searchBounds.startLine - 1; i < searchBounds.endLine; i++) {
-            const line = lines[i];
+        const results: SearchResult[] = [];
+        
+        // 💡: Search the full content (supports multi-line patterns)
+        let match: RegExpExecArray | null;
+        while ((match = regex.exec(searchContent.text)) !== null) {
+            const matchStart = match.index;
+            const matchLength = match[0].length;
+            const absoluteOffset = searchStartOffset + matchStart;
             
-            // 💡: Find all matches in this line using regex
-            let match: RegExpExecArray | null;
-            regex.lastIndex = 0; // Reset regex state for each line
+            // 💡: Use VSCode's positionAt to convert offset to line/column
+            const startPosition = document.positionAt(absoluteOffset);
             
-            while ((match = regex.exec(line)) !== null) {
-                const matchIndex = match.index;
-                const matchLength = match[0].length;
+            console.log(`[SearchEngine] Found match at offset ${absoluteOffset}: "${match[0].substring(0, 50)}${match[0].length > 50 ? '...' : ''}"`);
+            console.log(`[SearchEngine] Position: line ${startPosition.line + 1}, column ${startPosition.character + 1}`);
+            
+            // 💡: Check if match falls within line constraints
+            if (isMatchWithinConstraints(startPosition, lineConstraint)) {
+                // 💡: Extract the line containing the match start for display
+                const matchLine = document.lineAt(startPosition.line);
                 
-                console.log(`[SearchEngine] Found match on line ${i + 1}: "${match[0]}" at column ${matchIndex + 1}`);
-                
-                // 💡: Check column constraints if specified
-                if (shouldIncludeMatch(i + 1, matchIndex + 1, lineConstraint)) {
-                    results.push({
-                        line: i + 1,  // Convert to 1-based
-                        column: matchIndex + 1,  // Convert to 1-based
-                        text: line,
-                        matchStart: matchIndex,
-                        matchEnd: matchIndex + matchLength
-                    });
-                } else {
-                    console.log(`[SearchEngine] Match excluded by column constraints`);
-                }
-                
-                // 💡: Prevent infinite loop on zero-width matches
-                if (matchLength === 0) {
-                    regex.lastIndex++;
-                }
+                results.push({
+                    line: startPosition.line + 1,  // Convert to 1-based
+                    column: startPosition.character + 1,  // Convert to 1-based
+                    text: matchLine.text,
+                    matchStart: startPosition.character,
+                    matchEnd: match[0].includes('\n') ? matchLine.text.length : startPosition.character + matchLength
+                });
+            } else {
+                console.log(`[SearchEngine] Match excluded by line constraints`);
+            }
+            
+            // 💡: Prevent infinite loop on zero-width matches
+            if (matchLength === 0) {
+                regex.lastIndex++;
             }
         }
         
@@ -95,53 +96,84 @@ export async function searchInFile(fileUri: vscode.Uri, options: SearchOptions):
 }
 
 /**
- * Determine search bounds based on line constraint
+ * Get search content based on line constraints, using VSCode's position mapping
  */
-function getSearchBounds(totalLines: number, lineConstraint?: LineSpec): { startLine: number; endLine: number } {
+function getSearchContent(document: vscode.TextDocument, lineConstraint?: LineSpec): { text: string; startOffset: number } {
     if (!lineConstraint) {
-        return { startLine: 1, endLine: totalLines };
+        // 💡: Search entire document
+        return { text: document.getText(), startOffset: 0 };
     }
+    
+    // 💡: Convert line constraints to VSCode Range and get text within that range
+    const startLine = Math.max(0, lineConstraint.startLine - 1); // Convert to 0-based
+    const startChar = lineConstraint.startColumn ? lineConstraint.startColumn - 1 : 0; // Convert to 0-based
+    
+    let endLine: number;
+    let endChar: number;
     
     switch (lineConstraint.type) {
         case 'single':
+            // 💡: For single line, search from that line to end of document
+            endLine = document.lineCount - 1;
+            endChar = document.lineAt(endLine).text.length;
+            break;
+            
         case 'single-with-column':
-            // 💡: For single line constraints, search from that line to end
-            // This matches the design: "search starting from line N"
-            return { 
-                startLine: lineConstraint.startLine, 
-                endLine: totalLines 
-            };
+            // 💡: For single line with column, search from that position to end
+            endLine = document.lineCount - 1;
+            endChar = document.lineAt(endLine).text.length;
+            break;
             
         case 'range':
+            // 💡: For range, search only within the specified lines
+            endLine = Math.min(document.lineCount - 1, (lineConstraint.endLine || lineConstraint.startLine) - 1);
+            endChar = document.lineAt(endLine).text.length;
+            break;
+            
         case 'range-with-columns':
-            // 💡: For range constraints, search only within the range
-            return { 
-                startLine: lineConstraint.startLine, 
-                endLine: lineConstraint.endLine || totalLines 
-            };
+            // 💡: For precise range, use exact boundaries
+            endLine = Math.min(document.lineCount - 1, (lineConstraint.endLine || lineConstraint.startLine) - 1);
+            endChar = lineConstraint.endColumn ? lineConstraint.endColumn - 1 : document.lineAt(endLine).text.length;
+            break;
     }
+    
+    const startPosition = new vscode.Position(startLine, startChar);
+    const endPosition = new vscode.Position(endLine, endChar);
+    const range = new vscode.Range(startPosition, endPosition);
+    
+    return {
+        text: document.getText(range),
+        startOffset: document.offsetAt(startPosition)
+    };
 }
 
 /**
- * Check if a match should be included based on column constraints
+ * Check if a match position falls within line constraints
  */
-function shouldIncludeMatch(line: number, column: number, lineConstraint?: LineSpec): boolean {
+function isMatchWithinConstraints(position: vscode.Position, lineConstraint?: LineSpec): boolean {
     if (!lineConstraint) {
         return true;
     }
     
-    // 💡: For single line with column, only include matches at or after that column
+    const line = position.line + 1; // Convert to 1-based
+    const column = position.character + 1; // Convert to 1-based
+    
+    // 💡: Check line bounds
+    if (line < lineConstraint.startLine) {
+        return false;
+    }
+    
+    if (lineConstraint.endLine && line > lineConstraint.endLine) {
+        return false;
+    }
+    
+    // 💡: Check column bounds for single line with column constraint
     if (lineConstraint.type === 'single-with-column' && line === lineConstraint.startLine) {
         return column >= (lineConstraint.startColumn || 1);
     }
     
-    // 💡: For range with columns, check if match falls within the precise range
+    // 💡: Check column bounds for range with columns
     if (lineConstraint.type === 'range-with-columns') {
-        if (line < lineConstraint.startLine || line > (lineConstraint.endLine || lineConstraint.startLine)) {
-            return false;
-        }
-        
-        // Check column bounds for start and end lines
         if (line === lineConstraint.startLine && column < (lineConstraint.startColumn || 1)) {
             return false;
         }
