@@ -52,19 +52,22 @@ function checkQCli() {
 }
 
 function buildServer() {
-  console.log('📦 Building MCP server...');
-  const serverDir = path.join(ROOT_DIR, 'server');
+  console.log('📦 Building Rust MCP server...');
+  const serverDir = path.join(ROOT_DIR, 'server-rs');
 
-  if (!run('npm install', { cwd: serverDir })) {
-    console.error('Failed to install server dependencies');
+  // Check if Rust is installed
+  if (!run('cargo --version', { cwd: serverDir, quiet: true })) {
+    console.error('❌ Rust/Cargo not found. Please install Rust from https://rustup.rs/');
     process.exit(1);
   }
 
-  if (!run('npm run build', { cwd: serverDir })) {
-    console.error('Failed to build server');
+  console.log('🔨 Building Rust server in release mode...');
+  if (!run('cargo build --release', { cwd: serverDir })) {
+    console.error('Failed to build Rust server');
     process.exit(1);
   }
 
+  console.log('✅ Rust MCP server built successfully');
   return serverDir;
 }
 

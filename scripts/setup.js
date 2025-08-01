@@ -14,15 +14,16 @@ const {
 } = require('./setup-common');
 
 function main() {
-  console.log('🚀 Setting up Dialectic for development...\n');
+  console.log('🚀 Setting up Dialectic for production...\n');
 
-  // Step 1: Build server and install globally (self-contained)
+  // Step 1: Build Rust server
   const serverDir = buildServer();
 
-  console.log('\n📥 Installing MCP server globally...');
-  if (!run('npm install -g .', { cwd: serverDir })) {
-    console.error('Failed to install MCP server globally');
-    console.error('You may need to use sudo or configure npm permissions');
+  console.log('\n📥 Installing Rust MCP server globally...');
+  // For Rust, we use cargo install to build and install globally
+  if (!run('cargo install --path .', { cwd: serverDir })) {
+    console.error('Failed to install Rust MCP server globally');
+    console.error('Make sure Rust/Cargo is properly installed and configured');
     process.exit(1);
   }
 
@@ -36,6 +37,7 @@ function main() {
   // Success message
   console.log('\n✅ Setup complete!\n');
 
+  console.log('🦀 Rust MCP server installed globally as: dialectic-mcp-server');
   console.log('📋 Next steps:');
   console.log('1. Restart VSCode to activate the extension');
 
