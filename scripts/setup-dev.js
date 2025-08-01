@@ -53,7 +53,7 @@ function main() {
   } else {
     console.log('\n🤖 Configure your AI assistant:');
     console.log('   For Claude CLI: claude mcp add dialectic dialectic-mcp-server');
-    console.log('   For Q CLI: q mcp add --scope global --name dialectic --command dialectic-mcp-server');
+    console.log('   For Q CLI: q mcp add --global --name dialectic --command dialectic-mcp-server');
   }
 
   console.log('\n⚠️  Note: The extension still needs to be reinstalled, but you can use window reload instead of full restart');

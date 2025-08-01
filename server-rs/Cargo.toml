@@ -1,0 +1,46 @@
+[package]
+name = "dialectic-mcp-server"
+version = "0.1.0"
+edition = "2021"
+description = "Rust implementation of Dialectic MCP server for code review integration"
+authors = ["Niko Matsakis"]
+license = "MIT"
+
+[lib]
+name = "dialectic_mcp_server"
+path = "src/lib.rs"
+
+[[bin]]
+name = "dialectic-mcp-server"
+path = "src/main.rs"
+
+[dependencies]
+# Official MCP SDK
+rmcp = { version = "0.3.2", features = ["server", "transport-io", "schemars"] }
+
+# JSON serialization
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
+
+# JSON Schema support for MCP tools
+schemars = { version = "1.0", features = ["derive"] }
+
+# Async runtime
+tokio = { version = "1.0", features = ["full"] }
+
+# UUID generation for IPC message tracking
+uuid = { version = "1.0", features = ["v4"] }
+
+# Error handling
+anyhow = "1.0"
+thiserror = "1.0"
+
+# Logging
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+
+[dev-dependencies]
+tokio-test = "0.4"
+tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+# Add client feature for testing
+rmcp = { version = "0.3.2", features = ["server", "transport-io", "schemars", "client"] }

@@ -18,7 +18,7 @@ function main() {
 
   // Step 1: Build server and install globally (self-contained)
   const serverDir = buildServer();
-  
+
   console.log('\n📥 Installing MCP server globally...');
   if (!run('npm install -g .', { cwd: serverDir })) {
     console.error('Failed to install MCP server globally');
@@ -48,7 +48,7 @@ function main() {
   } else {
     console.log('2. Configure your AI assistant:');
     console.log('   For Claude CLI: claude mcp add dialectic dialectic-mcp-server');
-    console.log('   For Q CLI: q mcp add --scope global --name dialectic --command dialectic-mcp-server');
+    console.log('   For Q CLI: q mcp add --name dialectic --command dialectic-mcp-server');
   }
 
   console.log('\n3. Test by asking your AI assistant to present a code review');
