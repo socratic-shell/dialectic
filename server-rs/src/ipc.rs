@@ -7,9 +7,9 @@ use serde_json;
 use std::collections::HashMap;
 use std::sync::Arc;
 use thiserror::Error;
-use tokio::io::AsyncWriteExt;
+use tokio::io::{AsyncWriteExt, AsyncBufReadExt, BufReader};
 use tokio::sync::{oneshot, Mutex};
-use tracing::{info, error, debug};
+use tracing::{info, error, debug, warn};
 use uuid::Uuid;
 
 use crate::types::{
@@ -67,20 +67,23 @@ pub struct IPCCommunicator {
 }
 
 struct IPCCommunicatorInner {
-    /// Unix domain socket connection to VSCode extension (macOS/Linux)
-    /// Set by connect() when DIALECTIC_IPC_PATH points to a socket file
+    /// Connection to VSCode extension, shared between reader task and write operations
+    /// Uses Arc<Mutex<>> to allow the background reader task and send_message calls
+    /// to safely access the same underlying socket/pipe from different async contexts
     #[cfg(unix)]
-    socket: Option<UnixStream>,
+    connection: Option<Arc<Mutex<UnixStream>>>,
     
-    /// Named pipe connection to VSCode extension (Windows)
-    /// Set by connect() when DIALECTIC_IPC_PATH points to a pipe name
     #[cfg(windows)]
-    pipe: Option<tokio::net::windows::named_pipe::NamedPipeClient>,
+    connection: Option<Arc<Mutex<tokio::net::windows::named_pipe::NamedPipeClient>>>,
     
     /// Tracks outgoing requests awaiting responses from VSCode extension
     /// Key: unique message ID (UUID), Value: channel to send response back to caller
     /// Enables concurrent request/response handling with proper correlation
     pending_requests: HashMap<String, oneshot::Sender<IPCResponse>>,
+    
+    /// Flag to track if the response reader task is running
+    /// Prevents multiple reader tasks from being spawned
+    reader_started: bool,
 }
 
 impl IPCCommunicator {
@@ -88,14 +91,33 @@ impl IPCCommunicator {
         Self {
             inner: Arc::new(Mutex::new(IPCCommunicatorInner {
                 #[cfg(unix)]
-                socket: None,
+                connection: None,
                 
                 #[cfg(windows)]
-                pipe: None,
+                connection: None,
                 
                 pending_requests: HashMap::new(),
+                reader_started: false,
             })),
             test_mode: false,
+        }
+    }
+
+    /// Creates a new IPCCommunicator in test mode
+    /// In test mode, all IPC operations are mocked and only local logging occurs
+    pub fn new_test() -> Self {
+        Self {
+            inner: Arc::new(Mutex::new(IPCCommunicatorInner {
+                #[cfg(unix)]
+                connection: None,
+                
+                #[cfg(windows)]
+                connection: None,
+                
+                pending_requests: HashMap::new(),
+                reader_started: false,
+            })),
+            test_mode: true,
         }
     }
 
@@ -126,8 +148,21 @@ impl IPCCommunicator {
                 source: e 
             })?;
         
+        let connection = Arc::new(Mutex::new(stream));
+        
         let mut inner = self.inner.lock().await;
-        inner.socket = Some(stream);
+        inner.connection = Some(Arc::clone(&connection));
+        
+        // Start the response reader task if not already started
+        if !inner.reader_started {
+            inner.reader_started = true;
+            let inner_clone = Arc::clone(&self.inner);
+            let connection_clone = Arc::clone(&connection);
+            tokio::spawn(async move {
+                Self::response_reader_task(connection_clone, inner_clone).await;
+            });
+        }
+        
         Ok(())
     }
 
@@ -140,8 +175,21 @@ impl IPCCommunicator {
                 source: e 
             })?;
         
+        let connection = Arc::new(Mutex::new(client));
+        
         let mut inner = self.inner.lock().await;
-        inner.pipe = Some(client);
+        inner.connection = Some(Arc::clone(&connection));
+        
+        // Start the response reader task if not already started
+        if !inner.reader_started {
+            inner.reader_started = true;
+            let inner_clone = Arc::clone(&self.inner);
+            let connection_clone = Arc::clone(&connection);
+            tokio::spawn(async move {
+                Self::response_reader_task(connection_clone, inner_clone).await;
+            });
+        }
+        
         Ok(())
     }
 
@@ -162,7 +210,7 @@ impl IPCCommunicator {
 
         debug!("Sending present_review message: {:?}", message);
 
-        let response = self.send_message(message).await?;
+        let response = self.send_message_with_reply(message).await?;
         
         // Convert response to PresentReviewResult
         Ok(PresentReviewResult {
@@ -202,7 +250,7 @@ impl IPCCommunicator {
 
         debug!("Sending get_selection message: {:?}", message);
 
-        let response = self.send_message(message).await?;
+        let response = self.send_message_with_reply(message).await?;
         
         if let Some(data) = response.data {
             let selection: GetSelectionResult = serde_json::from_value(data)?;
@@ -252,13 +300,18 @@ impl IPCCommunicator {
 
         // For log messages, we don't need to wait for response
         // Just send and continue (fire-and-forget)
-        if let Err(e) = self.send_message_no_wait(ipc_message).await {
+        if let Err(e) = self.send_message_without_reply(ipc_message).await {
             // If IPC fails, we still have local logging above
             debug!("Failed to send log via IPC: {}", e);
         }
     }
 
-    async fn send_message(&self, message: IPCMessage) -> Result<IPCResponse> {
+    /// Sends an IPC message and waits for a response from VSCode extension
+    /// 
+    /// Sets up response correlation using the message UUID and waits up to 5 seconds
+    /// for the background reader task to deliver the matching response.
+    /// Uses the underlying `write_message` primitive to send the data.
+    async fn send_message_with_reply(&self, message: IPCMessage) -> Result<IPCResponse> {
         let (tx, rx) = oneshot::channel();
         
         // Store the response channel
@@ -282,34 +335,175 @@ impl IPCCommunicator {
         Ok(response)
     }
 
-    async fn send_message_no_wait(&self, message: IPCMessage) -> Result<()> {
+    /// Sends an IPC message without waiting for a response (fire-and-forget)
+    /// 
+    /// Used for operations like logging where we don't need confirmation from VSCode.
+    /// Uses the underlying `write_message` primitive to send the data.
+    async fn send_message_without_reply(&self, message: IPCMessage) -> Result<()> {
         let message_data = serde_json::to_string(&message)?;
         self.write_message(&message_data).await
     }
 
+    /// Low-level primitive for writing raw JSON data to the IPC connection (Unix)
+    /// 
+    /// This is the underlying method used by both `send_message_with_reply` and 
+    /// `send_message_without_reply`. It handles the platform-specific socket writing
+    /// and adds newline delimiters for message boundaries.
     #[cfg(unix)]
     async fn write_message(&self, data: &str) -> Result<()> {
-        let mut inner = self.inner.lock().await;
-        if let Some(ref mut socket) = inner.socket {
-            socket.write_all(data.as_bytes()).await?;
+        let inner = self.inner.lock().await;
+        if let Some(ref connection) = inner.connection {
+            let mut stream = connection.lock().await;
+            stream.write_all(data.as_bytes()).await?;
+            stream.write_all(b"\n").await?; // Add newline delimiter
             Ok(())
         } else {
             Err(IPCError::NotConnected)
         }
     }
 
+    /// Low-level primitive for writing raw JSON data to the IPC connection (Windows)
+    /// 
+    /// This is the underlying method used by both `send_message_with_reply` and 
+    /// `send_message_without_reply`. It handles the platform-specific pipe writing
+    /// and adds newline delimiters for message boundaries.
     #[cfg(windows)]
     async fn write_message(&self, data: &str) -> Result<()> {
-        let mut inner = self.inner.lock().await;
-        if let Some(ref mut pipe) = inner.pipe {
+        let inner = self.inner.lock().await;
+        if let Some(ref connection) = inner.connection {
+            let mut pipe = connection.lock().await;
             pipe.write_all(data.as_bytes()).await?;
+            pipe.write_all(b"\n").await?; // Add newline delimiter
             Ok(())
         } else {
             Err(IPCError::NotConnected)
         }
     }
 
-    // TODO: Implement message reading and response handling
-    // This will require spawning a background task to read from the socket/pipe
-    // and match responses to pending requests by ID
+    /// Background task that reads responses from the IPC connection
+    /// Runs continuously to handle incoming messages from VSCode extension
+    #[cfg(unix)]
+    async fn response_reader_task(
+        connection: Arc<Mutex<UnixStream>>,
+        inner: Arc<Mutex<IPCCommunicatorInner>>,
+    ) {
+        info!("Starting IPC response reader task (Unix)");
+        
+        loop {
+            let mut buffer = Vec::new();
+            
+            // Read a line from the connection
+            let read_result = {
+                let mut stream = connection.lock().await;
+                let mut reader = BufReader::new(&mut *stream);
+                reader.read_until(b'\n', &mut buffer).await
+            };
+            
+            match read_result {
+                Ok(0) => {
+                    warn!("IPC connection closed by VSCode extension");
+                    break;
+                }
+                Ok(_) => {
+                    // Remove the newline delimiter
+                    if buffer.ends_with(&[b'\n']) {
+                        buffer.pop();
+                    }
+                    
+                    let message_str = match String::from_utf8(buffer) {
+                        Ok(s) => s,
+                        Err(e) => {
+                            error!("Received invalid UTF-8 from VSCode extension: {}", e);
+                            continue;
+                        }
+                    };
+                    
+                    Self::handle_response_message(&inner, &message_str).await;
+                }
+                Err(e) => {
+                    error!("Error reading from IPC connection: {}", e);
+                    break;
+                }
+            }
+        }
+        
+        info!("IPC response reader task terminated");
+    }
+
+    /// Background task that reads responses from the IPC connection (Windows)
+    #[cfg(windows)]
+    async fn response_reader_task(
+        connection: Arc<Mutex<tokio::net::windows::named_pipe::NamedPipeClient>>,
+        inner: Arc<Mutex<IPCCommunicatorInner>>,
+    ) {
+        info!("Starting IPC response reader task (Windows)");
+        
+        loop {
+            let mut buffer = Vec::new();
+            
+            // Read a line from the connection
+            let read_result = {
+                let mut pipe = connection.lock().await;
+                let mut reader = BufReader::new(&mut *pipe);
+                reader.read_until(b'\n', &mut buffer).await
+            };
+            
+            match read_result {
+                Ok(0) => {
+                    warn!("IPC connection closed by VSCode extension");
+                    break;
+                }
+                Ok(_) => {
+                    // Remove the newline delimiter
+                    if buffer.ends_with(&[b'\n']) {
+                        buffer.pop();
+                    }
+                    
+                    let message_str = match String::from_utf8(buffer) {
+                        Ok(s) => s,
+                        Err(e) => {
+                            error!("Received invalid UTF-8 from VSCode extension: {}", e);
+                            continue;
+                        }
+                    };
+                    
+                    Self::handle_response_message(&inner, &message_str).await;
+                }
+                Err(e) => {
+                    error!("Error reading from IPC connection: {}", e);
+                    break;
+                }
+            }
+        }
+        
+        info!("IPC response reader task terminated");
+    }
+
+    /// Processes incoming response messages from VSCode extension
+    /// Matches responses to pending requests by ID and sends results back to callers
+    async fn handle_response_message(
+        inner: &Arc<Mutex<IPCCommunicatorInner>>,
+        message_str: &str,
+    ) {
+        debug!("Received IPC response: {}", message_str);
+        
+        // Parse the response message
+        let response: IPCResponse = match serde_json::from_str(message_str) {
+            Ok(r) => r,
+            Err(e) => {
+                error!("Failed to parse IPC response: {} - Message: {}", e, message_str);
+                return;
+            }
+        };
+        
+        // Find the pending request and send the response
+        let mut inner_guard = inner.lock().await;
+        if let Some(sender) = inner_guard.pending_requests.remove(&response.id) {
+            if let Err(_) = sender.send(response) {
+                warn!("Failed to send response to caller - receiver dropped");
+            }
+        } else {
+            warn!("Received response for unknown request ID: {}", response.id);
+        }
+    }
 }

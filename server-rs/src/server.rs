@@ -43,6 +43,18 @@ impl DialecticServer {
         })
     }
 
+    /// Creates a new DialecticServer in test mode
+    /// In test mode, IPC operations are mocked and don't require a VSCode connection
+    pub fn new_test() -> Self {
+        let ipc = IPCCommunicator::new_test();
+        info!("DialecticServer initialized in test mode");
+        
+        Self {
+            ipc,
+            tool_router: Self::tool_router(),
+        }
+    }
+
     /// Present a code review in the VSCode review panel
     /// 
     /// This tool allows AI assistants to display structured markdown reviews
