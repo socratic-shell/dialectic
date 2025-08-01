@@ -74,21 +74,33 @@ function createIPCServer(context: vscode.ExtensionContext, reviewProvider: Revie
         outputChannel.appendLine('MCP server connected via IPC');
         console.log('MCP server connected via IPC');
 
+        let buffer = '';
+
         socket.on('data', (data) => {
-            try {
-                const message: IPCMessage = JSON.parse(data.toString());
-                outputChannel.appendLine(`Received IPC message: ${message.type} (${message.id})`);
-                handleIPCMessage(message, socket, reviewProvider, outputChannel);
-            } catch (error) {
-                const errorMsg = `Failed to parse IPC message: ${error}`;
-                outputChannel.appendLine(errorMsg);
-                console.error(errorMsg);
-                const response: IPCResponse = {
-                    id: 'unknown',
-                    success: false,
-                    error: 'Invalid JSON message'
-                };
-                socket.write(JSON.stringify(response) + '\n');
+            buffer += data.toString();
+            
+            // Process all complete messages (ending with \n)
+            let lines = buffer.split('\n');
+            buffer = lines.pop() || ''; // Keep incomplete line in buffer
+            
+            for (const line of lines) {
+                if (line.trim()) { // Skip empty lines
+                    try {
+                        const message: IPCMessage = JSON.parse(line);
+                        outputChannel.appendLine(`Received IPC message: ${message.type} (${message.id})`);
+                        handleIPCMessage(message, socket, reviewProvider, outputChannel);
+                    } catch (error) {
+                        const errorMsg = `Failed to parse IPC message: ${error}`;
+                        outputChannel.appendLine(errorMsg);
+                        console.error(errorMsg);
+                        const response: IPCResponse = {
+                            id: 'unknown',
+                            success: false,
+                            error: 'Invalid JSON message'
+                        };
+                        socket.write(JSON.stringify(response) + '\n');
+                    }
+                }
             }
         });
 
