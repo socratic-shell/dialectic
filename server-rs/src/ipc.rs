@@ -9,7 +9,7 @@ use std::sync::Arc;
 use thiserror::Error;
 use tokio::io::{AsyncWriteExt, AsyncBufReadExt, BufReader};
 use tokio::sync::{oneshot, Mutex};
-use tracing::{info, error, debug, warn};
+use tracing::{info, error, debug, warn, trace};
 use uuid::Uuid;
 
 use crate::types::{
@@ -67,11 +67,9 @@ pub struct IPCCommunicator {
 }
 
 struct IPCCommunicatorInner {
-    /// Connection to VSCode extension, shared between reader task and write operations
-    /// Uses Arc<Mutex<>> to allow the background reader task and send_message calls
-    /// to safely access the same underlying socket/pipe from different async contexts
+    /// Write half of the connection to VSCode extension
     #[cfg(unix)]
-    connection: Option<Arc<Mutex<UnixStream>>>,
+    write_half: Option<Arc<Mutex<tokio::net::unix::OwnedWriteHalf>>>,
     
     #[cfg(windows)]
     connection: Option<Arc<Mutex<tokio::net::windows::named_pipe::NamedPipeClient>>>,
@@ -91,7 +89,7 @@ impl IPCCommunicator {
         Self {
             inner: Arc::new(Mutex::new(IPCCommunicatorInner {
                 #[cfg(unix)]
-                connection: None,
+                write_half: None,
                 
                 #[cfg(windows)]
                 connection: None,
@@ -109,7 +107,7 @@ impl IPCCommunicator {
         Self {
             inner: Arc::new(Mutex::new(IPCCommunicatorInner {
                 #[cfg(unix)]
-                connection: None,
+                write_half: None,
                 
                 #[cfg(windows)]
                 connection: None,
@@ -148,18 +146,19 @@ impl IPCCommunicator {
                 source: e 
             })?;
         
-        let connection = Arc::new(Mutex::new(stream));
+        // Split the stream into read and write halves to avoid deadlock
+        let (read_half, write_half) = stream.into_split();
+        let write_half = Arc::new(Mutex::new(write_half));
         
         let mut inner = self.inner.lock().await;
-        inner.connection = Some(Arc::clone(&connection));
+        inner.write_half = Some(Arc::clone(&write_half));
         
         // Start the response reader task if not already started
         if !inner.reader_started {
             inner.reader_started = true;
             let inner_clone = Arc::clone(&self.inner);
-            let connection_clone = Arc::clone(&connection);
             tokio::spawn(async move {
-                Self::response_reader_task(connection_clone, inner_clone).await;
+                Self::response_reader_task(read_half, inner_clone).await;
             });
         }
         
@@ -209,8 +208,11 @@ impl IPCCommunicator {
         };
 
         debug!("Sending present_review message: {:?}", message);
+        trace!("About to call send_message_with_reply for present_review");
 
         let response = self.send_message_with_reply(message).await?;
+        
+        trace!("Received response from send_message_with_reply: {:?}", response);
         
         // Convert response to PresentReviewResult
         Ok(PresentReviewResult {
@@ -312,24 +314,37 @@ impl IPCCommunicator {
     /// for the background reader task to deliver the matching response.
     /// Uses the underlying `write_message` primitive to send the data.
     async fn send_message_with_reply(&self, message: IPCMessage) -> Result<IPCResponse> {
+        trace!("send_message_with_reply called with message ID: {}", message.id);
+        
         let (tx, rx) = oneshot::channel();
         
         // Store the response channel
         {
             let mut inner = self.inner.lock().await;
+            trace!("Storing response channel for message ID: {}", message.id);
             inner.pending_requests.insert(message.id.clone(), tx);
+            trace!("Pending requests count: {}", inner.pending_requests.len());
         }
         
         // Send the message
         let message_data = serde_json::to_string(&message)?;
+        trace!("Serialized message data: {}", message_data);
+        trace!("About to call write_message");
+        
         self.write_message(&message_data).await?;
+        trace!("write_message completed successfully");
+        
+        trace!("Waiting for response with 5 second timeout...");
         
         // Wait for response with timeout
         let response = tokio::time::timeout(
             std::time::Duration::from_secs(5),
             rx
         ).await
-        .map_err(|_| IPCError::Timeout)?
+        .map_err(|_| {
+            error!("Timeout waiting for response to message ID: {}", message.id);
+            IPCError::Timeout
+        })?
         .map_err(|_| IPCError::ChannelClosed)?;
         
         Ok(response)
@@ -351,13 +366,23 @@ impl IPCCommunicator {
     /// and adds newline delimiters for message boundaries.
     #[cfg(unix)]
     async fn write_message(&self, data: &str) -> Result<()> {
+        trace!("write_message called with data length: {}", data.len());
+        
         let inner = self.inner.lock().await;
-        if let Some(ref connection) = inner.connection {
-            let mut stream = connection.lock().await;
-            stream.write_all(data.as_bytes()).await?;
-            stream.write_all(b"\n").await?; // Add newline delimiter
+        if let Some(ref write_half) = inner.write_half {
+            trace!("Got write half, writing to Unix socket");
+            let mut writer = write_half.lock().await;
+            
+            trace!("Writing message data to socket");
+            writer.write_all(data.as_bytes()).await?;
+            
+            trace!("Writing newline delimiter");
+            writer.write_all(b"\n").await?; // Add newline delimiter
+            
+            trace!("write_message completed successfully");
             Ok(())
         } else {
+            error!("write_message called but no connection available");
             Err(IPCError::NotConnected)
         }
     }
@@ -384,20 +409,20 @@ impl IPCCommunicator {
     /// Runs continuously to handle incoming messages from VSCode extension
     #[cfg(unix)]
     async fn response_reader_task(
-        connection: Arc<Mutex<UnixStream>>,
+        mut read_half: tokio::net::unix::OwnedReadHalf,
         inner: Arc<Mutex<IPCCommunicatorInner>>,
     ) {
         info!("Starting IPC response reader task (Unix)");
         
+        let mut reader = BufReader::new(&mut read_half);
+        
         loop {
             let mut buffer = Vec::new();
             
+            trace!("response_reader_task: About to read from connection");
+            
             // Read a line from the connection
-            let read_result = {
-                let mut stream = connection.lock().await;
-                let mut reader = BufReader::new(&mut *stream);
-                reader.read_until(b'\n', &mut buffer).await
-            };
+            let read_result = reader.read_until(b'\n', &mut buffer).await;
             
             match read_result {
                 Ok(0) => {

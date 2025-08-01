@@ -88,7 +88,7 @@ function createIPCServer(context: vscode.ExtensionContext, reviewProvider: Revie
                     success: false,
                     error: 'Invalid JSON message'
                 };
-                socket.write(JSON.stringify(response));
+                socket.write(JSON.stringify(response) + '\n');
             }
         });
 
@@ -226,7 +226,7 @@ function handleIPCMessage(message: IPCMessage, socket: net.Socket, reviewProvide
         };
     }
 
-    socket.write(JSON.stringify(response));
+    socket.write(JSON.stringify(response) + '\n');
 }
 
 // 💡: Set up universal selection detection for interactive code review
