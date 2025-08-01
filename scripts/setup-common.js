@@ -128,12 +128,12 @@ function configureAIAssistants() {
   const hasQCli = checkQCli();
   if (hasQCli) {
     console.log('\n⚙️  Configuring Q CLI...');
-    if (run('q mcp add --name dialectic --command dialectic-mcp-server')) {
+    if (run('q mcp add --name dialectic --command dialectic-mcp-server --force')) {
       console.log('✅ Q CLI configured successfully!');
     } else {
       console.error('❌ Failed to configure Q CLI automatically');
       console.log('You can manually add the MCP server with:');
-      console.log('  q mcp add --name dialectic --command dialectic-mcp-server');
+      console.log('  q mcp add --name dialectic --command dialectic-mcp-server --force');
     }
   }
 

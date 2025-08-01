@@ -50,7 +50,7 @@ function main() {
   } else {
     console.log('2. Configure your AI assistant:');
     console.log('   For Claude CLI: claude mcp add dialectic dialectic-mcp-server');
-    console.log('   For Q CLI: q mcp add --name dialectic --command dialectic-mcp-server');
+    console.log('   For Q CLI: q mcp add --name dialectic --command dialectic-mcp-server --force');
   }
 
   console.log('\n3. Test by asking your AI assistant to present a code review');
