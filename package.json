@@ -4,12 +4,10 @@
   "description": "Dialectic code review system - VSCode extension and MCP server",
   "private": true,
   "scripts": {
-    "setup": "node scripts/setup.js",
-    "setup-dev": "node scripts/setup-dev.js",
     "build": "npm run build:server && npm run build:extension",
-    "build:server": "cd server-rs && cargo build --release",
+    "build:server": "cd server && cargo build --release",
     "build:extension": "cd extension && npm run compile",
-    "clean": "cd server-rs && cargo clean && cd ../extension && rm -rf out"
+    "clean": "cd server && cargo clean && cd ../extension && rm -rf out"
   },
   "devDependencies": {
     "vsce": "^2.15.0"

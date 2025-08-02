@@ -19,10 +19,31 @@ curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh
 # Clone and setup
 git clone https://github.com/socratic-shell/dialectic.git
 cd dialectic
-npm run setup
+cargo setup
 ```
 
 Then ask your AI assistant: *"Present a review of the changes you just made"*
+
+## Setup Options
+
+```bash
+# Production setup (installs to PATH)
+cargo setup
+
+# Development setup (builds in target/)
+cargo setup --dev
+
+# Setup for specific AI assistant
+cargo setup --tool claude
+cargo setup --tool q
+cargo setup --tool both
+
+# Skip extension build (server only)
+cargo setup --skip-extension
+
+# Skip MCP registration (build only)
+cargo setup --skip-mcp
+```
 
 ## Documentation
 

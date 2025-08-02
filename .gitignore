@@ -9,3 +9,7 @@ node_modules
 
 # Rust build artifacts
 target/
+Cargo.lock
+
+# VSCode extension packages
+extension/*.vsix

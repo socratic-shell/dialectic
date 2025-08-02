@@ -16,31 +16,30 @@ path = "src/main.rs"
 
 [dependencies]
 # Official MCP SDK
-rmcp = { version = "0.3.2", features = ["server", "transport-io", "schemars"] }
+rmcp = { workspace = true }
 
 # JSON serialization
-serde = { version = "1.0", features = ["derive"] }
-serde_json = "1.0"
+serde = { workspace = true }
+serde_json = { workspace = true }
 
 # JSON Schema support for MCP tools
-schemars = { version = "1.0", features = ["derive"] }
+schemars = { workspace = true }
 
 # Async runtime
-tokio = { version = "1.0", features = ["full"] }
+tokio = { workspace = true }
 
 # UUID generation for IPC message tracking
-uuid = { version = "1.0", features = ["v4"] }
+uuid = { workspace = true }
 
 # Error handling
-anyhow = "1.0"
-thiserror = "1.0"
+anyhow = { workspace = true }
+thiserror = { workspace = true }
 
 # Logging
-tracing = "0.1"
-tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+tracing = { workspace = true }
+tracing-subscriber = { workspace = true }
 
 [dev-dependencies]
-tokio-test = "0.4"
-tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+tokio-test = { workspace = true }
 # Add client feature for testing
 rmcp = { version = "0.3.2", features = ["server", "transport-io", "schemars", "client"] }

@@ -12,6 +12,25 @@ and we use AI insight comments
 
 @.socratic-shell/ai-insights.md
 
+## Setup
+
+This project uses a Rust workspace with a custom setup tool. To set up the project:
+
+```bash
+# Production setup (installs to PATH)
+cargo setup
+
+# Development setup (builds in target/)
+cargo setup --dev
+
+# Setup for specific AI assistant
+cargo setup --tool claude
+cargo setup --tool q
+cargo setup --tool both
+```
+
+The setup tool builds both the Rust MCP server and VSCode extension, then configures them for use with AI assistants.
+
 ## Tool Management
 
 This project uses [proto](https://moonrepo.dev/proto) for managing development tools. Individual components include idiomatic tool version files (e.g., `.nvmrc` for Node.js projects) which proto can read automatically. Run `proto install` in any component directory to install the required tools.

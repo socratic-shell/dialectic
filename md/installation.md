@@ -6,6 +6,7 @@
 
 - **VSCode**: Version 1.74.0 or later
 - **Rust**: Latest stable version (for MCP server)
+- **Node.js**: Version 18+ (for VSCode extension)
 - **AI Assistant**: Compatible with Model Context Protocol (MCP)
 
 ## VSCode Extension
@@ -42,14 +43,35 @@ curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh
 # Clone and install Dialectic
 git clone https://github.com/socratic-shell/dialectic.git
 cd dialectic
-npm run setup
+cargo setup
 ```
 
-The setup script will:
+The setup tool will:
 - Build the Rust MCP server in release mode
 - Install the binary globally as `dialectic-mcp-server`
 - Build and install the VSCode extension
 - Configure your AI assistant (if Claude CLI or Q CLI is detected)
+
+### Setup Options
+
+```bash
+# Production setup (installs to PATH)
+cargo setup
+
+# Development setup (builds in target/)
+cargo setup --dev
+
+# Setup for specific AI assistant
+cargo setup --tool claude
+cargo setup --tool q
+cargo setup --tool both
+
+# Skip extension build (server only)
+cargo setup --skip-extension
+
+# Skip MCP registration (build only)
+cargo setup --skip-mcp
+```
 
 ### Manual Installation
 
@@ -57,7 +79,7 @@ If you prefer to install components separately:
 
 ```bash
 # Build and install the Rust MCP server
-cd server-rs
+cd server
 cargo build --release
 cargo install --path .
 
@@ -130,8 +152,8 @@ Refer to your AI assistant's documentation for adding MCP servers. Use:
 ### MCP Server Not Found
 
 - Verify installation: `which dialectic-mcp-server`
-- Check Node.js version: `node --version` (must be 18+)
-- Try reinstalling: `npm uninstall -g dialectic-mcp-server && npm install -g dialectic-mcp-server`
+- Check Rust installation: `cargo --version`
+- Try reinstalling: `cargo setup --skip-extension`
 
 ### IPC Connection Issues
 
@@ -179,7 +201,7 @@ dialectic-mcp-server --log-level debug --timeout 10000
 ### Remove MCP Server
 
 ```bash
-npm uninstall -g dialectic-mcp-server
+cargo uninstall dialectic-mcp-server
 ```
 
 ### Clean Configuration

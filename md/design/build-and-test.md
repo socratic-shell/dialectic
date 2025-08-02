@@ -20,11 +20,15 @@ dialectic/
 │   ├── src/           # TypeScript source
 │   ├── package.json   # Extension manifest
 │   └── tsconfig.json  # TypeScript config
-├── server-rs/         # Rust MCP server
+├── server/            # Rust MCP server
 │   ├── src/           # Rust source code
 │   ├── Cargo.toml     # Rust package manifest
 │   └── tests/         # Integration tests
+├── setup/             # Setup tool
+│   ├── src/           # Rust source code
+│   └── Cargo.toml     # Setup tool manifest
 ├── md/                # Documentation (mdbook)
+├── Cargo.toml         # Workspace manifest
 └── book.toml          # mdbook configuration
 ```
 
@@ -44,19 +48,18 @@ dialectic/
 
 3. **Quick setup** (recommended):
    ```bash
-   npm run setup-dev
+   cargo setup --dev
    ```
    
    This will:
    - Build the Rust MCP server in release mode
-   - Install the server binary globally
    - Build and install the VSCode extension
    - Configure AI assistants if available
 
 4. **Manual setup** (for detailed control):
    ```bash
    # Build Rust MCP server
-   cd server-rs
+   cd server
    cargo build --release
    cargo install --path .
    
@@ -83,7 +86,7 @@ dialectic/
 ### Rust MCP Server
 
 ```bash
-cd server-rs
+cd server
 cargo build           # Debug build
 cargo build --release # Optimized release build
 cargo install --path . # Install globally
@@ -117,6 +120,15 @@ npm run build:server  # Build Rust server only
 npm run build:extension # Build extension only
 npm run clean         # Clean all build artifacts
 ```
+
+### Setup Tool
+
+```bash
+cargo setup           # Production setup
+cargo setup --dev     # Development setup
+cargo setup --help    # See all options
+```
+
 ### Documentation
 
 ```bash
@@ -133,7 +145,7 @@ mdbook serve          # Serve with live reload
 
 **Rust MCP Server tests**:
 ```bash
-cd server-rs
+cd server
 cargo test            # Run all tests
 cargo test -- --nocapture # Run with output
 cargo test --release  # Test optimized build
@@ -152,7 +164,7 @@ npm run test:coverage # With coverage report
 **End-to-end testing**:
 ```bash
 # Test the complete MCP server workflow
-cd server-rs
+cd server
 cargo test --test integration
 
 # Test VSCode extension integration
@@ -179,12 +191,6 @@ claude mcp add dialectic dialectic-mcp-server
 # Configure Q CLI  
 q mcp add --name dialectic --command dialectic-mcp-server --force
 ```
-```bash
-cd server
-npm test              # Run all tests  
-npm run test:watch    # Watch mode
-npm run test:coverage # With coverage report
-```
 
 ### Integration Tests
 
@@ -196,7 +202,7 @@ npm run watch
 
 # Terminal 2: Start MCP server in debug mode  
 cd server
-npm run dev
+cargo run
 
 # Terminal 3: Test with AI assistant
 q chat --trust-all-tools
@@ -259,14 +265,15 @@ q chat --trust-all-tools
 1. **Enable debug logging**:
    ```bash
    cd server
-   npm run dev -- --log-level debug
+   RUST_LOG=debug cargo run
    ```
 
-2. **Use Node.js debugger**:
+2. **Use Rust debugger**:
    ```bash
-   node --inspect dist/index.js
+   cd server
+   cargo build
+   rust-gdb target/debug/dialectic-mcp-server
    ```
-   Then connect with Chrome DevTools or VSCode debugger
 
 3. **Test IPC communication**:
    ```bash
@@ -311,7 +318,7 @@ Monitor memory usage during development:
 code --inspect-extensions=9229
 
 # Server memory usage  
-node --inspect --max-old-space-size=4096 dist/index.js
+RUST_LOG=debug cargo run
 ```
 
 ## Continuous Integration
@@ -333,8 +340,8 @@ husky install
 ```
 
 **Hooks include**:
-- TypeScript compilation check
-- ESLint code style validation
+- Rust compilation check
+- Cargo clippy linting
 - Unit test execution
 - Documentation link validation
 
@@ -348,18 +355,18 @@ husky install
    cd extension && npm version patch
    
    # Server  
-   cd server && npm version patch
+   cd server && cargo set-version patch
    ```
 
 2. **Build release packages**:
    ```bash
+   cargo setup  # Build and install everything
    cd extension && npm run package
-   cd server && npm run package
    ```
 
 3. **Test release packages**:
    - Install extension from .vsix file
-   - Install server from .tgz file
+   - Test server binary from PATH
    - Verify end-to-end functionality
 
 4. **Create GitHub release**:
@@ -370,7 +377,7 @@ husky install
 ### Distribution
 
 - **VSCode Extension**: Published to VSCode Marketplace
-- **MCP Server**: Published to npm registry
+- **MCP Server**: Distributed as Rust binary
 - **Documentation**: Deployed to GitHub Pages
 
 This development workflow ensures reliable builds, comprehensive testing, and smooth releases for both contributors and users.

@@ -36,7 +36,7 @@ The **Model Context Protocol** ecosystem, with over 200 server implementations, 
 
 ## Best practices for setup and documentation
 
-Successful projects prioritize **one-command setup experiences**. Scripts like `npm run setup` or dedicated `setup.sh` files handle dependency installation, compilation, and environment validation. Cross-platform compatibility requires careful attention - using Node.js-based setup scripts often provides better portability than shell scripts.
+Successful projects prioritize **one-command setup experiences**. Scripts like `cargo setup` or dedicated `setup.sh` files handle dependency installation, compilation, and environment validation. Cross-platform compatibility requires careful attention - using Rust-based setup tools often provides better portability and performance than shell scripts.
 
 **Documentation structure** follows consistent patterns across successful projects. README files begin with quick start instructions, followed by architecture overviews using ASCII diagrams, detailed development workflows, and troubleshooting guides. The most effective documentation includes both conceptual explanations and concrete command examples.
 
@@ -48,23 +48,23 @@ Successful projects prioritize **one-command setup experiences**. Scripts like `
 
 **Development vs production configurations** require environment-aware connection logic. Development typically uses localhost connections with relaxed security, while production might involve authenticated HTTPS connections. Configuration schemas in package.json enable users to customize these settings.
 
-**Hot reload mechanisms** vary by component. While VSCode extensions require manual reloads (Ctrl+R in the Extension Development Host), server components can utilize nodemon, ts-node-dev, or webpack watch modes for automatic recompilation. State preservation between reloads improves the development experience.
+**Hot reload mechanisms** vary by component. While VSCode extensions require manual reloads (Ctrl+R in the Extension Development Host), server components can utilize cargo watch, nodemon, ts-node-dev, or webpack watch modes for automatic recompilation. State preservation between reloads improves the development experience.
 
 **Debugging configurations** benefit from compound launch configurations that start both extension and server with attached debuggers. Comprehensive logging systems with configurable verbosity levels prove essential for diagnosing issues across process boundaries.
 
 ## Developer workflow recommendations
 
-For **rapid local development**, combine the Extension Development Host for extension code with yalc for any separate npm packages. This avoids npm link issues while maintaining a fast feedback loop. Use watch modes for automatic compilation but expect to manually reload the Extension Development Host.
+For **rapid local development**, combine the Extension Development Host for extension code with workspace configurations for any separate components. This avoids dependency management issues while maintaining a fast feedback loop. Use watch modes for automatic compilation but expect to manually reload the Extension Development Host.
 
-**Project structure** should follow monorepo patterns even for simple extensions. This provides a clear upgrade path as complexity grows and establishes patterns that scale. Use workspaces (npm, yarn, or pnpm) to manage dependencies across components.
+**Project structure** should follow monorepo patterns even for simple extensions. This provides a clear upgrade path as complexity grows and establishes patterns that scale. Use workspaces (Cargo workspaces for Rust, npm workspaces for Node.js) to manage dependencies across components.
 
 **Communication patterns** should start with the simplest approach that meets requirements. Stdio suffices for most scenarios, with upgrades to sockets or HTTP only when specific features demand it. Following established protocols like LSP or DAP provides battle-tested patterns and existing tooling.
 
-**Testing strategies** must cover both components. Extension tests run in the Extension Development Host environment, while server tests can use standard Node.js testing frameworks. Integration tests that verify communication between components prevent subtle protocol mismatches.
+**Testing strategies** must cover both components. Extension tests run in the Extension Development Host environment, while server tests can use standard testing frameworks (cargo test for Rust, Jest for Node.js). Integration tests that verify communication between components prevent subtle protocol mismatches.
 
 ## Key takeaways for implementation
 
-Building VSCode extensions with separate server components requires balancing sophistication with developer experience. The Extension Development Host provides an excellent inner loop for extension development, while tools like yalc solve local dependency management. Monorepo structures with clear client/server separation enable scalable architectures.
+Building VSCode extensions with separate server components requires balancing sophistication with developer experience. The Extension Development Host provides an excellent inner loop for extension development, while workspace configurations solve local dependency management. Monorepo structures with clear client/server separation enable scalable architectures.
 
 Following established patterns from successful language servers and debug adapters provides a roadmap for implementation. Focus on developer experience through comprehensive setup scripts, clear documentation, and robust debugging configurations. Most importantly, start simple with stdio communication and monorepo structure, adding complexity only as requirements demand.
 
