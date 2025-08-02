@@ -50,22 +50,25 @@ export class ReviewWebviewProvider {
             const token = tokens[idx];
             const href = token.attrGet('href');
             
-            // Handle dialectic: URI scheme for file references
-            if (href && href.startsWith('dialectic:')) {
-                token.attrSet('href', 'javascript:void(0)');
-                token.attrSet('data-dialectic-url', href);
-                token.attrSet('class', 'file-ref');
-                this.outputChannel.appendLine(`Processed dialectic URL: ${href}`);
+            if (href) {
+                let dialecticUrl = href;
+                
+                // Convert simplified syntax to dialectic: URLs
+                if (!href.startsWith('dialectic:')) {
+                    dialecticUrl = this.convertToDialecticUrl(href);
+                }
+                
+                // Handle dialectic: URI scheme for file references
+                if (dialecticUrl.startsWith('dialectic:')) {
+                    token.attrSet('href', 'javascript:void(0)');
+                    token.attrSet('data-dialectic-url', dialecticUrl);
+                    token.attrSet('class', 'file-ref');
+                    this.outputChannel.appendLine(`Processed dialectic URL: ${dialecticUrl}`);
+                }
             }
             
             return defaultRender(tokens, idx, options, env, self);
         };
-
-        // 💡: Handle reference-style links by preprocessing
-        md.core.ruler.before('normalize', 'file_references', (state: any) => {
-            // Convert [`filename:line`][] to [filename:line](dialectic:filename?line=line)
-            state.src = state.src.replace(/\[`([^:`]+):(\d+)`\]\[\]/g, '[$1:$2](dialectic:$1?line=$2)');
-        });
 
         return md;
     }
@@ -257,6 +260,32 @@ export class ReviewWebviewProvider {
             this.outputChannel.appendLine(`Failed to open dialectic URL: ${error}`);
             vscode.window.showErrorMessage(`Failed to open ${dialecticUrlString} - ${error}`);
         }
+    }
+
+    /**
+     * Convert simplified URL syntax to dialectic: format
+     */
+    private convertToDialecticUrl(href: string): string {
+        // Handle path?regex format for search
+        const searchMatch = href.match(/^([^\s\[\]()]+)\?([^\s\[\]()]+)$/);
+        if (searchMatch) {
+            return `dialectic:${searchMatch[1]}?regex=${searchMatch[2]}`;
+        }
+        
+        // Handle path#L42-L50 format for line ranges
+        const rangeMatch = href.match(/^([^\s\[\]()]+)#L(\d+)-L(\d+)$/);
+        if (rangeMatch) {
+            return `dialectic:${rangeMatch[1]}?line=${rangeMatch[2]}-${rangeMatch[3]}`;
+        }
+        
+        // Handle path#L42 format for single lines
+        const lineMatch = href.match(/^([^\s\[\]()]+)#L(\d+)$/);
+        if (lineMatch) {
+            return `dialectic:${lineMatch[1]}?line=${lineMatch[2]}`;
+        }
+        
+        // Return unchanged if no patterns match
+        return href;
     }
 
     /**
