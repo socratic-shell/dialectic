@@ -1,6 +1,6 @@
 # MCP Server Design
 
-*This chapter details the design and implementation approach of the MCP server component.*
+*This chapter details the design and implementation approach of the Rust-based MCP server component.*
 
 ## Role and Responsibilities
 
@@ -17,14 +17,24 @@ The MCP server acts as a thin communication bridge between AI assistants and the
 
 ```
 ┌─────────────────┐    MCP Protocol    ┌─────────────────┐    Unix Socket    ┌─────────────────┐
-│   AI Assistant  │ ←─────────────────→ │   MCP Server    │ ←─────────────────→ │ VSCode Extension│
+│   AI Assistant  │ ←─────────────────→ │ Rust MCP Server │ ←─────────────────→ │ VSCode Extension│
 └─────────────────┘                    └─────────────────┘                    └─────────────────┘
 ```
 
 The MCP server operates as:
-- **MCP Protocol Server**: Handles stdio communication with AI assistants
-- **IPC Client**: Connects to VSCode extension's Unix socket server
-- **Message Bridge**: Translates between MCP tool calls and IPC messages
+- **MCP Protocol Server**: Handles stdio communication with AI assistants using the rmcp SDK
+- **IPC Client**: Connects to VSCode extension's Unix socket server with cross-platform support
+- **Message Bridge**: Translates between MCP tool calls and IPC messages with proper async handling
+
+## Rust Implementation Benefits
+
+**Performance**: Rust's zero-cost abstractions and lack of garbage collection provide better resource efficiency compared to Node.js implementations.
+
+**Memory Safety**: Rust's ownership system prevents memory leaks and data races that could occur in long-running processes.
+
+**Concurrency**: The async/await model with tokio provides true concurrent processing without blocking operations.
+
+**Cross-Platform**: Native support for both Unix sockets (macOS/Linux) and named pipes (Windows) through conditional compilation.
 
 ## Core Tool: present-review
 
@@ -34,6 +44,7 @@ The primary tool exposed by the MCP server provides structured guidance to AI as
 - `content` (required): Markdown review content with structured format
 - `mode` (optional): How to handle content - 'replace', 'update-section', or 'append'
 - `section` (optional): Section name for update-section mode
+- `baseUri` (required): Base directory path for resolving relative file references
 
 **AI Guidance Strategy:**
 The tool description provides multi-line structured guidance including:

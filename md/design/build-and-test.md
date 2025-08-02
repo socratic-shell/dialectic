@@ -6,7 +6,8 @@
 
 ### Prerequisites
 
-- **Node.js**: Version 18 or later
+- **Rust**: Latest stable version (for MCP server)
+- **Node.js**: Version 18 or later (for VSCode extension)
 - **npm**: Version 8 or later  
 - **VSCode**: Version 1.74.0 or later (for extension development)
 - **Git**: For version control
@@ -19,37 +20,56 @@ dialectic/
 │   ├── src/           # TypeScript source
 │   ├── package.json   # Extension manifest
 │   └── tsconfig.json  # TypeScript config
-├── server/            # MCP server
-│   ├── src/           # TypeScript source  
-│   ├── package.json   # Server package
-│   └── tsconfig.json  # TypeScript config
+├── server-rs/         # Rust MCP server
+│   ├── src/           # Rust source code
+│   ├── Cargo.toml     # Rust package manifest
+│   └── tests/         # Integration tests
 ├── md/                # Documentation (mdbook)
 └── book.toml          # mdbook configuration
 ```
 
 ### Initial Setup
 
-1. **Clone the repository**:
+1. **Install Rust** (if not already installed):
+   ```bash
+   curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh
+   source ~/.cargo/env
+   ```
+
+2. **Clone the repository**:
    ```bash
    git clone https://github.com/socratic-shell/dialectic.git
    cd dialectic
    ```
 
-2. **Install dependencies**:
+3. **Quick setup** (recommended):
    ```bash
-   # Install extension dependencies
-   cd extension
-   npm install
+   npm run setup-dev
+   ```
    
-   # Install server dependencies  
-   cd ../server
+   This will:
+   - Build the Rust MCP server in release mode
+   - Install the server binary globally
+   - Build and install the VSCode extension
+   - Configure AI assistants if available
+
+4. **Manual setup** (for detailed control):
+   ```bash
+   # Build Rust MCP server
+   cd server-rs
+   cargo build --release
+   cargo install --path .
+   
+   # Build VSCode extension
+   cd ../extension
    npm install
+   npm run compile
    
    # Return to root
    cd ..
    ```
 
-3. **Install development tools**:
+5. **Install development tools**:
    ```bash
    # Install mdbook for documentation
    cargo install mdbook
@@ -59,6 +79,20 @@ dialectic/
    ```
 
 ## Building
+
+### Rust MCP Server
+
+```bash
+cd server-rs
+cargo build           # Debug build
+cargo build --release # Optimized release build
+cargo install --path . # Install globally
+```
+
+**Build outputs**:
+- `target/debug/dialectic-mcp-server`: Debug binary
+- `target/release/dialectic-mcp-server`: Optimized release binary
+- `~/.cargo/bin/dialectic-mcp-server`: Globally installed binary
 
 ### VSCode Extension
 
@@ -73,19 +107,16 @@ npm run package       # Create .vsix package
 - `out/`: Compiled JavaScript files
 - `dialectic-*.vsix`: Installable extension package
 
-### MCP Server
+### Workspace Commands
+
+From the root directory:
 
 ```bash
-cd server  
-npm run build         # Compile TypeScript
-npm run dev          # Development mode with auto-restart
-npm run package      # Create distributable package
+npm run build         # Build both server and extension
+npm run build:server  # Build Rust server only
+npm run build:extension # Build extension only
+npm run clean         # Clean all build artifacts
 ```
-
-**Build outputs**:
-- `dist/`: Compiled JavaScript files
-- `dialectic-mcp-server-*.tgz`: npm package
-
 ### Documentation
 
 ```bash
@@ -100,6 +131,14 @@ mdbook serve          # Serve with live reload
 
 ### Unit Tests
 
+**Rust MCP Server tests**:
+```bash
+cd server-rs
+cargo test            # Run all tests
+cargo test -- --nocapture # Run with output
+cargo test --release  # Test optimized build
+```
+
 **Extension tests**:
 ```bash
 cd extension
@@ -108,7 +147,38 @@ npm run test:watch    # Watch mode
 npm run test:coverage # With coverage report
 ```
 
-**Server tests**:
+### Integration Tests
+
+**End-to-end testing**:
+```bash
+# Test the complete MCP server workflow
+cd server-rs
+cargo test --test integration
+
+# Test VSCode extension integration
+cd extension
+npm run test:integration
+```
+
+### Manual Testing
+
+**Test MCP server directly**:
+```bash
+# Run the server and test with a simple MCP client
+dialectic-mcp-server
+
+# Or test with trace logging
+RUST_LOG=trace dialectic-mcp-server
+```
+
+**Test with AI assistants**:
+```bash
+# Configure Claude CLI
+claude mcp add dialectic dialectic-mcp-server
+
+# Configure Q CLI  
+q mcp add --name dialectic --command dialectic-mcp-server --force
+```
 ```bash
 cd server
 npm test              # Run all tests  

@@ -15,7 +15,6 @@
     "vsce": "^2.15.0"
   },
   "workspaces": [
-    "extension",
-    "server"
+    "extension"
   ]
 }

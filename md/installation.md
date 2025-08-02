@@ -5,7 +5,7 @@
 ## Prerequisites
 
 - **VSCode**: Version 1.74.0 or later
-- **Node.js**: Version 18 or later (for MCP server)
+- **Rust**: Latest stable version (for MCP server)
 - **AI Assistant**: Compatible with Model Context Protocol (MCP)
 
 ## VSCode Extension
@@ -31,20 +31,42 @@ If installing from a local VSIX file:
 
 ## MCP Server
 
-### Via npm (Recommended)
+### From Source (Current Method)
+
+The Dialectic MCP server is implemented in Rust for optimal performance and reliability:
 
 ```bash
-npm install -g dialectic-mcp-server
+# Install Rust if you haven't already
+curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh
+
+# Clone and install Dialectic
+git clone https://github.com/socratic-shell/dialectic.git
+cd dialectic
+npm run setup
 ```
 
-### From Source
+The setup script will:
+- Build the Rust MCP server in release mode
+- Install the binary globally as `dialectic-mcp-server`
+- Build and install the VSCode extension
+- Configure your AI assistant (if Claude CLI or Q CLI is detected)
+
+### Manual Installation
+
+If you prefer to install components separately:
 
 ```bash
-git clone https://github.com/socratic-shell/dialectic.git
-cd dialectic/server
+# Build and install the Rust MCP server
+cd server-rs
+cargo build --release
+cargo install --path .
+
+# Build and install the VSCode extension
+cd ../extension
 npm install
-npm run build
-npm link
+npm run compile
+npm run package
+code --install-extension dialectic-*.vsix
 ```
 
 ## AI Assistant Configuration
