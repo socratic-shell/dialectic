@@ -35,6 +35,21 @@ The communication follows a client-server pattern:
 
 ## Message Protocol
 
+### Message Format
+All communication uses **newline-delimited JSON** messages over the Unix socket/named pipe:
+
+- **Format**: Each message is a single line of JSON terminated by `\n`
+- **Parsing**: Receivers split incoming data on newlines and parse each line as JSON
+- **Buffering**: TCP streams may deliver partial messages, so receivers must buffer until complete lines
+
+**Example Message Stream:**
+```
+{"type":"present-review","id":"abc123","payload":{...}}\n
+{"id":"abc123","success":true}\n
+```
+
+This format ensures reliable message boundaries in TCP streams and handles cases where multiple messages arrive in a single data chunk or messages arrive in fragments.
+
 ### Request/Response Pattern
 All communication uses JSON messages with unique IDs for request/response correlation:
 
