@@ -284,6 +284,14 @@ export class ReviewWebviewProvider {
             return `dialectic:${lineMatch[1]}?line=${lineMatch[2]}`;
         }
         
+        // Handle bare filenames - convert to dialectic: URL
+        // This matches file paths that don't contain spaces, brackets, parentheses, or colons
+        // Excludes URLs and other schemes by rejecting anything with ':'
+        const bareFileMatch = href.match(/^([^\s\[\]():]+)$/);
+        if (bareFileMatch) {
+            return `dialectic:${bareFileMatch[1]}`;
+        }
+        
         // Return unchanged if no patterns match
         return href;
     }
