@@ -267,7 +267,8 @@ export class ReviewWebviewProvider {
      */
     private convertToDialecticUrl(href: string): string {
         // Handle path?regex format for search
-        const searchMatch = href.match(/^([^\s\[\]()]+)\?([^\s\[\]()]+)$/);
+        // Allow spaces in search patterns but exclude brackets and parentheses
+        const searchMatch = href.match(/^([^\s\[\]()]+)\?([^\[\]()]+)$/);
         if (searchMatch) {
             return `dialectic:${searchMatch[1]}?regex=${searchMatch[2]}`;
         }
