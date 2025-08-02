@@ -17,7 +17,6 @@
 - [System overview](./design/overview.md) <!-- 💡: High-level architecture showing MCP server ↔ VSCode extension communication via Unix sockets -->
     - [Communication protocol](./design/protocol.md) <!-- 💡: JSON message format, Unix socket/named pipe IPC, and error handling between components -->
     - [Security considerations](./design/security.md) <!-- 💡: CSP headers, DOMPurify sanitization, and secure webview practices for markdown rendering -->
-- [MCP server](./design/mcp-server.md) <!-- 💡: Server implementation details, IPC client logic, and message handling -->
     - [MCP Tool interface](./design/mcp-tool-interface.md) <!-- 💡: API specification for AI assistants calling present_review tool with markdown content -->
     - [AI Guidance design considerations](./design/ai-guidance.md) <!-- 💡: Design decisions made specifically to work well with AI collaboration patterns from socratic shell -->
 - [VSCode extension](./design/extension.md) <!-- 💡: Highlights of the VSCode Extension design and implementation: activation, establishing IPC protocol -->
