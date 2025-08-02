@@ -19,20 +19,15 @@ AI Assistant → MCP Tool → Unix Socket → VSCode Extension → Review Panel 
      └─────────── Response ←─────── IPC Response ←─────── User Interaction ←┘
 ```
 
-### IPC Connection Discovery
+### IPC Communication
 
-The connection between MCP server and VSCode extension uses environment variable discovery:
+The MCP server and VSCode extension communicate via Unix socket IPC using environment variable discovery. The VSCode extension creates a socket server and sets `DIALECTIC_IPC_PATH` for the MCP server to find and connect to.
 
-1. **VSCode Extension Startup**: Creates a Unix socket server and sets `DIALECTIC_IPC_PATH` environment variable
-2. **MCP Server Launch**: AI assistant launches the MCP server, which reads `DIALECTIC_IPC_PATH` to find the socket
-3. **Connection Establishment**: MCP server connects as IPC client to the VSCode extension's socket server
-4. **Bidirectional Communication**: Both components can send/receive messages through the established connection
-
-This approach ensures the MCP server automatically discovers the correct VSCode instance without hardcoded paths or configuration files.
+For detailed information about how the IPC connection is established and what messages are exchanged, see the [Communication Protocol](./protocol.md) chapter.
 
 **Key Design Decisions:**
 - **Unix Socket/Named Pipe**: Secure, efficient local IPC following VSCode extension patterns
-- **JSON Message Protocol**: Simple, debuggable, and extensible communication format
+- **Newline-Delimited JSON**: Simple, debuggable message format with reliable boundaries
 - **Promise-Based Tracking**: Supports concurrent operations with unique message IDs
 - **Environment Variable Discovery**: Automatic connection without configuration complexity
 
