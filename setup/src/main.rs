@@ -212,31 +212,18 @@ fn detect_available_tools() -> Result<CLITool> {
 }
 
 fn get_repo_root() -> Result<PathBuf> {
-    let current_exe = std::env::current_exe()
-        .context("Failed to get current executable path")?;
+    // Require CARGO_MANIFEST_DIR - only available when running via cargo
+    let manifest_dir = std::env::var("CARGO_MANIFEST_DIR")
+        .context("❌ Setup tool must be run via cargo (e.g., 'cargo setup'). CARGO_MANIFEST_DIR not found.")?;
     
-    // Navigate up from target/debug/setup or target/release/setup to repo root
-    let mut path = current_exe.parent()
-        .and_then(|p| p.parent()) // target/
-        .and_then(|p| p.parent()) // repo root
-        .ok_or_else(|| anyhow!("Could not determine repository root"))?;
-    
-    // If we're running via cargo run, we might be in a different location
-    // Try to find Cargo.toml in current dir or parents
-    let mut current = std::env::current_dir().context("Failed to get current directory")?;
-    loop {
-        if current.join("Cargo.toml").exists() && current.join("server").exists() {
-            path = &current;
-            break;
-        }
-        if let Some(parent) = current.parent() {
-            current = parent.to_path_buf();
-        } else {
-            break;
+    let manifest_path = PathBuf::from(manifest_dir);
+    // If we're in a workspace member (like setup/), go up to workspace root
+    if manifest_path.file_name() == Some(std::ffi::OsStr::new("setup")) {
+        if let Some(parent) = manifest_path.parent() {
+            return Ok(parent.to_path_buf());
         }
     }
-    
-    Ok(path.to_path_buf())
+    Ok(manifest_path)
 }
 
 fn install_rust_server() -> Result<PathBuf> {
@@ -303,8 +290,12 @@ fn build_rust_server() -> Result<PathBuf> {
         return Err(anyhow!("❌ Failed to build Rust server:\n   Error: {}", stderr.trim()));
     }
     
+    // Use CARGO_TARGET_DIR if set, otherwise use workspace default
+    let target_dir = std::env::var("CARGO_TARGET_DIR")
+        .unwrap_or_else(|_| repo_root.join("target").to_string_lossy().to_string());
+    
     // Verify the binary exists
-    let binary_path = server_dir.join("target").join("release").join("dialectic-mcp-server");
+    let binary_path = PathBuf::from(target_dir).join("release").join("dialectic-mcp-server");
     if !binary_path.exists() {
         return Err(anyhow!("❌ Build verification failed: Built binary not found at {}", binary_path.display()));
     }
