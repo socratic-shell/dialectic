@@ -32,6 +32,11 @@ export function activate(context: vscode.ExtensionContext) {
     outputChannel.appendLine('Dialectic extension is now active');
     console.log('Dialectic extension is now active');
 
+    // 💡: PID Discovery Testing - Log VSCode and terminal PIDs
+    logPIDDiscovery(outputChannel).catch(error => {
+        outputChannel.appendLine(`Error in PID discovery: ${error}`);
+    });
+
     // Create the webview review provider
     const reviewProvider = new ReviewWebviewProvider(context, outputChannel);
 
@@ -53,7 +58,14 @@ export function activate(context: vscode.ExtensionContext) {
         vscode.window.showInformationMessage('Use the Copy Review button in the review panel');
     });
 
-    context.subscriptions.push(showReviewCommand, copyReviewCommand, reviewProvider, {
+    // 💡: PID discovery command for testing
+    const logPIDsCommand = vscode.commands.registerCommand('dialectic.logPIDs', async () => {
+        outputChannel.show(); // Bring output channel into focus
+        await logPIDDiscovery(outputChannel);
+        vscode.window.showInformationMessage('PID information logged to Dialectic output channel');
+    });
+
+    context.subscriptions.push(showReviewCommand, copyReviewCommand, logPIDsCommand, reviewProvider, {
         dispose: () => {
             server.close();
         }
@@ -390,6 +402,100 @@ function formatSelectionMessage(
     const message = `<context>looking at this code from ${location} <content>${truncatedText}</content></context> `;
 
     return message;
+}
+
+// 💡: PID Discovery Testing - Log all relevant PIDs for debugging
+async function logPIDDiscovery(outputChannel: vscode.OutputChannel): Promise<void> {
+    outputChannel.appendLine('=== PID DISCOVERY TESTING ===');
+    
+    // Extension process info
+    outputChannel.appendLine(`Extension process PID: ${process.pid}`);
+    outputChannel.appendLine(`Extension parent PID: ${process.ppid}`);
+    
+    // Try to find VSCode PID by walking up the process tree
+    const vscodePid = findVSCodePID(outputChannel);
+    if (vscodePid) {
+        outputChannel.appendLine(`Found VSCode PID: ${vscodePid}`);
+    } else {
+        outputChannel.appendLine('Could not find VSCode PID');
+    }
+    
+    // Log terminal PIDs (handle the Promise properly)
+    const terminals = vscode.window.terminals;
+    outputChannel.appendLine(`Found ${terminals.length} terminals:`);
+    
+    for (let i = 0; i < terminals.length; i++) {
+        const terminal = terminals[i];
+        try {
+            // terminal.processId returns a Promise in newer VSCode versions
+            const pid = await terminal.processId;
+            outputChannel.appendLine(`  Terminal ${i}: name="${terminal.name}", PID=${pid}`);
+        } catch (error) {
+            outputChannel.appendLine(`  Terminal ${i}: name="${terminal.name}", PID=<error: ${error}>`);
+        }
+    }
+    
+    // Set up terminal monitoring
+    const terminalListener = vscode.window.onDidOpenTerminal(async (terminal) => {
+        try {
+            const pid = await terminal.processId;
+            outputChannel.appendLine(`NEW TERMINAL: name="${terminal.name}", PID=${pid}`);
+        } catch (error) {
+            outputChannel.appendLine(`NEW TERMINAL: name="${terminal.name}", PID=<error: ${error}>`);
+        }
+    });
+    
+    outputChannel.appendLine('=== END PID DISCOVERY ===');
+}
+
+// 💡: Attempt to find VSCode PID by walking up process tree
+function findVSCodePID(outputChannel: vscode.OutputChannel): number | null {
+    const { execSync } = require('child_process');
+    
+    try {
+        let currentPid = process.pid;
+        outputChannel.appendLine(`Starting PID walk from extension PID: ${currentPid}`);
+        
+        // Walk up the process tree
+        for (let i = 0; i < 10; i++) { // Safety limit
+            try {
+                // Get process info (works on macOS/Linux)
+                const psOutput = execSync(`ps -p ${currentPid} -o pid,ppid,comm,args`, { encoding: 'utf8' });
+                const lines = psOutput.trim().split('\n');
+                
+                if (lines.length < 2) break;
+                
+                const processLine = lines[1].trim();
+                const parts = processLine.split(/\s+/);
+                const pid = parseInt(parts[0]);
+                const ppid = parseInt(parts[1]);
+                const command = parts.slice(3).join(' '); // Full command line
+                
+                outputChannel.appendLine(`  PID ${pid} -> PPID ${ppid}: ${command}`);
+                
+                // Check if this looks like the main VSCode process (not helper processes)
+                if ((command.includes('Visual Studio Code') || command.includes('Code.app') || command.includes('Electron')) 
+                    && !command.includes('Code Helper')) {
+                    outputChannel.appendLine(`  *** FOUND MAIN VSCODE PROCESS: PID ${pid} ***`);
+                    return pid;
+                }
+                
+                currentPid = ppid;
+                if (ppid <= 1) break; // Reached init process
+                
+            } catch (error) {
+                outputChannel.appendLine(`  Error getting process info for PID ${currentPid}: ${error}`);
+                break;
+            }
+        }
+        
+        outputChannel.appendLine('Reached end of process tree without finding VSCode');
+        return null;
+        
+    } catch (error) {
+        outputChannel.appendLine(`Error in PID discovery: ${error}`);
+        return null;
+    }
 }
 
 export function deactivate() { }

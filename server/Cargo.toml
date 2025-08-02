@@ -39,6 +39,9 @@ thiserror = { workspace = true }
 tracing = { workspace = true }
 tracing-subscriber = { workspace = true }
 
+# Command line argument parsing
+clap = { version = "4.0", features = ["derive"] }
+
 [dev-dependencies]
 tokio-test = { workspace = true }
 # Add client feature for testing

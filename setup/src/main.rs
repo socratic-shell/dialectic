@@ -304,7 +304,7 @@ fn build_rust_server() -> Result<PathBuf> {
     }
     
     // Verify the binary exists
-    let binary_path = server_dir.join("target").join("release").join("dialectic");
+    let binary_path = server_dir.join("target").join("release").join("dialectic-mcp-server");
     if !binary_path.exists() {
         return Err(anyhow!("❌ Build verification failed: Built binary not found at {}", binary_path.display()));
     }
