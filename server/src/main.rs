@@ -8,10 +8,10 @@
 use anyhow::Result;
 use clap::Parser;
 use rmcp::{transport::stdio, ServiceExt};
-use tracing::{error, info, trace};
+use tracing::{error, info};
 use tracing_subscriber::{self, EnvFilter};
 
-use dialectic_mcp_server::{DialecticServer, pid_discovery};
+use dialectic_mcp_server::{pid_discovery, DialecticServer};
 
 #[derive(Parser)]
 #[command(name = "dialectic-mcp-server")]
@@ -62,13 +62,13 @@ async fn main() -> Result<()> {
 /// Run PID discovery probe for testing
 async fn run_pid_probe() -> Result<()> {
     use std::process;
-    use tracing::{info, error};
-    
+    use tracing::{error, info};
+
     info!("=== DIALECTIC MCP SERVER PID PROBE ===");
-    
+
     let current_pid = process::id();
     info!("MCP Server PID: {}", current_pid);
-    
+
     // Try to walk up the process tree to find VSCode
     match pid_discovery::find_vscode_pid_from_mcp(current_pid).await {
         Ok(Some((vscode_pid, terminal_shell_pid))) => {
@@ -86,7 +86,7 @@ async fn run_pid_probe() -> Result<()> {
             error!("❌ ERROR: PID discovery failed: {}", e);
         }
     }
-    
+
     info!("=== END PID PROBE ===");
     Ok(())
 }

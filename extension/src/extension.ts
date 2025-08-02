@@ -73,7 +73,7 @@ export function activate(context: vscode.ExtensionContext) {
 }
 
 function createIPCServer(context: vscode.ExtensionContext, reviewProvider: ReviewWebviewProvider, outputChannel: vscode.OutputChannel): net.Server {
-    const socketPath = getSocketPath(context);
+    const socketPath = getSocketPath(context, outputChannel);
     outputChannel.appendLine(`Setting up IPC server at: ${socketPath}`);
 
     // 💡: Clean up any existing socket file
@@ -132,21 +132,35 @@ function createIPCServer(context: vscode.ExtensionContext, reviewProvider: Revie
     outputChannel.appendLine(`IPC server listening on: ${socketPath}`);
     console.log('IPC server listening on:', socketPath);
 
-    // 💡: Set environment variable so MCP server can find the socket
-    context.environmentVariableCollection.replace("DIALECTIC_IPC_PATH", socketPath);
-    outputChannel.appendLine(`Set DIALECTIC_IPC_PATH environment variable to: ${socketPath}`);
-
     return server;
 }
 
-function getSocketPath(context: vscode.ExtensionContext): string {
-    // 💡: Use UUID-based filename to avoid path length limits and ensure uniqueness
-    if (process.platform === 'win32') {
-        return `\\\\.\\pipe\\dialectic-${crypto.randomUUID()}`;
-    } else {
-        // Use /tmp with UUID for short, unique socket path
-        return `/tmp/dialectic-${crypto.randomUUID()}.sock`;
-    }
+function getSocketPath(context: vscode.ExtensionContext, outputChannel: vscode.OutputChannel): string {
+    // (1) Get PID
+    const discoveredPid = findVSCodePID(outputChannel);
+    
+    // (2) If failed, use UUID fallback and notify user
+    const vscodePid = discoveredPid || (() => {
+        vscode.window.showWarningMessage(
+            'Dialectic: Could not discover VSCode PID for reliable connection. Using fallback method.',
+            'View Logs'
+        ).then(selection => {
+            if (selection === 'View Logs') {
+                outputChannel.show();
+            }
+        });
+        return crypto.randomUUID();
+    })();
+    
+    // (3) Create platform-appropriate path
+    const socketPath = process.platform === 'win32' 
+        ? `\\\\.\\pipe\\dialectic-vscode-${vscodePid}`
+        : `/tmp/dialectic-vscode-${vscodePid}.sock`;
+    
+    // Log the final path
+    outputChannel.appendLine(`Using socket path: ${socketPath}`);
+    
+    return socketPath;
 }
 
 function handleIPCMessage(message: IPCMessage, socket: net.Socket, reviewProvider: ReviewWebviewProvider, outputChannel: vscode.OutputChannel): void {
@@ -267,9 +281,6 @@ function setupSelectionDetection(context: vscode.ExtensionContext, outputChannel
     const selectionListener = vscode.window.onDidChangeTextEditorSelection((event) => {
         if (event.selections.length > 0 && !event.selections[0].isEmpty) {
             const selection = event.selections[0];
-            const selectedText = event.textEditor.document.getText(selection);
-
-            outputChannel.appendLine(`Selection detected: "${selectedText}" in ${event.textEditor.document.fileName}`);
 
             // Store current selection state
             currentSelection = {
@@ -278,7 +289,6 @@ function setupSelectionDetection(context: vscode.ExtensionContext, outputChannel
             };
         } else {
             currentSelection = null;
-            outputChannel.appendLine('Selection cleared');
         }
     });
 
@@ -299,7 +309,6 @@ function setupSelectionDetection(context: vscode.ExtensionContext, outputChannel
                     };
                     action.isPreferred = true; // Show at top of list
 
-                    outputChannel.appendLine('Code action provided for selection');
                     return [action];
                 }
                 return [];
@@ -454,7 +463,6 @@ function findVSCodePID(outputChannel: vscode.OutputChannel): number | null {
     
     try {
         let currentPid = process.pid;
-        outputChannel.appendLine(`Starting PID walk from extension PID: ${currentPid}`);
         
         // Walk up the process tree
         for (let i = 0; i < 10; i++) { // Safety limit
@@ -471,12 +479,10 @@ function findVSCodePID(outputChannel: vscode.OutputChannel): number | null {
                 const ppid = parseInt(parts[1]);
                 const command = parts.slice(3).join(' '); // Full command line
                 
-                outputChannel.appendLine(`  PID ${pid} -> PPID ${ppid}: ${command}`);
-                
                 // Check if this looks like the main VSCode process (not helper processes)
                 if ((command.includes('Visual Studio Code') || command.includes('Code.app') || command.includes('Electron')) 
                     && !command.includes('Code Helper')) {
-                    outputChannel.appendLine(`  *** FOUND MAIN VSCODE PROCESS: PID ${pid} ***`);
+                    outputChannel.appendLine(`Found VSCode PID: ${pid}`);
                     return pid;
                 }
                 
@@ -484,16 +490,15 @@ function findVSCodePID(outputChannel: vscode.OutputChannel): number | null {
                 if (ppid <= 1) break; // Reached init process
                 
             } catch (error) {
-                outputChannel.appendLine(`  Error getting process info for PID ${currentPid}: ${error}`);
                 break;
             }
         }
         
-        outputChannel.appendLine('Reached end of process tree without finding VSCode');
+        outputChannel.appendLine('Could not find VSCode PID in process tree');
         return null;
         
     } catch (error) {
-        outputChannel.appendLine(`Error in PID discovery: ${error}`);
+        outputChannel.appendLine(`PID discovery error: ${error}`);
         return null;
     }
 }

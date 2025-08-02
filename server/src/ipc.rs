@@ -16,6 +16,7 @@ use crate::types::{
     IPCMessage, IPCResponse, IPCMessageType, PresentReviewParams, PresentReviewResult,
     LogParams, LogLevel, GetSelectionResult
 };
+use crate::pid_discovery;
 
 // Cross-platform imports
 #[cfg(unix)]
@@ -29,6 +30,9 @@ use tokio::net::windows::named_pipe::ClientOptions;
 pub enum IPCError {
     #[error("Environment variable DIALECTIC_IPC_PATH not set")]
     MissingEnvironmentVariable,
+    
+    #[error("Failed to discover VSCode PID: {0}")]
+    PidDiscoveryFailed(String),
     
     #[error("Failed to connect to socket/pipe at {path}: {source}")]
     ConnectionFailed { path: String, source: std::io::Error },
@@ -125,9 +129,8 @@ impl IPCCommunicator {
             return Ok(());
         }
 
-        // Get the socket path from environment variable set by VSCode extension
-        let socket_path = std::env::var("DIALECTIC_IPC_PATH")
-            .map_err(|_| IPCError::MissingEnvironmentVariable)?;
+        // Use PID discovery to find VSCode and construct socket path
+        let socket_path = self.discover_vscode_socket().await?;
 
         info!("Connecting to VSCode extension at: {}", socket_path);
 
@@ -136,6 +139,31 @@ impl IPCCommunicator {
         
         info!("Connected to VSCode extension via IPC");
         Ok(())
+    }
+
+    /// Discover VSCode socket path using PID discovery
+    async fn discover_vscode_socket(&self) -> Result<String> {
+        let current_pid = std::process::id();
+        info!("Starting PID discovery from MCP server PID: {}", current_pid);
+
+        match pid_discovery::find_vscode_pid_from_mcp(current_pid).await {
+            Ok(Some((vscode_pid, _terminal_shell_pid))) => {
+                let socket_path = format!("/tmp/dialectic-vscode-{}.sock", vscode_pid);
+                info!("Discovered VSCode PID: {}, socket path: {}", vscode_pid, socket_path);
+                Ok(socket_path)
+            }
+            Ok(None) => {
+                let error_msg = "Could not find VSCode PID in process tree. \
+                                 Ensure MCP server is running from a VSCode terminal.";
+                error!("{}", error_msg);
+                Err(IPCError::PidDiscoveryFailed(error_msg.to_string()))
+            }
+            Err(e) => {
+                let error_msg = format!("PID discovery failed: {}", e);
+                error!("{}", error_msg);
+                Err(IPCError::PidDiscoveryFailed(error_msg))
+            }
+        }
     }
 
     #[cfg(unix)]
