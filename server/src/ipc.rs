@@ -84,6 +84,7 @@ struct IPCCommunicatorInner {
     
     /// Terminal shell PID for this MCP server instance
     /// Reported to extension during handshake for smart terminal selection
+    #[expect(dead_code)] // Will be used in Phase 3 handshake protocol
     terminal_shell_pid: u32,
 }
 
@@ -363,51 +364,51 @@ impl IPCCommunicatorInner {
     /// Ensures connection is established, connecting if necessary
     /// Idempotent - safe to call multiple times, only connects if not already connected
     async fn ensure_connection(this: Arc<Mutex<Self>>) -> Result<()> {
-        let connected = {
-            let inner = this.lock().await;
-            inner.connected
-        };
-        
-        if connected {
+        let mut inner = this.lock().await;
+        if inner.connected {
             return Ok(()); // Already connected, nothing to do
         }
         
-        Self::attempt_connection_with_backoff(Arc::clone(&this)).await
+        inner.attempt_connection_with_backoff(&this).await
     }
     
     /// Clears dead connection state and attempts fresh reconnection
     /// Called by reader task as "parting gift" when connection dies
+    #[expect(dead_code)] // Will be re-enabled when reader task reconnection is fixed
     async fn clear_connection_and_reconnect(this: Arc<Mutex<Self>>) -> Result<()> {
         info!("Clearing dead connection state and attempting reconnection");
         
+        let mut inner = this.lock().await;
+        
         // Clean up dead connection state
-        {
-            let mut inner = this.lock().await;
-            inner.connected = false;
-            inner.write_half = None;
-            
-            // Clean up orphaned pending requests to fix memory leak
-            let orphaned_count = inner.pending_requests.len();
-            if orphaned_count > 0 {
-                warn!("Cleaning up {} orphaned pending requests", orphaned_count);
-                inner.pending_requests.clear();
-            }
+        inner.connected = false;
+        inner.write_half = None;
+        
+        // Clean up orphaned pending requests to fix memory leak
+        let orphaned_count = inner.pending_requests.len();
+        if orphaned_count > 0 {
+            warn!("Cleaning up {} orphaned pending requests", orphaned_count);
+            inner.pending_requests.clear();
         }
         
         // Attempt fresh connection
-        Self::attempt_connection_with_backoff(this).await
+        inner.attempt_connection_with_backoff(&this).await
     }
     
     /// Attempts connection with exponential backoff to handle extension restart timing
-    async fn attempt_connection_with_backoff(this: Arc<Mutex<Self>>) -> Result<()> {
+    /// 
+    /// Runs while holding the lock to avoid races where multiple concurrent attempts
+    /// try to re-establish the connection. This ensures only one connection attempt
+    /// happens at a time, preventing duplicate reader tasks or connection state corruption.
+    async fn attempt_connection_with_backoff(&mut self, this: &Arc<Mutex<Self>>) -> Result<()> {
+        // Precondition: we should only be called when disconnected
+        assert!(!self.connected, "attempt_connection_with_backoff called while already connected");
+        assert!(self.write_half.is_none(), "attempt_connection_with_backoff called with existing write_half");
+        
         const MAX_RETRIES: u32 = 5;
         const BASE_DELAY_MS: u64 = 100;
         
-        let socket_path = {
-            let inner = this.lock().await;
-            format!("/tmp/dialectic-vscode-{}.sock", inner.vscode_pid)
-        };
-        
+        let socket_path = format!("/tmp/dialectic-vscode-{}.sock", self.vscode_pid);
         info!("Attempting connection to: {}", socket_path);
         
         for attempt in 1..=MAX_RETRIES {
@@ -419,15 +420,12 @@ impl IPCCommunicatorInner {
                     let (read_half, write_half) = stream.into_split();
                     let write_half = Arc::new(Mutex::new(write_half));
                     
-                    // Update connection state
-                    {
-                        let mut inner = this.lock().await;
-                        inner.write_half = Some(Arc::clone(&write_half));
-                        inner.connected = true;
-                    }
+                    // Update connection state (we already hold the lock)
+                    self.write_half = Some(Arc::clone(&write_half));
+                    self.connected = true;
                     
-                    // Spawn new reader task with shared Arc
-                    let inner_clone = Arc::clone(&this);
+                    // Spawn new reader task with cloned Arc
+                    let inner_clone = Arc::clone(this);
                     tokio::spawn(async move {
                         IPCCommunicator::response_reader_task(read_half, inner_clone).await;
                     });
