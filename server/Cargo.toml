@@ -28,6 +28,9 @@ schemars = { workspace = true }
 # Async runtime
 tokio = { workspace = true }
 
+# Async utilities
+futures = "0.3"
+
 # UUID generation for IPC message tracking
 uuid = { workspace = true }
 
