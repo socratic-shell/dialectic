@@ -6,6 +6,7 @@
 use serde_json;
 use std::collections::HashMap;
 use std::sync::Arc;
+use std::time::Duration;
 use thiserror::Error;
 use tokio::io::{AsyncWriteExt, AsyncBufReadExt, BufReader};
 use tokio::net::UnixStream;
@@ -73,21 +74,53 @@ struct IPCCommunicatorInner {
     /// Enables concurrent request/response handling with proper correlation
     pending_requests: HashMap<String, oneshot::Sender<IPCResponse>>,
     
-    /// Flag to track if the response reader task is running
-    /// Prevents multiple reader tasks from being spawned
-    reader_started: bool,
+    /// Flag to track if we have an active connection and reader task
+    /// When true, ensure_connection() is a no-op
+    connected: bool,
+    
+    /// VSCode process PID discovered during initialization
+    /// Used to construct socket path: /tmp/dialectic-vscode-{vscode_pid}.sock
+    vscode_pid: u32,
+    
+    /// Terminal shell PID for this MCP server instance
+    /// Reported to extension during handshake for smart terminal selection
+    terminal_shell_pid: u32,
 }
 
 impl IPCCommunicator {
-    pub fn new() -> Self {
-        Self {
+    pub async fn new() -> Result<Self> {
+        // Perform PID discovery once during construction
+        let current_pid = std::process::id();
+        info!("Starting PID discovery from MCP server PID: {}", current_pid);
+
+        let (vscode_pid, terminal_shell_pid) = match pid_discovery::find_vscode_pid_from_mcp(current_pid).await {
+            Ok(Some((vscode_pid, terminal_shell_pid))) => {
+                info!("Discovered VSCode PID: {}, Terminal Shell PID: {}", vscode_pid, terminal_shell_pid);
+                (vscode_pid, terminal_shell_pid)
+            }
+            Ok(None) => {
+                let error_msg = "Could not find VSCode PID in process tree. \
+                                 Ensure MCP server is running from a VSCode terminal.";
+                error!("{}", error_msg);
+                return Err(IPCError::PidDiscoveryFailed(error_msg.to_string()).into());
+            }
+            Err(e) => {
+                let error_msg = format!("PID discovery failed: {}", e);
+                error!("{}", error_msg);
+                return Err(IPCError::PidDiscoveryFailed(error_msg).into());
+            }
+        };
+
+        Ok(Self {
             inner: Arc::new(Mutex::new(IPCCommunicatorInner {
                 write_half: None,
                 pending_requests: HashMap::new(),
-                reader_started: false,
+                connected: false,
+                vscode_pid,
+                terminal_shell_pid,
             })),
             test_mode: false,
-        }
+        })
     }
 
     /// Creates a new IPCCommunicator in test mode
@@ -97,7 +130,9 @@ impl IPCCommunicator {
             inner: Arc::new(Mutex::new(IPCCommunicatorInner {
                 write_half: None,
                 pending_requests: HashMap::new(),
-                reader_started: false,
+                connected: false,
+                vscode_pid: 0, // Dummy PID for test mode
+                terminal_shell_pid: 0, // Dummy PID for test mode
             })),
             test_mode: true,
         }
@@ -109,66 +144,10 @@ impl IPCCommunicator {
             return Ok(());
         }
 
-        // Use PID discovery to find VSCode and construct socket path
-        let socket_path = self.discover_vscode_socket().await?;
-
-        info!("Connecting to VSCode extension at: {}", socket_path);
-
-        // Create cross-platform connection
-        self.connect(&socket_path).await?;
+        // Use ensure_connection for initial connection
+        IPCCommunicatorInner::ensure_connection(Arc::clone(&self.inner)).await?;
         
         info!("Connected to VSCode extension via IPC");
-        Ok(())
-    }
-
-    /// Discover VSCode socket path using PID discovery
-    async fn discover_vscode_socket(&self) -> Result<String> {
-        let current_pid = std::process::id();
-        info!("Starting PID discovery from MCP server PID: {}", current_pid);
-
-        match pid_discovery::find_vscode_pid_from_mcp(current_pid).await {
-            Ok(Some((vscode_pid, _terminal_shell_pid))) => {
-                let socket_path = format!("/tmp/dialectic-vscode-{}.sock", vscode_pid);
-                info!("Discovered VSCode PID: {}, socket path: {}", vscode_pid, socket_path);
-                Ok(socket_path)
-            }
-            Ok(None) => {
-                let error_msg = "Could not find VSCode PID in process tree. \
-                                 Ensure MCP server is running from a VSCode terminal.";
-                error!("{}", error_msg);
-                Err(IPCError::PidDiscoveryFailed(error_msg.to_string()))
-            }
-            Err(e) => {
-                let error_msg = format!("PID discovery failed: {}", e);
-                error!("{}", error_msg);
-                Err(IPCError::PidDiscoveryFailed(error_msg))
-            }
-        }
-    }
-
-    async fn connect(&mut self, socket_path: &str) -> Result<()> {
-        let stream = UnixStream::connect(socket_path).await
-            .map_err(|e| IPCError::ConnectionFailed { 
-                path: socket_path.to_string(), 
-                source: e 
-            })?;
-        
-        // Split the stream into read and write halves to avoid deadlock
-        let (read_half, write_half) = stream.into_split();
-        let write_half = Arc::new(Mutex::new(write_half));
-        
-        let mut inner = self.inner.lock().await;
-        inner.write_half = Some(Arc::clone(&write_half));
-        
-        // Start the response reader task if not already started
-        if !inner.reader_started {
-            inner.reader_started = true;
-            let inner_clone = Arc::clone(&self.inner);
-            tokio::spawn(async move {
-                Self::response_reader_task(read_half, inner_clone).await;
-            });
-        }
-        
         Ok(())
     }
 
@@ -180,6 +159,9 @@ impl IPCCommunicator {
                 message: Some("Review successfully displayed (test mode)".to_string()),
             });
         }
+
+        // Ensure connection is established before proceeding
+        IPCCommunicatorInner::ensure_connection(Arc::clone(&self.inner)).await?;
 
         let message = IPCMessage {
             message_type: IPCMessageType::PresentReview,
@@ -223,6 +205,9 @@ impl IPCCommunicator {
                 message: Some("No selection available (test mode)".to_string()),
             });
         }
+
+        // Ensure connection is established before proceeding
+        IPCCommunicatorInner::ensure_connection(Arc::clone(&self.inner)).await?;
 
         let message = IPCMessage {
             message_type: IPCMessageType::GetSelection,
@@ -322,6 +307,13 @@ impl IPCCommunicator {
             rx
         ).await
         .map_err(|_| {
+            // Clean up the leaked entry on timeout to fix memory leak
+            let inner_clone = Arc::clone(&self.inner);
+            let message_id = message.id.clone();
+            tokio::spawn(async move {
+                let mut inner = inner_clone.lock().await;
+                inner.pending_requests.remove(&message_id);
+            });
             error!("Timeout waiting for response to message ID: {}", message.id);
             IPCError::Timeout
         })?
@@ -365,13 +357,103 @@ impl IPCCommunicator {
             Err(IPCError::NotConnected)
         }
     }
+}
 
-    /// Low-level primitive for writing raw JSON data to the IPC connection (Windows)
-    /// 
-    /// This is the underlying method used by both `send_message_with_reply` and 
-    /// `send_message_without_reply`. It handles the platform-specific pipe writing
-    /// Background task that reads responses from the IPC connection
-    /// Runs continuously to handle incoming messages from VSCode extension
+impl IPCCommunicatorInner {
+    /// Ensures connection is established, connecting if necessary
+    /// Idempotent - safe to call multiple times, only connects if not already connected
+    async fn ensure_connection(this: Arc<Mutex<Self>>) -> Result<()> {
+        let connected = {
+            let inner = this.lock().await;
+            inner.connected
+        };
+        
+        if connected {
+            return Ok(()); // Already connected, nothing to do
+        }
+        
+        Self::attempt_connection_with_backoff(Arc::clone(&this)).await
+    }
+    
+    /// Clears dead connection state and attempts fresh reconnection
+    /// Called by reader task as "parting gift" when connection dies
+    async fn clear_connection_and_reconnect(this: Arc<Mutex<Self>>) -> Result<()> {
+        info!("Clearing dead connection state and attempting reconnection");
+        
+        // Clean up dead connection state
+        {
+            let mut inner = this.lock().await;
+            inner.connected = false;
+            inner.write_half = None;
+            
+            // Clean up orphaned pending requests to fix memory leak
+            let orphaned_count = inner.pending_requests.len();
+            if orphaned_count > 0 {
+                warn!("Cleaning up {} orphaned pending requests", orphaned_count);
+                inner.pending_requests.clear();
+            }
+        }
+        
+        // Attempt fresh connection
+        Self::attempt_connection_with_backoff(this).await
+    }
+    
+    /// Attempts connection with exponential backoff to handle extension restart timing
+    async fn attempt_connection_with_backoff(this: Arc<Mutex<Self>>) -> Result<()> {
+        const MAX_RETRIES: u32 = 5;
+        const BASE_DELAY_MS: u64 = 100;
+        
+        let socket_path = {
+            let inner = this.lock().await;
+            format!("/tmp/dialectic-vscode-{}.sock", inner.vscode_pid)
+        };
+        
+        info!("Attempting connection to: {}", socket_path);
+        
+        for attempt in 1..=MAX_RETRIES {
+            match UnixStream::connect(&socket_path).await {
+                Ok(stream) => {
+                    info!("Successfully connected on attempt {}", attempt);
+                    
+                    // Split the stream into read and write halves
+                    let (read_half, write_half) = stream.into_split();
+                    let write_half = Arc::new(Mutex::new(write_half));
+                    
+                    // Update connection state
+                    {
+                        let mut inner = this.lock().await;
+                        inner.write_half = Some(Arc::clone(&write_half));
+                        inner.connected = true;
+                    }
+                    
+                    // Spawn new reader task with shared Arc
+                    let inner_clone = Arc::clone(&this);
+                    tokio::spawn(async move {
+                        IPCCommunicator::response_reader_task(read_half, inner_clone).await;
+                    });
+                    
+                    return Ok(());
+                }
+                Err(e) if attempt < MAX_RETRIES => {
+                    let delay = Duration::from_millis(BASE_DELAY_MS * 2_u64.pow(attempt - 1));
+                    warn!("Connection attempt {} failed: {}. Retrying in {:?}", attempt, e, delay);
+                    tokio::time::sleep(delay).await;
+                }
+                Err(e) => {
+                    error!("All connection attempts failed. Last error: {}", e);
+                    return Err(IPCError::ConnectionFailed { 
+                        path: socket_path, 
+                        source: e 
+                    }.into());
+                }
+            }
+        }
+        
+        unreachable!("Loop should always return or error")
+    }
+}
+
+impl IPCCommunicator {
     async fn response_reader_task(
         mut read_half: tokio::net::unix::OwnedReadHalf,
         inner: Arc<Mutex<IPCCommunicatorInner>>,

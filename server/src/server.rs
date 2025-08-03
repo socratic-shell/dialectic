@@ -31,7 +31,7 @@ pub struct DialecticServer {
 #[tool_router]
 impl DialecticServer {
     pub async fn new() -> Result<Self> {
-        let mut ipc = IPCCommunicator::new();
+        let mut ipc = IPCCommunicator::new().await?;
         
         // Initialize IPC connection to VSCode extension
         ipc.initialize().await?;
