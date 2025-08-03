@@ -8,6 +8,7 @@ use std::collections::HashMap;
 use std::sync::Arc;
 use thiserror::Error;
 use tokio::io::{AsyncWriteExt, AsyncBufReadExt, BufReader};
+use tokio::net::UnixStream;
 use tokio::sync::{oneshot, Mutex};
 use tracing::{info, error, debug, warn, trace};
 use uuid::Uuid;
@@ -17,13 +18,6 @@ use crate::types::{
     LogParams, LogLevel, GetSelectionResult
 };
 use crate::pid_discovery;
-
-// Cross-platform imports
-#[cfg(unix)]
-use tokio::net::UnixStream;
-
-#[cfg(windows)]
-use tokio::net::windows::named_pipe::ClientOptions;
 
 /// Errors that can occur during IPC communication
 #[derive(Error, Debug)]
@@ -71,12 +65,8 @@ pub struct IPCCommunicator {
 }
 
 struct IPCCommunicatorInner {
-    /// Write half of the connection to VSCode extension
-    #[cfg(unix)]
+    /// Write half of the Unix socket connection to VSCode extension
     write_half: Option<Arc<Mutex<tokio::net::unix::OwnedWriteHalf>>>,
-    
-    #[cfg(windows)]
-    connection: Option<Arc<Mutex<tokio::net::windows::named_pipe::NamedPipeClient>>>,
     
     /// Tracks outgoing requests awaiting responses from VSCode extension
     /// Key: unique message ID (UUID), Value: channel to send response back to caller
@@ -92,12 +82,7 @@ impl IPCCommunicator {
     pub fn new() -> Self {
         Self {
             inner: Arc::new(Mutex::new(IPCCommunicatorInner {
-                #[cfg(unix)]
                 write_half: None,
-                
-                #[cfg(windows)]
-                connection: None,
-                
                 pending_requests: HashMap::new(),
                 reader_started: false,
             })),
@@ -110,12 +95,7 @@ impl IPCCommunicator {
     pub fn new_test() -> Self {
         Self {
             inner: Arc::new(Mutex::new(IPCCommunicatorInner {
-                #[cfg(unix)]
                 write_half: None,
-                
-                #[cfg(windows)]
-                connection: None,
-                
                 pending_requests: HashMap::new(),
                 reader_started: false,
             })),
@@ -166,7 +146,6 @@ impl IPCCommunicator {
         }
     }
 
-    #[cfg(unix)]
     async fn connect(&mut self, socket_path: &str) -> Result<()> {
         let stream = UnixStream::connect(socket_path).await
             .map_err(|e| IPCError::ConnectionFailed { 
@@ -187,33 +166,6 @@ impl IPCCommunicator {
             let inner_clone = Arc::clone(&self.inner);
             tokio::spawn(async move {
                 Self::response_reader_task(read_half, inner_clone).await;
-            });
-        }
-        
-        Ok(())
-    }
-
-    #[cfg(windows)]
-    async fn connect(&mut self, pipe_path: &str) -> Result<()> {
-        let client = ClientOptions::new()
-            .open(pipe_path)
-            .map_err(|e| IPCError::ConnectionFailed { 
-                path: pipe_path.to_string(), 
-                source: e 
-            })?;
-        
-        let connection = Arc::new(Mutex::new(client));
-        
-        let mut inner = self.inner.lock().await;
-        inner.connection = Some(Arc::clone(&connection));
-        
-        // Start the response reader task if not already started
-        if !inner.reader_started {
-            inner.reader_started = true;
-            let inner_clone = Arc::clone(&self.inner);
-            let connection_clone = Arc::clone(&connection);
-            tokio::spawn(async move {
-                Self::response_reader_task(connection_clone, inner_clone).await;
             });
         }
         
@@ -392,7 +344,6 @@ impl IPCCommunicator {
     /// This is the underlying method used by both `send_message_with_reply` and 
     /// `send_message_without_reply`. It handles the platform-specific socket writing
     /// and adds newline delimiters for message boundaries.
-    #[cfg(unix)]
     async fn write_message(&self, data: &str) -> Result<()> {
         trace!("write_message called with data length: {}", data.len());
         
@@ -419,23 +370,8 @@ impl IPCCommunicator {
     /// 
     /// This is the underlying method used by both `send_message_with_reply` and 
     /// `send_message_without_reply`. It handles the platform-specific pipe writing
-    /// and adds newline delimiters for message boundaries.
-    #[cfg(windows)]
-    async fn write_message(&self, data: &str) -> Result<()> {
-        let inner = self.inner.lock().await;
-        if let Some(ref connection) = inner.connection {
-            let mut pipe = connection.lock().await;
-            pipe.write_all(data.as_bytes()).await?;
-            pipe.write_all(b"\n").await?; // Add newline delimiter
-            Ok(())
-        } else {
-            Err(IPCError::NotConnected)
-        }
-    }
-
     /// Background task that reads responses from the IPC connection
     /// Runs continuously to handle incoming messages from VSCode extension
-    #[cfg(unix)]
     async fn response_reader_task(
         mut read_half: tokio::net::unix::OwnedReadHalf,
         inner: Arc<Mutex<IPCCommunicatorInner>>,
@@ -451,55 +387,6 @@ impl IPCCommunicator {
             
             // Read a line from the connection
             let read_result = reader.read_until(b'\n', &mut buffer).await;
-            
-            match read_result {
-                Ok(0) => {
-                    warn!("IPC connection closed by VSCode extension");
-                    break;
-                }
-                Ok(_) => {
-                    // Remove the newline delimiter
-                    if buffer.ends_with(&[b'\n']) {
-                        buffer.pop();
-                    }
-                    
-                    let message_str = match String::from_utf8(buffer) {
-                        Ok(s) => s,
-                        Err(e) => {
-                            error!("Received invalid UTF-8 from VSCode extension: {}", e);
-                            continue;
-                        }
-                    };
-                    
-                    Self::handle_response_message(&inner, &message_str).await;
-                }
-                Err(e) => {
-                    error!("Error reading from IPC connection: {}", e);
-                    break;
-                }
-            }
-        }
-        
-        info!("IPC response reader task terminated");
-    }
-
-    /// Background task that reads responses from the IPC connection (Windows)
-    #[cfg(windows)]
-    async fn response_reader_task(
-        connection: Arc<Mutex<tokio::net::windows::named_pipe::NamedPipeClient>>,
-        inner: Arc<Mutex<IPCCommunicatorInner>>,
-    ) {
-        info!("Starting IPC response reader task (Windows)");
-        
-        loop {
-            let mut buffer = Vec::new();
-            
-            // Read a line from the connection
-            let read_result = {
-                let mut pipe = connection.lock().await;
-                let mut reader = BufReader::new(&mut *pipe);
-                reader.read_until(b'\n', &mut buffer).await
-            };
             
             match read_result {
                 Ok(0) => {
