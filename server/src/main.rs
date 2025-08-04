@@ -18,12 +18,24 @@ use dialectic_mcp_server::{pid_discovery, DialecticServer};
 #[command(about = "Dialectic MCP Server for VSCode integration")]
 struct Args {
     /// Run PID discovery probe and exit (for testing)
-    #[arg(long)]
+    #[arg(long, global = true)]
     probe: bool,
 
     /// Enable development logging to /tmp/dialectic-mcp-server.log
-    #[arg(long)]
+    #[arg(long, global = true)]
     dev_log: bool,
+
+    #[command(subcommand)]
+    command: Option<Command>,
+}
+
+#[derive(Parser)]
+enum Command {
+    /// Run as message bus daemon for multi-window support
+    Daemon {
+        /// VSCode process ID to monitor
+        vscode_pid: u32,
+    },
 }
 
 #[tokio::main]
@@ -69,23 +81,107 @@ async fn main() -> Result<()> {
         return Ok(());
     }
 
-    info!("Starting Dialectic MCP Server (Rust)");
+    match args.command {
+        Some(Command::Daemon { vscode_pid }) => {
+            info!("🚀 DAEMON MODE - Starting message bus daemon for VSCode PID {}", vscode_pid);
+            run_daemon(vscode_pid).await?;
+        }
+        None => {
+            info!("Starting Dialectic MCP Server (Rust)");
 
-    // Create our server instance
-    let server = DialecticServer::new().await?;
+            // Create our server instance
+            let server = DialecticServer::new().await?;
 
-    // Start the MCP server with stdio transport
-    let service = server.serve(stdio()).await.inspect_err(|e| {
-        error!("MCP server error: {:?}", e);
-    })?;
+            // Start the MCP server with stdio transport
+            let service = server.serve(stdio()).await.inspect_err(|e| {
+                error!("MCP server error: {:?}", e);
+            })?;
 
-    info!("Dialectic MCP Server is ready and listening");
+            info!("Dialectic MCP Server is ready and listening");
 
-    // Wait for the service to complete
-    service.waiting().await?;
+            // Wait for the service to complete
+            service.waiting().await?;
 
-    info!("Dialectic MCP Server shutting down");
+            info!("Dialectic MCP Server shutting down");
+        }
+    }
     std::mem::drop(flush_guard);
+    Ok(())
+}
+
+/// Run the message bus daemon for multi-window support
+async fn run_daemon(vscode_pid: u32) -> Result<()> {
+    use std::os::unix::net::UnixListener;
+    use std::path::Path;
+    
+    let socket_path = format!("/tmp/dialectic-vscode-{}.sock", vscode_pid);
+    info!("Attempting to claim socket: {}", socket_path);
+
+    // Try to bind to the socket first - this is our "claim" operation
+    let _listener = match UnixListener::bind(&socket_path) {
+        Ok(listener) => {
+            info!("✅ Successfully claimed socket: {}", socket_path);
+            listener
+        }
+        Err(e) if e.kind() == std::io::ErrorKind::AddrInUse => {
+            error!("❌ Failed to claim socket {}: {}", socket_path, e);
+            error!("Another daemon is already running for VSCode PID {}", vscode_pid);
+            return Err(e.into());
+        }
+        Err(e) => {
+            // Other error - maybe stale socket file, try to remove and retry once
+            if Path::new(&socket_path).exists() {
+                std::fs::remove_file(&socket_path)?;
+                info!("Removed stale socket file, retrying bind");
+                
+                // Retry binding once
+                match UnixListener::bind(&socket_path) {
+                    Ok(listener) => {
+                        info!("✅ Successfully claimed socket after cleanup: {}", socket_path);
+                        listener
+                    }
+                    Err(e) => {
+                        error!("❌ Failed to claim socket {} even after cleanup: {}", socket_path, e);
+                        return Err(e.into());
+                    }
+                }
+            } else {
+                error!("❌ Failed to claim socket {}: {}", socket_path, e);
+                return Err(e.into());
+            }
+        }
+    };
+
+    info!("🚀 Message bus daemon started for VSCode PID {}", vscode_pid);
+    info!("📡 Listening on socket: {}", socket_path);
+
+    // TODO: Implement the actual message bus loop
+    // For now, just keep the socket claimed and monitor the VSCode process
+    loop {
+        // Check if VSCode process is still alive
+        match nix::sys::signal::kill(nix::unistd::Pid::from_raw(vscode_pid as i32), None) {
+            Ok(_) => {
+                // Process exists, continue
+                tokio::time::sleep(tokio::time::Duration::from_secs(5)).await;
+            }
+            Err(nix::errno::Errno::ESRCH) => {
+                info!("VSCode process {} has died, shutting down daemon", vscode_pid);
+                break;
+            }
+            Err(e) => {
+                error!("Error checking VSCode process {}: {}", vscode_pid, e);
+                tokio::time::sleep(tokio::time::Duration::from_secs(5)).await;
+            }
+        }
+    }
+
+    // Clean up socket file on exit
+    if Path::new(&socket_path).exists() {
+        std::fs::remove_file(&socket_path)?;
+        info!("🧹 Cleaned up socket file: {}", socket_path);
+    }
+
+    info!("🛑 Daemon shutdown complete");
     Ok(())
 }
 

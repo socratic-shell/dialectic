@@ -46,6 +46,9 @@ tracing-appender = "0.2"
 # Command line argument parsing
 clap = { version = "4.0", features = ["derive"] }
 
+# Unix system calls for process monitoring
+nix = { version = "0.27", features = ["signal", "process"] }
+
 [dev-dependencies]
 tokio-test = { workspace = true }
 # Add client feature for testing
