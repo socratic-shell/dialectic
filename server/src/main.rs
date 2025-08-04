@@ -20,18 +20,47 @@ struct Args {
     /// Run PID discovery probe and exit (for testing)
     #[arg(long)]
     probe: bool,
+
+    /// Enable development logging to /tmp/dialectic-mcp-server.log
+    #[arg(long)]
+    dev_log: bool,
 }
 
 #[tokio::main]
 async fn main() -> Result<()> {
     let args = Args::parse();
+    let mut flush_guard = None;
 
     // Initialize logging to stderr (MCP uses stdout for protocol)
-    tracing_subscriber::fmt()
-        .with_env_filter(EnvFilter::from_default_env())
-        .with_writer(std::io::stderr)
-        .with_ansi(true)
-        .init();
+    // In dev mode, also log to file for debugging
+    if args.dev_log {
+        use std::fs::OpenOptions;
+        use tracing_appender::non_blocking;
+
+        let file = OpenOptions::new()
+            .create(true)
+            .append(true)
+            .open("/tmp/dialectic-mcp-server.log")
+            .expect("Failed to open log file");
+
+        let (file_writer, _guard) = non_blocking(file);
+        flush_guard = Some(_guard);
+
+        tracing_subscriber::fmt()
+            .with_env_filter(EnvFilter::from_default_env())
+            .with_writer(file_writer)
+            .with_ansi(false) // No ANSI codes in file
+            .init();
+
+        // Also log to stderr for immediate feedback
+        eprintln!("Development logging enabled - writing to /tmp/dialectic-mcp-server.log (PID: {})", std::process::id());
+    } else {
+        tracing_subscriber::fmt()
+            .with_env_filter(EnvFilter::from_default_env())
+            .with_writer(std::io::stderr)
+            .with_ansi(true)
+            .init();
+    }
 
     if args.probe {
         info!("🔍 PROBE MODE DETECTED - Running PID discovery probe...");
@@ -56,6 +85,7 @@ async fn main() -> Result<()> {
     service.waiting().await?;
 
     info!("Dialectic MCP Server shutting down");
+    std::mem::drop(flush_guard);
     Ok(())
 }
 

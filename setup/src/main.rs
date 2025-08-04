@@ -122,13 +122,13 @@ fn main() -> Result<()> {
     if !args.skip_mcp {
         match tool {
             CLITool::QCli => {
-                success = setup_q_cli_mcp(&binary_path)?;
+                success = setup_q_cli_mcp(&binary_path, args.dev)?;
             }
             CLITool::ClaudeCode => {
                 success = setup_claude_code_mcp(&binary_path, &args.claude_scope)?;
             }
             CLITool::Both => {
-                success = setup_q_cli_mcp(&binary_path)?
+                success = setup_q_cli_mcp(&binary_path, args.dev)?
                     && setup_claude_code_mcp(&binary_path, &args.claude_scope)?;
             }
             CLITool::Auto => unreachable!("Auto should have been resolved earlier"),
@@ -385,18 +385,34 @@ fn build_and_install_extension(dev_mode: bool) -> Result<()> {
     Ok(())
 }
 
-fn setup_q_cli_mcp(binary_path: &Path) -> Result<bool> {
-    // Build the command arguments for the binary
+fn setup_q_cli_mcp(binary_path: &Path, dev_mode: bool) -> Result<bool> {
     let mut cmd = Command::new("q");
-    cmd.args([
-        "mcp", "add",
-        "--name", "dialectic",
-        "--command", &binary_path.to_string_lossy(),
-        "--force",  // Always overwrite existing configuration
-    ]);
+    
+    if dev_mode {
+        // In dev mode, register with --dev-log argument and debug logging
+        cmd.args([
+            "mcp", "add",
+            "--name", "dialectic",
+            "--command", &binary_path.to_string_lossy(),
+            "--args", "--dev-log",
+            "--env", "RUST_LOG=dialectic_mcp_server=debug",
+            "--force",  // Always overwrite existing configuration
+        ]);
+    } else {
+        // In production mode, register without arguments
+        cmd.args([
+            "mcp", "add",
+            "--name", "dialectic",
+            "--command", &binary_path.to_string_lossy(),
+            "--force",  // Always overwrite existing configuration
+        ]);
+    }
     
     println!("🔧 Registering Dialectic MCP server with Q CLI...");
     println!("   Binary path: {}", binary_path.display());
+    if dev_mode {
+        println!("   Development mode: logging to /tmp/dialectic-mcp-server.log with RUST_LOG=dialectic_mcp_server=debug");
+    }
     
     let output = cmd.output().context("Failed to execute q mcp add")?;
     

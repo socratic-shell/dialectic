@@ -296,9 +296,10 @@ impl IPCCommunicator {
     /// for the background reader task to deliver the matching response.
     /// Uses the underlying `write_message` primitive to send the data.
     async fn send_message_with_reply(&self, message: IPCMessage) -> Result<IPCResponse> {
-        trace!(
-            "send_message_with_reply called with message ID: {}",
-            message.id
+        debug!(
+            "Sending IPC message with ID: {} (PID: {})",
+            message.id,
+            std::process::id()
         );
 
         let (tx, rx) = oneshot::channel();
@@ -566,7 +567,7 @@ impl IPCCommunicator {
     /// Processes incoming response messages from VSCode extension
     /// Matches responses to pending requests by ID and sends results back to callers
     async fn handle_response_message(inner: &Arc<Mutex<IPCCommunicatorInner>>, message_str: &str) {
-        debug!("Received IPC response: {}", message_str);
+        debug!("Received IPC response (PID: {}): {}", std::process::id(), message_str);
 
         // Parse the response message
         let response: IPCResponse = match serde_json::from_str(message_str) {
@@ -587,7 +588,7 @@ impl IPCCommunicator {
                 warn!("Failed to send response to caller - receiver dropped");
             }
         } else {
-            warn!("Received response for unknown request ID: {}", response.id);
+            warn!("Received response for unknown request ID: {} (PID: {})", response.id, std::process::id());
         }
     }
 }
