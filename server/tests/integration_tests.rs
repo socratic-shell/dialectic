@@ -5,6 +5,10 @@
 use dialectic_mcp_server::types::{IPCMessage, IPCMessageType, PresentReviewParams, ReviewMode};
 use dialectic_mcp_server::ipc::IPCCommunicator;
 use serde_json;
+use std::time::Duration;
+use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
+use tokio::net::UnixStream;
+use tokio::time::timeout;
 
 #[tokio::test]
 async fn test_ipc_communicator_test_mode() {
@@ -99,4 +103,268 @@ async fn test_ipc_message_structure() {
     assert_eq!(deserialized.content, "# Review Content");
     assert!(matches!(deserialized.mode, ReviewMode::Append));
     assert_eq!(deserialized.base_uri, "/project/root");
+}
+
+#[tokio::test]
+async fn test_daemon_message_broadcasting() {
+    use dialectic_mcp_server::daemon::run_daemon_with_prefix;
+    use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
+    use tokio::net::UnixStream;
+    use tokio::sync::Barrier;
+    use tokio::time::{timeout, Duration};
+    use std::sync::Arc;
+    use uuid::Uuid;
+
+    // Initialize tracing for test output
+    let _ = tracing_subscriber::fmt::try_init();
+
+    // Use current process PID so daemon won't exit due to "VSCode died"
+    let test_pid = std::process::id();
+    // Use UUID to ensure unique socket path per test run
+    let test_id = Uuid::new_v4();
+    let socket_prefix = format!("dialectic-test-{}", test_id);
+    let socket_path = format!("/tmp/{}-{}.sock", socket_prefix, test_pid);
+
+    // Clean up any existing socket
+    let _ = std::fs::remove_file(&socket_path);
+
+    // Barrier for coordinating when daemon is ready (2 participants: daemon + test)
+    let ready_barrier = Arc::new(Barrier::new(2));
+    // Barrier for coordinating when both clients are connected and ready (2 participants: clients)
+    let client_barrier = Arc::new(Barrier::new(2));
+
+    // Start the full daemon with unique prefix and ready barrier
+    let ready_barrier_clone = ready_barrier.clone();
+    let daemon_handle = tokio::spawn(async move {
+        run_daemon_with_prefix(test_pid, &socket_prefix, Some(ready_barrier_clone)).await
+    });
+
+    // Wait for daemon to be ready
+    ready_barrier.wait().await;
+
+    // Verify socket was created
+    assert!(std::path::Path::new(&socket_path).exists(), "Daemon should create socket file");
+
+    // Test: Connect two clients and verify message broadcasting
+    let socket_path_1 = socket_path.clone();
+    let barrier_1 = client_barrier.clone();
+    let client1_handle = tokio::spawn(async move {
+        let mut stream = UnixStream::connect(&socket_path_1).await.expect("Client 1 failed to connect");
+        
+        // Wait at barrier until both clients are connected
+        barrier_1.wait().await;
+        
+        // Client 1 sends first, then waits for response
+        stream.write_all(b"Hello from client 1\n").await.expect("Failed to send message");
+        stream.flush().await.expect("Failed to flush");
+
+        // Read response from client 2
+        let mut reader = BufReader::new(&mut stream);
+        let mut response = String::new();
+        
+        match timeout(Duration::from_secs(2), reader.read_line(&mut response)).await {
+            Ok(Ok(_)) => response.trim().to_string(),
+            _ => "NO_RESPONSE".to_string(),
+        }
+    });
+
+    let socket_path_2 = socket_path.clone();
+    let barrier_2 = client_barrier.clone();
+    let client2_handle = tokio::spawn(async move {
+        let mut stream = UnixStream::connect(&socket_path_2).await.expect("Client 2 failed to connect");
+        
+        // Wait at barrier until both clients are connected
+        barrier_2.wait().await;
+        
+        // Client 2 waits to receive message from client 1, then responds
+        let mut reader = BufReader::new(&mut stream);
+        let mut message = String::new();
+        
+        let received = match timeout(Duration::from_secs(2), reader.read_line(&mut message)).await {
+            Ok(Ok(_)) => message.trim().to_string(),
+            _ => "NO_MESSAGE".to_string(),
+        };
+
+        // Send response back to client 1
+        stream.write_all(b"Hello from client 2\n").await.expect("Failed to send response");
+        stream.flush().await.expect("Failed to flush");
+
+        received
+    });
+
+    // Wait for both clients to complete
+    let (client1_response, client2_received) = tokio::join!(client1_handle, client2_handle);
+    
+    // Verify message broadcasting worked
+    let client1_response = client1_response.expect("Client 1 task failed");
+    let client2_received = client2_received.expect("Client 2 task failed");
+
+    // Client 2 should always receive the message from Client 1
+    assert_eq!(client2_received, "Hello from client 1", "Client 2 should receive message from Client 1");
+    
+    // Client 1 might receive either its own message (due to broadcast) or Client 2's response
+    // Both are valid in a broadcast system - this verifies the broadcast mechanism works
+    assert!(
+        client1_response == "Hello from client 1" || client1_response == "Hello from client 2",
+        "Client 1 should receive either its own message or Client 2's response, got: '{}'", 
+        client1_response
+    );
+
+    // Clean up
+    daemon_handle.abort();
+}
+
+#[tokio::test]
+async fn test_daemon_multiple_clients() {
+    use dialectic_mcp_server::daemon::run_daemon_with_prefix;
+    use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
+    use tokio::net::UnixStream;
+    use tokio::sync::Barrier;
+    use tokio::time::{timeout, Duration};
+    use std::sync::Arc;
+    use uuid::Uuid;
+
+    // Initialize tracing for test output
+    let _ = tracing_subscriber::fmt::try_init();
+
+    // Use current process PID
+    let test_pid = std::process::id();
+    // Use UUID to ensure unique socket path per test run
+    let test_id = Uuid::new_v4();
+    let socket_prefix = format!("dialectic-test-{}", test_id);
+    let socket_path = format!("/tmp/{}-{}.sock", socket_prefix, test_pid);
+
+    // Clean up any existing socket
+    let _ = std::fs::remove_file(&socket_path);
+
+    // Barrier for coordinating when daemon is ready (2 participants: daemon + test)
+    let ready_barrier = Arc::new(Barrier::new(2));
+    // Barrier for coordinating when all clients are connected (1 sender + 2 receivers = 3)
+    let client_barrier = Arc::new(Barrier::new(3));
+
+    // Start the full daemon with unique prefix and ready barrier
+    let ready_barrier_clone = ready_barrier.clone();
+    let daemon_handle = tokio::spawn(async move {
+        run_daemon_with_prefix(test_pid, &socket_prefix, Some(ready_barrier_clone)).await
+    });
+
+    // Wait for daemon to be ready
+    ready_barrier.wait().await;
+
+    // Verify socket was created
+    assert!(std::path::Path::new(&socket_path).exists(), "Daemon should create socket file");
+
+    // Test: One sender, multiple receivers
+    let socket_path_sender = socket_path.clone();
+    let barrier_sender = client_barrier.clone();
+    let sender_handle = tokio::spawn(async move {
+        let mut stream = UnixStream::connect(&socket_path_sender).await.expect("Sender failed to connect");
+        
+        // Wait at barrier until all clients are connected
+        barrier_sender.wait().await;
+        
+        // All clients are now connected and ready, send broadcast message
+        stream.write_all(b"Broadcast message\n").await.expect("Failed to send message");
+        stream.flush().await.expect("Failed to flush");
+    });
+
+    let socket_path_r1 = socket_path.clone();
+    let barrier_r1 = client_barrier.clone();
+    let receiver1_handle = tokio::spawn(async move {
+        let mut stream = UnixStream::connect(&socket_path_r1).await.expect("Receiver 1 failed to connect");
+        
+        // Wait at barrier until all clients are connected
+        barrier_r1.wait().await;
+        
+        // Wait for broadcast message from sender
+        let mut reader = BufReader::new(&mut stream);
+        let mut message = String::new();
+        
+        match timeout(Duration::from_secs(2), reader.read_line(&mut message)).await {
+            Ok(Ok(_)) => message.trim().to_string(),
+            _ => "NO_MESSAGE".to_string(),
+        }
+    });
+
+    let socket_path_r2 = socket_path.clone();
+    let barrier_r2 = client_barrier.clone();
+    let receiver2_handle = tokio::spawn(async move {
+        let mut stream = UnixStream::connect(&socket_path_r2).await.expect("Receiver 2 failed to connect");
+        
+        // Wait at barrier until all clients are connected
+        barrier_r2.wait().await;
+        
+        // Wait for broadcast message from sender
+        let mut reader = BufReader::new(&mut stream);
+        let mut message = String::new();
+        
+        match timeout(Duration::from_secs(2), reader.read_line(&mut message)).await {
+            Ok(Ok(_)) => message.trim().to_string(),
+            _ => "NO_MESSAGE".to_string(),
+        }
+    });
+
+    // Wait for all tasks
+    let (_, receiver1_msg, receiver2_msg) = tokio::join!(sender_handle, receiver1_handle, receiver2_handle);
+    
+    // Verify both receivers got the message
+    let receiver1_msg = receiver1_msg.expect("Receiver 1 task failed");
+    let receiver2_msg = receiver2_msg.expect("Receiver 2 task failed");
+
+    assert_eq!(receiver1_msg, "Broadcast message", "Receiver 1 should get broadcast");
+    assert_eq!(receiver2_msg, "Broadcast message", "Receiver 2 should get broadcast");
+
+    // Clean up
+    daemon_handle.abort();
+}
+
+#[tokio::test]
+async fn test_daemon_socket_claiming() {
+    use dialectic_mcp_server::daemon::run_daemon_with_prefix;
+    use tokio::sync::Barrier;
+    use std::sync::Arc;
+    use uuid::Uuid;
+
+    // Initialize tracing for test output
+    let _ = tracing_subscriber::fmt::try_init();
+
+    // Use actual test process PID (so daemon won't exit due to "process died")
+    let test_pid = std::process::id();
+    // Use UUID to ensure unique socket path per test run
+    let test_id = Uuid::new_v4();
+    let socket_prefix = format!("dialectic-test-{}", test_id);
+    let socket_path = format!("/tmp/{}-{}.sock", socket_prefix, test_pid);
+
+    // Clean up any existing socket
+    let _ = std::fs::remove_file(&socket_path);
+
+    // Barrier for coordinating when first daemon is ready (2 participants: daemon + test)
+    let ready_barrier = Arc::new(Barrier::new(2));
+
+    // Start first daemon with ready barrier
+    let socket_prefix_1 = socket_prefix.clone();
+    let ready_barrier_clone = ready_barrier.clone();
+    let daemon1_handle = tokio::spawn(async move {
+        run_daemon_with_prefix(test_pid, &socket_prefix_1, Some(ready_barrier_clone)).await
+    });
+
+    // Wait for first daemon to be ready
+    ready_barrier.wait().await;
+
+    // Verify socket was created
+    assert!(std::path::Path::new(&socket_path).exists(), "First daemon should create socket file");
+
+    // Try to start second daemon with same PID and prefix (should fail)
+    let socket_prefix_2 = socket_prefix.clone();
+    let daemon2_result = tokio::spawn(async move {
+        run_daemon_with_prefix(test_pid, &socket_prefix_2, None).await
+    }).await;
+
+    // Second daemon should fail due to socket conflict
+    assert!(daemon2_result.is_ok(), "Task should complete");
+    let daemon2_inner_result = daemon2_result.unwrap();
+    assert!(daemon2_inner_result.is_err(), "Second daemon should fail due to socket conflict");
+
+    // Clean up first daemon
+    daemon1_handle.abort();
 }
