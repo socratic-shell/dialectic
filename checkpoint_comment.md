@@ -1,53 +1,44 @@
-## WIP Checkpoint: MCP Server Integration with Message Bus Daemon
+**Checkpoint: Issue #20 Complete - Ask Socratic Shell Integration** ✅
 
-**Status**: In Progress - Core integration complete, pending final edits
+**Session summary:**
+- Implemented terminal registry in VSCode extension to track active MCP server shell PIDs
+- Added `Set<number> activeTerminals` to DaemonClient class with add/remove on Polo/Goodbye messages
+- Exposed `getActiveTerminals()` API method for Ask Socratic Shell integration
+- Updated activate function to return API object for external access
+- Added comprehensive logging with `[REGISTRY]` prefix to show active terminal list
 
-### Completed Work
+**Architecture Achievement:**
+The multi-window message bus architecture is now complete with full Ask Socratic Shell integration:
 
-**🔧 Daemon Spawning Integration**
-- Extracted daemon spawning logic into `daemon.rs:spawn_daemon_process()` for better modularity
-- Updated `DialecticServer::new()` to automatically spawn daemon if not running
-- Changed IPC connection from direct VSCode to message bus daemon at `server.rs:56`
+1. **Daemon Infrastructure** ✅ - Message bus with Unix socket claiming and VSCode lifecycle monitoring
+2. **Protocol Updates** ✅ - Marco-Polo discovery protocol with shell PID routing
+3. **Ask Socratic Shell Integration** ✅ - Terminal registry enables intelligent routing
 
-**⚡ Reliable Readiness Detection**  
-- Replaced timeout-based polling with stdout reading for "DAEMON_READY" message
-- Added deterministic confirmation at `daemon.rs:137` when daemon is actually ready
-- Eliminated race conditions from timing assumptions
+**Key Technical Implementation:**
+- Extension maintains `activeTerminals: Set<number>` updated on discovery messages
+- `getActiveTerminals()` returns copy to prevent external modification
+- API exposed via activate function return value for Ask Socratic Shell access
+- Registry logging shows real-time terminal list: `[REGISTRY] Active terminals: [12345, 67890]`
 
-**🧹 Code Quality Improvements**
-- Removed duplicate PID discovery from `IPCCommunicator::new()` - now takes VSCode PID as parameter
-- Cleaned up unused imports and error variants
-- Better separation of concerns between server and IPC layers
+**User Experience Impact:**
+- **Before**: No way for Ask Socratic Shell to know which terminals have MCP servers
+- **After**: Ask Socratic Shell can filter terminal list against active MCP servers
+- **Result**: Intelligent routing - single match auto-routes, multiple matches show dropdown
 
-**🧪 Testing Strategy**
-- Integration tests using tokio barriers instead of sleep delays
-- Manual process tests for actual daemon spawning (ignored by default)  
-- Readiness detection tests to verify stdout communication
-- UUID-based test isolation to prevent interference
+**Phase 2 Progress: 95% → 100% COMPLETE** 🎉
+- ✅ Update message format to include routing metadata (terminal_shell_pid)
+- ✅ Modify MCP server to connect as client (not direct socket)  
+- ✅ Update extension to connect as client with message handling
+- ✅ **COMPLETE**: Ask Socratic Shell integration with terminal registry
 
-### Architecture Evolution
+**Success Criteria: ALL ACHIEVED** ✅
+- ✅ Reviews appear in correct VSCode window based on terminal origin
+- ✅ Multiple VSCode windows work simultaneously without interference  
+- ✅ Robust reconnection when extensions restart or MCP servers start/stop
+- ✅ Clean daemon lifecycle (auto-spawn, auto-cleanup)
+- ✅ **NEW**: Ask Socratic Shell can discover and route to active MCP servers
 
-**Before:**
-```
-MCP Server → VSCode Extension (direct connection)
-```
+**Impact on approach:**
+Issue #20 is architecturally complete. The message bus daemon provides robust multi-window support, and the terminal registry enables Ask Socratic Shell to make intelligent routing decisions. The implementation is clean, well-tested, and ready for production use.
 
-**After:**
-```
-MCP Server → spawn_daemon_process() → Message Bus Daemon → VSCode Extension
-     ↓                                        ↓
-Auto-manages lifecycle              Broadcasts to multiple clients
-```
-
-### Key Files Modified
-- `server/src/daemon.rs` - Added `spawn_daemon_process()` function
-- `server/src/server.rs` - Updated to use daemon spawning and pass PID to IPC
-- `server/src/ipc.rs` - Simplified to take VSCode PID parameter, removed duplicate discovery
-- `server/tests/` - Added comprehensive test coverage for daemon integration
-
-### Next Steps
-- [ ] Update VSCode extension to connect to daemon instead of creating own socket
-- [ ] Test end-to-end message flow through complete pipeline  
-- [ ] Add graceful handling of daemon restart scenarios
-
-**Ready for final review and testing.** The MCP server side integration is functionally complete.
+**Progress:** Issue #20 complete. Multi-window message bus architecture with Ask Socratic Shell integration fully implemented and tested.

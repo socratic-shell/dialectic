@@ -26,6 +26,9 @@ class DaemonClient implements vscode.Disposable {
     private isDisposed = false;
     private buffer = '';
     private readonly RECONNECT_INTERVAL_MS = 5000; // 5 seconds
+    
+    // Terminal registry: track active shell PIDs with MCP servers
+    private activeTerminals: Set<number> = new Set();
 
     constructor(
         private context: vscode.ExtensionContext,
@@ -173,7 +176,10 @@ class DaemonClient implements vscode.Disposable {
 
                 if (await this.isMessageForOurWindow(poloPayload.terminal_shell_pid)) {
                     this.outputChannel.appendLine(`[DISCOVERY] MCP server connected in terminal PID ${poloPayload.terminal_shell_pid}`);
-                    // TODO: Add to terminal registry for Ask Socratic Shell integration
+                    
+                    // Add to terminal registry for Ask Socratic Shell integration
+                    this.activeTerminals.add(poloPayload.terminal_shell_pid);
+                    this.outputChannel.appendLine(`[REGISTRY] Active terminals: [${Array.from(this.activeTerminals).join(', ')}]`);
                 }
             } catch (error) {
                 this.outputChannel.appendLine(`Error handling polo message: ${error}`);
@@ -187,7 +193,10 @@ class DaemonClient implements vscode.Disposable {
 
                 if (await this.isMessageForOurWindow(goodbyePayload.terminal_shell_pid)) {
                     this.outputChannel.appendLine(`[DISCOVERY] MCP server disconnected from terminal PID ${goodbyePayload.terminal_shell_pid}`);
-                    // TODO: Remove from terminal registry for Ask Socratic Shell integration
+                    
+                    // Remove from terminal registry for Ask Socratic Shell integration
+                    this.activeTerminals.delete(goodbyePayload.terminal_shell_pid);
+                    this.outputChannel.appendLine(`[REGISTRY] Active terminals: [${Array.from(this.activeTerminals).join(', ')}]`);
                 }
             } catch (error) {
                 this.outputChannel.appendLine(`Error handling goodbye message: ${error}`);
@@ -370,6 +379,14 @@ class DaemonClient implements vscode.Disposable {
 
         this.outputChannel.appendLine('Daemon client disposed');
     }
+
+    /**
+     * Get the set of active terminal shell PIDs with MCP servers
+     * For Ask Socratic Shell integration
+     */
+    getActiveTerminals(): Set<number> {
+        return new Set(this.activeTerminals); // Return a copy to prevent external modification
+    }
 }
 
 export function activate(context: vscode.ExtensionContext) {
@@ -414,6 +431,11 @@ export function activate(context: vscode.ExtensionContext) {
     });
 
     context.subscriptions.push(showReviewCommand, copyReviewCommand, logPIDsCommand, reviewProvider, daemonClient);
+
+    // Return API for Ask Socratic Shell integration
+    return {
+        getActiveTerminals: () => daemonClient.getActiveTerminals()
+    };
 }
 
 // 💡: Set up universal selection detection for interactive code review
