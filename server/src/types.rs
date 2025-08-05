@@ -112,6 +112,33 @@ pub struct GetSelectionResult {
     pub message: Option<String>,
 }
 
+/// Payload for Polo discovery messages (MCP server announces presence)
+#[derive(Debug, Clone, Deserialize, Serialize)]
+pub struct PoloPayload {
+    /// Shell PID of the terminal where this MCP server is running
+    pub terminal_shell_pid: u32,
+}
+
+/// Payload for Goodbye discovery messages (MCP server announces departure)
+#[derive(Debug, Clone, Deserialize, Serialize)]
+pub struct GoodbyePayload {
+    /// Shell PID of the terminal where this MCP server was running
+    pub terminal_shell_pid: u32,
+}
+
+/// Payload for Response messages (replaces IPCResponse struct)
+#[derive(Debug, Clone, Deserialize, Serialize)]
+pub struct ResponsePayload {
+    /// Whether the operation succeeded
+    pub success: bool,
+    
+    /// Optional error message
+    pub error: Option<String>,
+    
+    /// Optional data payload for responses like get_selection
+    pub data: Option<serde_json::Value>,
+}
+
 /// IPC message sent from MCP server to VSCode extension
 #[derive(Debug, Clone, Deserialize, Serialize)]
 pub struct IPCMessage {
@@ -133,20 +160,14 @@ pub enum IPCMessageType {
     PresentReview,
     Log,
     GetSelection,
+    /// Extension broadcasts "who's out there?" to discover active MCP servers
+    Marco,
+    /// MCP server announces presence with shell PID (response to Marco or unsolicited)
+    Polo,
+    /// MCP server announces departure with shell PID
+    Goodbye,
+    /// Response to any message (replaces IPCResponse struct)
+    Response,
 }
 
-/// IPC response sent from VSCode extension back to MCP server
-#[derive(Debug, Clone, Deserialize, Serialize)]
-pub struct IPCResponse {
-    /// Response to message with this ID
-    pub id: String,
-    
-    /// Whether the operation succeeded
-    pub success: bool,
-    
-    /// Optional error message
-    pub error: Option<String>,
-    
-    /// Optional data payload for get_selection responses
-    pub data: Option<serde_json::Value>,
-}
+

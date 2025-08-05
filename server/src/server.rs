@@ -49,10 +49,19 @@ impl DialecticServer {
         ipc.initialize().await?;
         info!("IPC communication with message bus daemon initialized");
 
+        // Send unsolicited Polo message to announce our presence
+        ipc.send_polo(shell_pid).await?;
+        info!("Sent Polo discovery message with shell PID: {}", shell_pid);
+
         Ok(Self {
             ipc,
             tool_router: Self::tool_router(),
         })
+    }
+
+    /// Get a reference to the IPC communicator
+    pub fn ipc(&self) -> &IPCCommunicator {
+        &self.ipc
     }
 
     /// Ensure the message bus daemon is running for the given VSCode PID

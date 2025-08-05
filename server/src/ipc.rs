@@ -4,8 +4,8 @@
 //! Ports the logic from server/src/ipc.ts to Rust with cross-platform support.
 
 use crate::types::{
-    GetSelectionResult, IPCMessage, IPCMessageType, IPCResponse, LogLevel, LogParams,
-    PresentReviewParams, PresentReviewResult,
+    GetSelectionResult, GoodbyePayload, IPCMessage, IPCMessageType, LogLevel, LogParams,
+    PoloPayload, PresentReviewParams, PresentReviewResult, ResponsePayload,
 };
 use futures::FutureExt;
 use serde_json;
@@ -73,7 +73,7 @@ struct IPCCommunicatorInner {
     /// Tracks outgoing requests awaiting responses from VSCode extension
     /// Key: unique message ID (UUID), Value: channel to send response back to caller
     /// Enables concurrent request/response handling with proper correlation
-    pending_requests: HashMap<String, oneshot::Sender<IPCResponse>>,
+    pending_requests: HashMap<String, oneshot::Sender<ResponsePayload>>,
 
     /// Flag to track if we have an active connection and reader task
     /// When true, ensure_connection() is a no-op
@@ -258,12 +258,96 @@ impl IPCCommunicator {
         }
     }
 
+    /// Send Marco discovery message. In normal workflow,
+    /// this is actually sent by the *extension* to broadcast
+    /// "who's out there?" -- but we include it for testing purposes.
+    pub async fn send_marco(&self) -> Result<()> {
+        if self.test_mode {
+            info!("Marco discovery message sent (test mode)");
+            return Ok(());
+        }
+
+        let message = IPCMessage {
+            message_type: IPCMessageType::Marco,
+            payload: serde_json::json!({}),
+            id: Uuid::new_v4().to_string(),
+        };
+
+        debug!("Sending Marco discovery message");
+        self.send_message_without_reply(message).await
+    }
+
+    /// Send Polo discovery message (MCP server announces presence with shell PID)
+    pub async fn send_polo(&self, terminal_shell_pid: u32) -> Result<()> {
+        if self.test_mode {
+            info!(
+                "Polo discovery message sent (test mode) with shell PID: {}",
+                terminal_shell_pid
+            );
+            return Ok(());
+        }
+
+        let payload = PoloPayload { terminal_shell_pid };
+        let message = IPCMessage {
+            message_type: IPCMessageType::Polo,
+            payload: serde_json::to_value(payload)?,
+            id: Uuid::new_v4().to_string(),
+        };
+
+        debug!(
+            "Sending Polo discovery message with shell PID: {}",
+            terminal_shell_pid
+        );
+        self.send_message_without_reply(message).await
+    }
+
+    /// Send Goodbye discovery message (MCP server announces departure with shell PID)
+    pub async fn send_goodbye(&self, terminal_shell_pid: u32) -> Result<()> {
+        if self.test_mode {
+            info!(
+                "Goodbye discovery message sent (test mode) with shell PID: {}",
+                terminal_shell_pid
+            );
+            return Ok(());
+        }
+
+        let payload = GoodbyePayload { terminal_shell_pid };
+        let message = IPCMessage {
+            message_type: IPCMessageType::Goodbye,
+            payload: serde_json::to_value(payload)?,
+            id: Uuid::new_v4().to_string(),
+        };
+
+        debug!(
+            "Sending Goodbye discovery message with shell PID: {}",
+            terminal_shell_pid
+        );
+        self.send_message_without_reply(message).await
+    }
+
+    /// Gracefully shutdown the IPC communicator, sending Goodbye discovery message
+    pub async fn shutdown(&self) -> Result<()> {
+        if self.test_mode {
+            info!("IPC shutdown (test mode)");
+            return Ok(());
+        }
+
+        let shell_pid = {
+            let inner_guard = self.inner.lock().await;
+            inner_guard.terminal_shell_pid
+        };
+
+        self.send_goodbye(shell_pid).await?;
+        info!("Sent Goodbye discovery message during shutdown");
+        Ok(())
+    }
+
     /// Sends an IPC message and waits for a response from VSCode extension
     ///
     /// Sets up response correlation using the message UUID and waits up to 5 seconds
     /// for the background reader task to deliver the matching response.
     /// Uses the underlying `write_message` primitive to send the data.
-    async fn send_message_with_reply(&self, message: IPCMessage) -> Result<IPCResponse> {
+    async fn send_message_with_reply(&self, message: IPCMessage) -> Result<ResponsePayload> {
         debug!(
             "Sending IPC message with ID: {} (PID: {})",
             message.id,
@@ -512,7 +596,7 @@ impl IPCCommunicator {
                             }
                         };
 
-                        Self::handle_response_message(&inner, &message_str).await;
+                        Self::handle_incoming_message(&inner, &message_str).await;
                     }
                     Err(e) => {
                         error!("Error reading from IPC connection: {}", e);
@@ -535,39 +619,81 @@ impl IPCCommunicator {
         .boxed()
     }
 
-    /// Processes incoming response messages from VSCode extension
-    /// Matches responses to pending requests by ID and sends results back to callers
-    async fn handle_response_message(inner: &Arc<Mutex<IPCCommunicatorInner>>, message_str: &str) {
+    /// Processes incoming messages from the daemon
+    /// Handles both responses to our requests and incoming messages (like Marco)
+    async fn handle_incoming_message(inner: &Arc<Mutex<IPCCommunicatorInner>>, message_str: &str) {
         debug!(
-            "Received IPC response (PID: {}): {}",
+            "Received IPC message (PID: {}): {}",
             std::process::id(),
             message_str
         );
 
-        // Parse the response message
-        let response: IPCResponse = match serde_json::from_str(message_str) {
-            Ok(r) => r,
+        // Parse as unified IPCMessage
+        let message: IPCMessage = match serde_json::from_str(message_str) {
+            Ok(msg) => msg,
             Err(e) => {
                 error!(
-                    "Failed to parse IPC response: {} - Message: {}",
+                    "Failed to parse incoming message: {} - Message: {}",
                     e, message_str
                 );
                 return;
             }
         };
 
-        // Find the pending request and send the response
-        let mut inner_guard = inner.lock().await;
-        if let Some(sender) = inner_guard.pending_requests.remove(&response.id) {
-            if let Err(_) = sender.send(response) {
-                warn!("Failed to send response to caller - receiver dropped");
+        match message.message_type {
+            IPCMessageType::Response => {
+                // Handle response to our request
+                let response_payload: ResponsePayload =
+                    match serde_json::from_value(message.payload) {
+                        Ok(payload) => payload,
+                        Err(e) => {
+                            error!("Failed to parse response payload: {}", e);
+                            return;
+                        }
+                    };
+
+                let mut inner_guard = inner.lock().await;
+                if let Some(sender) = inner_guard.pending_requests.remove(&message.id) {
+                    if let Err(_) = sender.send(response_payload) {
+                        warn!("Failed to send response to caller - receiver dropped");
+                    }
+                } else {
+                    // Every message (including the ones we send...) gets rebroadcast to everyone,
+                    // so this is (hopefully) to some other MCP server. Just ignore it.
+                    debug!(
+                        "Received response for unknown request ID: {} (PID: {})",
+                        message.id,
+                        std::process::id()
+                    );
+                }
             }
-        } else {
-            warn!(
-                "Received response for unknown request ID: {} (PID: {})",
-                response.id,
-                std::process::id()
-            );
+            IPCMessageType::Marco => {
+                info!("Received Marco discovery message, responding with Polo");
+
+                // Get shell PID from inner state
+                let shell_pid = {
+                    let inner_guard = inner.lock().await;
+                    inner_guard.terminal_shell_pid
+                };
+
+                // Create a temporary IPCCommunicator to send Polo response
+                let temp_communicator = IPCCommunicator {
+                    inner: Arc::clone(inner),
+                    test_mode: false,
+                };
+
+                if let Err(e) = temp_communicator.send_polo(shell_pid).await {
+                    error!("Failed to send Polo response to Marco: {}", e);
+                }
+            }
+            _ => {
+                // Every message (including the ones we send...) gets rebroadcast to everyone,
+                // so we can just ignore anything else.
+                debug!(
+                    "Received unhandled message type: {:?}",
+                    message.message_type
+                );
+            }
         }
     }
 }
