@@ -7,7 +7,7 @@ import { ReviewWebviewProvider } from './reviewWebview';
 
 // 💡: Types for IPC communication with MCP server
 interface IPCMessage {
-    type: 'present_review' | 'log' | 'get_selection' | 'response';
+    type: 'present_review' | 'log' | 'get_selection' | 'response' | 'marco' | 'polo' | 'goodbye';
     payload: {
         content: string;
         mode: 'replace' | 'update-section' | 'append';
@@ -52,6 +52,9 @@ class DaemonClient implements vscode.Disposable {
         this.socket.on('connect', () => {
             this.outputChannel.appendLine('✅ Connected to message bus daemon');
             this.clearReconnectTimer();
+
+            // Send Marco broadcast to discover existing MCP servers
+            this.sendMarco();
         });
 
         this.socket.on('error', (error) => {
@@ -98,17 +101,6 @@ class DaemonClient implements vscode.Disposable {
     }
 
     private async handleIncomingMessage(message: IPCMessage): Promise<void> {
-        // Extract shell PID from message payload for filtering
-        const shellPid = this.extractShellPidFromMessage(message);
-
-        if (shellPid) {
-            // Check if this message is intended for our VSCode window
-            const isForOurWindow = await this.isMessageForOurWindow(shellPid);
-            if (!isForOurWindow) {
-                this.outputChannel.appendLine(`Debug: Ignoring message from shell PID ${shellPid} (not in our window)`);
-                return;
-            }
-        }
         if (message.type === 'present_review') {
             try {
                 const reviewPayload = message.payload as {
@@ -119,14 +111,16 @@ class DaemonClient implements vscode.Disposable {
                     terminal_shell_pid: number;
                 };
 
-                this.reviewProvider.updateReview(
-                    reviewPayload.content,
-                    reviewPayload.mode,
-                    reviewPayload.baseUri
-                );
+                if (await this.isMessageForOurWindow(reviewPayload.terminal_shell_pid)) {
+                    this.reviewProvider.updateReview(
+                        reviewPayload.content,
+                        reviewPayload.mode,
+                        reviewPayload.baseUri
+                    );
 
-                // Send success response back through daemon
-                this.sendResponse(message.id, { success: true });
+                    // Send success response back through daemon
+                    this.sendResponse(message.id, { success: true });
+                }
             } catch (error) {
                 this.outputChannel.appendLine(`Error handling present_review: ${error}`);
                 this.sendResponse(message.id, {
@@ -136,11 +130,17 @@ class DaemonClient implements vscode.Disposable {
             }
         } else if (message.type === 'get_selection') {
             try {
-                const selectionData = this.getCurrentSelection();
-                this.sendResponse(message.id, {
-                    success: true,
-                    data: selectionData
-                });
+                const selectionPayload = message.payload as {
+                    terminal_shell_pid: number;
+                };
+
+                if (await this.isMessageForOurWindow(selectionPayload.terminal_shell_pid)) {
+                    const selectionData = this.getCurrentSelection();
+                    this.sendResponse(message.id, {
+                        success: true,
+                        data: selectionData
+                    });
+                }
             } catch (error) {
                 this.outputChannel.appendLine(`Error handling get_selection: ${error}`);
                 this.sendResponse(message.id, {
@@ -156,12 +156,45 @@ class DaemonClient implements vscode.Disposable {
                     message: string;
                     terminal_shell_pid: number;
                 };
-                
-                const levelPrefix = logPayload.level.toUpperCase();
-                this.outputChannel.appendLine(`[${levelPrefix}] ${logPayload.message}`);
+
+                if (await this.isMessageForOurWindow(logPayload.terminal_shell_pid)) {
+                    const levelPrefix = logPayload.level.toUpperCase();
+                    this.outputChannel.appendLine(`[${levelPrefix}] ${logPayload.message}`);
+                }
             } catch (error) {
                 this.outputChannel.appendLine(`Error handling log message: ${error}`);
             }
+        } else if (message.type === 'polo') {
+            // Handle Polo messages - MCP server announcing presence
+            try {
+                const poloPayload = message.payload as {
+                    terminal_shell_pid: number;
+                };
+
+                if (await this.isMessageForOurWindow(poloPayload.terminal_shell_pid)) {
+                    this.outputChannel.appendLine(`[DISCOVERY] MCP server connected in terminal PID ${poloPayload.terminal_shell_pid}`);
+                    // TODO: Add to terminal registry for Ask Socratic Shell integration
+                }
+            } catch (error) {
+                this.outputChannel.appendLine(`Error handling polo message: ${error}`);
+            }
+        } else if (message.type === 'goodbye') {
+            // Handle Goodbye messages - MCP server announcing departure
+            try {
+                const goodbyePayload = message.payload as {
+                    terminal_shell_pid: number;
+                };
+
+                if (await this.isMessageForOurWindow(goodbyePayload.terminal_shell_pid)) {
+                    this.outputChannel.appendLine(`[DISCOVERY] MCP server disconnected from terminal PID ${goodbyePayload.terminal_shell_pid}`);
+                    // TODO: Remove from terminal registry for Ask Socratic Shell integration
+                }
+            } catch (error) {
+                this.outputChannel.appendLine(`Error handling goodbye message: ${error}`);
+            }
+        } else if (message.type === 'marco') {
+            // Ignore Marco messages - these are broadcasts we send, MCP servers respond to them
+            // Extensions don't need to respond to Marco broadcasts
         } else if (message.type == 'response') {
             // Ignore this, response messages are messages that WE send to clients.
         } else {
@@ -201,6 +234,7 @@ class DaemonClient implements vscode.Disposable {
                 try {
                     const terminalPid = await terminal.processId;
                     if (terminalPid === shellPid) {
+                        this.outputChannel.appendLine(`Debug: shell PID ${shellPid} is in our window`);
                         return true;
                     }
                 } catch (error) {
@@ -209,6 +243,7 @@ class DaemonClient implements vscode.Disposable {
                 }
             }
 
+            this.outputChannel.appendLine(`Debug: shell PID ${shellPid} is not in our window`);
             return false;
         } catch (error) {
             this.outputChannel.appendLine(`Error checking if message is for our window: ${error}`);
@@ -275,6 +310,26 @@ class DaemonClient implements vscode.Disposable {
             this.socket.write(JSON.stringify(responseMessage) + '\n');
         } catch (error) {
             this.outputChannel.appendLine(`Failed to send response: ${error}`);
+        }
+    }
+
+    private sendMarco(): void {
+        if (!this.socket || this.socket.destroyed) {
+            this.outputChannel.appendLine(`Cannot send Marco - socket not connected`);
+            return;
+        }
+
+        const marcoMessage = {
+            type: 'marco',
+            payload: {},
+            id: crypto.randomUUID()
+        };
+
+        try {
+            this.socket.write(JSON.stringify(marcoMessage) + '\n');
+            this.outputChannel.appendLine('[DISCOVERY] Sent Marco broadcast to discover MCP servers');
+        } catch (error) {
+            this.outputChannel.appendLine(`Failed to send Marco: ${error}`);
         }
     }
 
