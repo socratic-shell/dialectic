@@ -5,26 +5,107 @@
 
 use anyhow::Result;
 use std::collections::HashMap;
-use std::os::unix::net::UnixListener;
-use std::path::Path;
-use tokio::time::{interval, Duration};
 use tracing::{error, info};
 
-/// Run the message bus daemon for multi-window support
-pub async fn run_daemon(vscode_pid: u32) -> Result<()> {
-    run_daemon_with_prefix(vscode_pid, "dialectic-daemon", None).await
+/// Spawn the daemon as a separate detached process
+pub async fn spawn_daemon_process(vscode_pid: u32) -> Result<()> {
+    use std::process::Command;
+
+    let socket_path = format!("/tmp/dialectic-daemon-{}.sock", vscode_pid);
+
+    // Check if daemon is already running by trying to connect
+    if tokio::net::UnixStream::connect(&socket_path).await.is_ok() {
+        info!(
+            "Message bus daemon already running for VSCode PID {}",
+            vscode_pid
+        );
+        return Ok(());
+    }
+
+    info!(
+        "Starting message bus daemon as separate process for VSCode PID {}",
+        vscode_pid
+    );
+
+    // Get the current executable path to spawn daemon
+    let current_exe = std::env::current_exe()
+        .map_err(|e| anyhow::anyhow!("Failed to get current executable path: {}", e))?;
+
+    // Spawn daemon as separate detached process
+    let mut cmd = Command::new(&current_exe);
+    cmd.args(&["daemon", &vscode_pid.to_string()]);
+    cmd.stdout(std::process::Stdio::piped()); // Capture stdout to read readiness message
+    cmd.stderr(std::process::Stdio::null()); // Suppress stderr to avoid noise
+
+    // Detach from parent process (Unix-specific)
+    #[cfg(unix)]
+    {
+        use std::os::unix::process::CommandExt;
+        cmd.process_group(0); // Create new process group
+    }
+
+    let mut child = cmd
+        .spawn()
+        .map_err(|e| anyhow::anyhow!("Failed to spawn daemon process: {}", e))?;
+
+    info!("Spawned daemon process with PID: {}", child.id());
+
+    // Read stdout until we get the "OK" message indicating daemon is ready
+    if let Some(stdout) = child.stdout.take() {
+        use std::io::{BufRead, BufReader};
+        use std::time::Duration;
+
+        let reader = BufReader::new(stdout);
+
+        // Use a timeout as a safety net, but rely primarily on the OK message
+        let timeout_result = tokio::time::timeout(Duration::from_secs(10), async {
+            // We need to use blocking I/O here since we're reading from a process
+            tokio::task::spawn_blocking(move || {
+                for line in reader.lines() {
+                    match line {
+                        Ok(line) => {
+                            if line.trim() == "DAEMON_READY" {
+                                return Ok(());
+                            }
+                        }
+                        Err(e) => {
+                            return Err(anyhow::anyhow!("Error reading daemon stdout: {}", e));
+                        }
+                    }
+                }
+                Err(anyhow::anyhow!(
+                    "Daemon process ended without sending DAEMON_READY message"
+                ))
+            })
+            .await?
+        })
+        .await;
+
+        match timeout_result {
+            Ok(Ok(())) => {
+                info!("Message bus daemon confirmed ready");
+                Ok(())
+            }
+            Ok(Err(e)) => Err(e),
+            Err(_) => {
+                anyhow::bail!("Timeout waiting for daemon readiness confirmation (10 seconds)");
+            }
+        }
+    } else {
+        anyhow::bail!("Failed to capture daemon stdout for readiness confirmation");
+    }
 }
 
 /// Run the message bus daemon with custom socket path prefix
 /// If ready_barrier is provided, it will be signaled when the daemon is ready to accept connections
 pub async fn run_daemon_with_prefix(
-    vscode_pid: u32, 
+    vscode_pid: u32,
     socket_prefix: &str,
-    ready_barrier: Option<std::sync::Arc<tokio::sync::Barrier>>
+    ready_barrier: Option<std::sync::Arc<tokio::sync::Barrier>>,
 ) -> Result<()> {
     use std::os::unix::net::UnixListener;
     use std::path::Path;
-    
+
     let socket_path = format!("/tmp/{}-{}.sock", socket_prefix, vscode_pid);
     info!("Attempting to claim socket: {}", socket_path);
 
@@ -37,7 +118,10 @@ pub async fn run_daemon_with_prefix(
         Err(e) => {
             if e.kind() == std::io::ErrorKind::AddrInUse {
                 error!("❌ Failed to claim socket {}: {}", socket_path, e);
-                error!("Another daemon is already running for VSCode PID {}", vscode_pid);
+                error!(
+                    "Another daemon is already running for VSCode PID {}",
+                    vscode_pid
+                );
             } else {
                 error!("❌ Failed to claim socket {}: {}", socket_path, e);
             }
@@ -45,12 +129,18 @@ pub async fn run_daemon_with_prefix(
         }
     };
 
-    info!("🚀 Message bus daemon started for VSCode PID {}", vscode_pid);
+    info!(
+        "🚀 Message bus daemon started for VSCode PID {}",
+        vscode_pid
+    );
     info!("📡 Listening on socket: {}", socket_path);
 
     // Convert std::os::unix::net::UnixListener to tokio::net::UnixListener
     _listener.set_nonblocking(true)?;
     let listener = tokio::net::UnixListener::from_std(_listener)?;
+
+    // Signal that daemon is ready to accept connections
+    println!("DAEMON_READY");
 
     // Run the message bus loop
     run_message_bus(listener, vscode_pid, ready_barrier).await?;
@@ -67,23 +157,23 @@ pub async fn run_daemon_with_prefix(
 
 /// Run the message bus loop - accept connections, broadcast messages, monitor VSCode
 pub async fn run_message_bus(
-    listener: tokio::net::UnixListener, 
+    listener: tokio::net::UnixListener,
     vscode_pid: u32,
-    ready_barrier: Option<std::sync::Arc<tokio::sync::Barrier>>
+    ready_barrier: Option<std::sync::Arc<tokio::sync::Barrier>>,
 ) -> Result<()> {
     use tokio::sync::broadcast;
     use tokio::time::{interval, Duration};
 
     info!("Starting message bus loop");
-    
+
     // Signal that daemon is ready to accept connections
     if let Some(barrier) = ready_barrier {
         barrier.wait().await;
     }
-    
+
     // Broadcast channel for distributing messages to all clients
     let (tx, _rx) = broadcast::channel::<String>(1000);
-    
+
     // Track connected clients
     let mut clients: HashMap<usize, tokio::task::JoinHandle<()>> = HashMap::new();
     let mut next_client_id = 0;
@@ -99,9 +189,9 @@ pub async fn run_message_bus(
                     Ok((stream, _addr)) => {
                         let client_id = next_client_id;
                         next_client_id += 1;
-                        
+
                         info!("Client {} connected", client_id);
-                        
+
                         // Spawn task to handle this client
                         let tx_clone = tx.clone();
                         let rx = tx.subscribe();
@@ -113,7 +203,7 @@ pub async fn run_message_bus(
                     }
                 }
             }
-            
+
             // Check if VSCode process is still alive
             _ = vscode_check_interval.tick() => {
                 match nix::sys::signal::kill(nix::unistd::Pid::from_raw(vscode_pid as i32), None) {
@@ -129,7 +219,7 @@ pub async fn run_message_bus(
                     }
                 }
             }
-            
+
             // Clean up finished client tasks
             _ = tokio::time::sleep(Duration::from_secs(1)) => {
                 clients.retain(|&client_id, handle| {
@@ -145,7 +235,10 @@ pub async fn run_message_bus(
     }
 
     // Shutdown: wait for all client tasks to finish
-    info!("Shutting down message bus, waiting for {} clients", clients.len());
+    info!(
+        "Shutting down message bus, waiting for {} clients",
+        clients.len()
+    );
     for (client_id, handle) in clients {
         handle.abort();
         info!("Disconnected client {}", client_id);
@@ -162,7 +255,7 @@ pub async fn handle_client(
     mut rx: tokio::sync::broadcast::Receiver<String>,
 ) {
     use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
-    
+
     let (reader, mut writer) = stream.split();
     let mut reader = BufReader::new(reader);
     let mut line = String::new();
@@ -181,7 +274,7 @@ pub async fn handle_client(
                         let message = line.trim().to_string();
                         if !message.is_empty() {
                             info!("Client {} sent: {}", client_id, message);
-                            
+
                             // Broadcast message to all other clients
                             if let Err(e) = tx.send(message) {
                                 error!("Failed to broadcast message from client {}: {}", client_id, e);
@@ -195,7 +288,7 @@ pub async fn handle_client(
                     }
                 }
             }
-            
+
             // Receive broadcasts from other clients
             result = rx.recv() => {
                 match result {
@@ -223,6 +316,6 @@ pub async fn handle_client(
             }
         }
     }
-    
+
     info!("Client {} handler finished", client_id);
 }

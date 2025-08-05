@@ -3,6 +3,10 @@
 //! Handles Unix socket/named pipe communication with the VSCode extension.
 //! Ports the logic from server/src/ipc.ts to Rust with cross-platform support.
 
+use crate::types::{
+    GetSelectionResult, IPCMessage, IPCMessageType, IPCResponse, LogLevel, LogParams,
+    PresentReviewParams, PresentReviewResult,
+};
 use futures::FutureExt;
 use serde_json;
 use std::collections::HashMap;
@@ -17,20 +21,11 @@ use tokio::sync::{oneshot, Mutex};
 use tracing::{debug, error, info, trace, warn};
 use uuid::Uuid;
 
-use crate::pid_discovery;
-use crate::types::{
-    GetSelectionResult, IPCMessage, IPCMessageType, IPCResponse, LogLevel, LogParams,
-    PresentReviewParams, PresentReviewResult,
-};
-
 /// Errors that can occur during IPC communication
 #[derive(Error, Debug)]
 pub enum IPCError {
     #[error("Environment variable DIALECTIC_IPC_PATH not set")]
     MissingEnvironmentVariable,
-
-    #[error("Failed to discover VSCode PID: {0}")]
-    PidDiscoveryFailed(String),
 
     #[error("Failed to connect to socket/pipe at {path}: {source}")]
     ConnectionFailed {
@@ -95,35 +90,8 @@ struct IPCCommunicatorInner {
 }
 
 impl IPCCommunicator {
-    pub async fn new() -> Result<Self> {
-        // Perform PID discovery once during construction
-        let current_pid = std::process::id();
-        info!(
-            "Starting PID discovery from MCP server PID: {}",
-            current_pid
-        );
-
-        let (vscode_pid, terminal_shell_pid) =
-            match pid_discovery::find_vscode_pid_from_mcp(current_pid).await {
-                Ok(Some((vscode_pid, terminal_shell_pid))) => {
-                    info!(
-                        "Discovered VSCode PID: {}, Terminal Shell PID: {}",
-                        vscode_pid, terminal_shell_pid
-                    );
-                    (vscode_pid, terminal_shell_pid)
-                }
-                Ok(None) => {
-                    let error_msg = "Could not find VSCode PID in process tree. \
-                                 Ensure MCP server is running from a VSCode terminal.";
-                    error!("{}", error_msg);
-                    return Err(IPCError::PidDiscoveryFailed(error_msg.to_string()).into());
-                }
-                Err(e) => {
-                    let error_msg = format!("PID discovery failed: {}", e);
-                    error!("{}", error_msg);
-                    return Err(IPCError::PidDiscoveryFailed(error_msg).into());
-                }
-            };
+    pub async fn new(vscode_pid: u32, shell_pid: u32) -> Result<Self> {
+        info!("Creating IPC communicator for VSCode PID {vscode_pid} and shell PID {shell_pid}");
 
         Ok(Self {
             inner: Arc::new(Mutex::new(IPCCommunicatorInner {
@@ -131,7 +99,7 @@ impl IPCCommunicator {
                 pending_requests: HashMap::new(),
                 connected: false,
                 vscode_pid,
-                terminal_shell_pid,
+                terminal_shell_pid: shell_pid,
             })),
             test_mode: false,
         })
@@ -161,7 +129,7 @@ impl IPCCommunicator {
         // Use ensure_connection for initial connection
         IPCCommunicatorInner::ensure_connection(Arc::clone(&self.inner)).await?;
 
-        info!("Connected to VSCode extension via IPC");
+        info!("Connected to message bus daemon via IPC");
         Ok(())
     }
 
@@ -355,19 +323,19 @@ impl IPCCommunicator {
     /// This is the underlying method used by both `send_message_with_reply` and
     /// `send_message_without_reply`. It handles the platform-specific socket writing
     /// and adds newline delimiters for message boundaries.
-    /// 
+    ///
     /// ## Known Edge Case: Write Failure Race Condition
-    /// 
+    ///
     /// There's a rare race condition where the extension restarts between the time
     /// `ensure_connection()` checks `connected: true` and when this method attempts
     /// to write. In this case:
-    /// 
+    ///
     /// 1. `ensure_connection()` sees stale `connected: true` state (reader hasn't detected failure yet)
     /// 2. `write_message()` fails with "Broken pipe" or similar
     /// 3. Error is returned to user (operation fails)
     /// 4. Reader task detects failure and reconnects in background
     /// 5. User's retry succeeds
-    /// 
+    ///
     /// This is acceptable because:
     /// - The race window is very small (reader task detects failures quickly)
     /// - The failure is transient and self-healing
@@ -457,8 +425,11 @@ impl IPCCommunicatorInner {
         const MAX_RETRIES: u32 = 5;
         const BASE_DELAY_MS: u64 = 100;
 
-        let socket_path = format!("/tmp/dialectic-vscode-{}.sock", self.vscode_pid);
-        info!("Attempting connection to: {}", socket_path);
+        let socket_path = format!("/tmp/dialectic-daemon-{}.sock", self.vscode_pid);
+        info!(
+            "Attempting connection to message bus daemon: {}",
+            socket_path
+        );
 
         for attempt in 1..=MAX_RETRIES {
             match UnixStream::connect(&socket_path).await {
@@ -567,7 +538,11 @@ impl IPCCommunicator {
     /// Processes incoming response messages from VSCode extension
     /// Matches responses to pending requests by ID and sends results back to callers
     async fn handle_response_message(inner: &Arc<Mutex<IPCCommunicatorInner>>, message_str: &str) {
-        debug!("Received IPC response (PID: {}): {}", std::process::id(), message_str);
+        debug!(
+            "Received IPC response (PID: {}): {}",
+            std::process::id(),
+            message_str
+        );
 
         // Parse the response message
         let response: IPCResponse = match serde_json::from_str(message_str) {
@@ -588,7 +563,11 @@ impl IPCCommunicator {
                 warn!("Failed to send response to caller - receiver dropped");
             }
         } else {
-            warn!("Received response for unknown request ID: {} (PID: {})", response.id, std::process::id());
+            warn!(
+                "Received response for unknown request ID: {} (PID: {})",
+                response.id,
+                std::process::id()
+            );
         }
     }
 }

@@ -1,25 +1,24 @@
 //! Dialectic MCP Server implementation using the official rmcp SDK
-//! 
+//!
 //! Provides present_review and get_selection tools for AI assistants
 //! to interact with the VSCode extension via IPC.
 
 use anyhow::Result;
-use std::future::Future;
 use rmcp::{
-    ErrorData as McpError, RoleServer, ServerHandler,
     handler::server::{router::tool::ToolRouter, tool::Parameters},
     model::*,
     service::RequestContext,
-    tool, tool_handler, tool_router,
+    tool, tool_handler, tool_router, ErrorData as McpError, RoleServer, ServerHandler,
 };
 use serde_json;
+use std::future::Future;
 use tracing::info;
 
 use crate::ipc::IPCCommunicator;
 use crate::types::{LogLevel, PresentReviewParams};
 
 /// Dialectic MCP Server
-/// 
+///
 /// Implements the MCP server protocol and bridges to VSCode extension via IPC.
 /// Uses the official rmcp SDK with tool macros for clean implementation.
 #[derive(Clone)]
@@ -31,16 +30,34 @@ pub struct DialecticServer {
 #[tool_router]
 impl DialecticServer {
     pub async fn new() -> Result<Self> {
-        let mut ipc = IPCCommunicator::new().await?;
-        
-        // Initialize IPC connection to VSCode extension
+        // First, discover VSCode PID by walking up the process tree
+        let current_pid = std::process::id();
+        let Some((vscode_pid, shell_pid)) =
+            crate::pid_discovery::find_vscode_pid_from_mcp(current_pid).await?
+        else {
+            anyhow::bail!("Could not discover VSCode PID from process tree");
+        };
+
+        info!("Discovered VSCode PID: {vscode_pid} and shell PID: {shell_pid}");
+
+        // Ensure the message bus daemon is running
+        Self::ensure_daemon_running(vscode_pid).await?;
+
+        let mut ipc = IPCCommunicator::new(vscode_pid, shell_pid).await?;
+
+        // Initialize IPC connection to message bus daemon (not directly to VSCode)
         ipc.initialize().await?;
-        info!("IPC communication with VSCode extension initialized");
-        
+        info!("IPC communication with message bus daemon initialized");
+
         Ok(Self {
             ipc,
             tool_router: Self::tool_router(),
         })
+    }
+
+    /// Ensure the message bus daemon is running for the given VSCode PID
+    async fn ensure_daemon_running(vscode_pid: u32) -> Result<()> {
+        crate::daemon::spawn_daemon_process(vscode_pid).await
     }
 
     /// Creates a new DialecticServer in test mode
@@ -48,7 +65,7 @@ impl DialecticServer {
     pub fn new_test() -> Self {
         let ipc = IPCCommunicator::new_test();
         info!("DialecticServer initialized in test mode");
-        
+
         Self {
             ipc,
             tool_router: Self::tool_router(),
@@ -56,68 +73,91 @@ impl DialecticServer {
     }
 
     /// Present a code review in the VSCode review panel
-    /// 
+    ///
     /// This tool allows AI assistants to display structured markdown reviews
     /// with clickable file references in the VSCode extension.
-    #[tool(
-        description = "Display a code review in the VSCode review panel. \
+    #[tool(description = "Display a code review in the VSCode review panel. \
                        Reviews should be structured markdown with clear sections and actionable feedback. \
-                       The Dialectic guidance in your context describe link format and overall structure."
-    )]
+                       The Dialectic guidance in your context describe link format and overall structure.")]
     async fn present_review(
         &self,
         Parameters(params): Parameters<PresentReviewParams>,
     ) -> Result<CallToolResult, McpError> {
         // Log the tool call via IPC (also logs locally)
-        self.ipc.send_log(
-            LogLevel::Debug,
-            format!("Received present_review tool call with params: {:?}", params)
-        ).await;
+        self.ipc
+            .send_log(
+                LogLevel::Debug,
+                format!(
+                    "Received present_review tool call with params: {:?}",
+                    params
+                ),
+            )
+            .await;
 
-        self.ipc.send_log(
-            LogLevel::Debug,
-            format!("Parameters: mode={:?}, content length={}", params.mode, params.content.len())
-        ).await;
+        self.ipc
+            .send_log(
+                LogLevel::Debug,
+                format!(
+                    "Parameters: mode={:?}, content length={}",
+                    params.mode,
+                    params.content.len()
+                ),
+            )
+            .await;
 
         // Forward to VSCode extension via IPC
-        self.ipc.send_log(
-            LogLevel::Info,
-            "Forwarding review to VSCode extension via IPC...".to_string()
-        ).await;
+        self.ipc
+            .send_log(
+                LogLevel::Info,
+                "Forwarding review to VSCode extension via IPC...".to_string(),
+            )
+            .await;
 
         let result = self.ipc.present_review(params).await.map_err(|e| {
-            McpError::internal_error("IPC communication failed", Some(serde_json::json!({
-                "error": e.to_string()
-            })))
+            McpError::internal_error(
+                "IPC communication failed",
+                Some(serde_json::json!({
+                    "error": e.to_string()
+                })),
+            )
         })?;
 
         if result.success {
-            self.ipc.send_log(
-                LogLevel::Info,
-                "Review successfully displayed in VSCode".to_string()
-            ).await;
-            
-            let message = result.message.unwrap_or_else(|| 
-                "Review successfully displayed in VSCode".to_string()
-            );
-            
+            self.ipc
+                .send_log(
+                    LogLevel::Info,
+                    "Review successfully displayed in VSCode".to_string(),
+                )
+                .await;
+
+            let message = result
+                .message
+                .unwrap_or_else(|| "Review successfully displayed in VSCode".to_string());
+
             Ok(CallToolResult::success(vec![Content::text(message)]))
         } else {
-            let error_msg = result.message.unwrap_or_else(|| "Unknown error".to_string());
-            
-            self.ipc.send_log(
-                LogLevel::Error,
-                format!("Failed to display review: {}", error_msg)
-            ).await;
-            
-            Err(McpError::internal_error("Failed to display review", Some(serde_json::json!({
-                "error": format!("Failed to display review: {}", error_msg)
-            }))))
+            let error_msg = result
+                .message
+                .unwrap_or_else(|| "Unknown error".to_string());
+
+            self.ipc
+                .send_log(
+                    LogLevel::Error,
+                    format!("Failed to display review: {}", error_msg),
+                )
+                .await;
+
+            Err(McpError::internal_error(
+                "Failed to display review",
+                Some(serde_json::json!({
+                    "error": format!("Failed to display review: {}", error_msg)
+                })),
+            ))
         }
     }
 
     /// Get the currently selected text from any active editor in VSCode
-    /// 
+    ///
     /// Works with source files, review panels, and any other text editor.
     /// Returns null if no text is selected or no active editor is found.
     #[tool(
@@ -127,39 +167,51 @@ impl DialecticServer {
     )]
     async fn get_selection(&self) -> Result<CallToolResult, McpError> {
         // Log the tool call via IPC (also logs locally)
-        self.ipc.send_log(
-            LogLevel::Debug,
-            "Received get_selection tool call".to_string()
-        ).await;
+        self.ipc
+            .send_log(
+                LogLevel::Debug,
+                "Received get_selection tool call".to_string(),
+            )
+            .await;
 
         // Request current selection from VSCode extension via IPC
-        self.ipc.send_log(
-            LogLevel::Info,
-            "Requesting current selection from VSCode extension...".to_string()
-        ).await;
+        self.ipc
+            .send_log(
+                LogLevel::Info,
+                "Requesting current selection from VSCode extension...".to_string(),
+            )
+            .await;
 
         let result = self.ipc.get_selection().await.map_err(|e| {
-            McpError::internal_error("IPC communication failed", Some(serde_json::json!({
-                "error": e.to_string()
-            })))
+            McpError::internal_error(
+                "IPC communication failed",
+                Some(serde_json::json!({
+                    "error": e.to_string()
+                })),
+            )
         })?;
 
-        let status_msg = if result.selected_text.is_some() { 
-            "text selected" 
-        } else { 
-            "no selection" 
+        let status_msg = if result.selected_text.is_some() {
+            "text selected"
+        } else {
+            "no selection"
         };
-        
-        self.ipc.send_log(
-            LogLevel::Info,
-            format!("Selection retrieved: {}", status_msg)
-        ).await;
+
+        self.ipc
+            .send_log(
+                LogLevel::Info,
+                format!("Selection retrieved: {}", status_msg),
+            )
+            .await;
 
         // Convert result to JSON and return
         let json_content = Content::json(result).map_err(|e| {
-            McpError::internal_error("Serialization failed", Some(serde_json::json!({
-                "error": format!("Failed to serialize selection result: {}", e)
-            })))
+            McpError::internal_error(
+                "Serialization failed",
+                Some(serde_json::json!({
+                    "error": format!("Failed to serialize selection result: {}", e)
+                })),
+            )
         })?;
 
         Ok(CallToolResult::success(vec![json_content]))
@@ -171,9 +223,7 @@ impl ServerHandler for DialecticServer {
     fn get_info(&self) -> ServerInfo {
         ServerInfo {
             protocol_version: ProtocolVersion::V_2024_11_05,
-            capabilities: ServerCapabilities::builder()
-                .enable_tools()
-                .build(),
+            capabilities: ServerCapabilities::builder().enable_tools().build(),
             server_info: Implementation {
                 name: "dialectic-mcp-server".to_string(),
                 version: "0.1.0".to_string(),
@@ -182,7 +232,7 @@ impl ServerHandler for DialecticServer {
                 "This server provides tools for AI assistants to display code reviews in VSCode. \
                 Use 'present_review' to display structured markdown reviews with file references, \
                 and 'get_selection' to retrieve currently selected text from the active editor."
-                .to_string()
+                    .to_string(),
             ),
         }
     }

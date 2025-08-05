@@ -8,7 +8,7 @@
 use anyhow::Result;
 use clap::Parser;
 use rmcp::{transport::stdio, ServiceExt};
-use tracing::{error, info};
+use tracing::{error, info, Level};
 use tracing_subscriber::{self, EnvFilter};
 
 use dialectic_mcp_server::{pid_discovery, DialecticServer};
@@ -17,10 +17,6 @@ use dialectic_mcp_server::{pid_discovery, DialecticServer};
 #[command(name = "dialectic-mcp-server")]
 #[command(about = "Dialectic MCP Server for VSCode integration")]
 struct Args {
-    /// Run PID discovery probe and exit (for testing)
-    #[arg(long, global = true)]
-    probe: bool,
-
     /// Enable development logging to /tmp/dialectic-mcp-server.log
     #[arg(long, global = true)]
     dev_log: bool,
@@ -29,22 +25,34 @@ struct Args {
     command: Option<Command>,
 }
 
-#[derive(Parser)]
+#[derive(Parser, Debug)]
 enum Command {
+    /// Run PID discovery probe and exit (for testing)
+    Probe {},
+
     /// Run as message bus daemon for multi-window support
     Daemon {
         /// VSCode process ID to monitor
         vscode_pid: u32,
+
+        /// Optional filename prefix to use (for testing)
+        #[arg(long)]
+        prefix: Option<String>,
     },
 }
 
 #[tokio::main]
 async fn main() -> Result<()> {
     let args = Args::parse();
+
+    // If we are logging to /tmp/dialectic-mcp-server.log
+    // then when we drop this flush guard, any final messages
+    // will be flushed for sure.
     let mut flush_guard = None;
 
-    // Initialize logging to stderr (MCP uses stdout for protocol)
-    // In dev mode, also log to file for debugging
+    // Initialize logging to stderr (MCP uses stdout for protocol).
+    // By default, we respect `RUST_LOG` for level etc.
+    // In dev mode, we use debug level, and also log to a temporary file.
     if args.dev_log {
         use std::fs::OpenOptions;
         use tracing_appender::non_blocking;
@@ -59,13 +67,16 @@ async fn main() -> Result<()> {
         flush_guard = Some(_guard);
 
         tracing_subscriber::fmt()
-            .with_env_filter(EnvFilter::from_default_env())
+            .with_max_level(Level::DEBUG)
             .with_writer(file_writer)
             .with_ansi(false) // No ANSI codes in file
             .init();
 
         // Also log to stderr for immediate feedback
-        eprintln!("Development logging enabled - writing to /tmp/dialectic-mcp-server.log (PID: {})", std::process::id());
+        eprintln!(
+            "Development logging enabled - writing to /tmp/dialectic-mcp-server.log (PID: {})",
+            std::process::id()
+        );
     } else {
         tracing_subscriber::fmt()
             .with_env_filter(EnvFilter::from_default_env())
@@ -74,17 +85,21 @@ async fn main() -> Result<()> {
             .init();
     }
 
-    if args.probe {
-        info!("🔍 PROBE MODE DETECTED - Running PID discovery probe...");
-        run_pid_probe().await?;
-        info!("🔍 PROBE MODE COMPLETE - Exiting");
-        return Ok(());
-    }
-
     match args.command {
-        Some(Command::Daemon { vscode_pid }) => {
-            info!("🚀 DAEMON MODE - Starting message bus daemon for VSCode PID {}", vscode_pid);
-            dialectic_mcp_server::daemon::run_daemon(vscode_pid).await?;
+        Some(Command::Probe {}) => {
+            info!("🔍 PROBE MODE DETECTED - Running PID discovery probe...");
+            run_pid_probe().await?;
+            info!("🔍 PROBE MODE COMPLETE - Exiting");
+        }
+        Some(Command::Daemon { vscode_pid, prefix }) => {
+            let prefix = match &prefix {
+                Some(s) => s,
+                None => "dialectic-mcp-daemon",
+            };
+            info!(
+                "🚀 DAEMON MODE - Starting message bus daemon for VSCode PID {vscode_pid} with prefix {prefix}",
+            );
+            dialectic_mcp_server::daemon::run_daemon_with_prefix(vscode_pid, prefix, None).await?;
         }
         None => {
             info!("Starting Dialectic MCP Server (Rust)");
