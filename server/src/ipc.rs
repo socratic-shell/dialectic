@@ -253,15 +253,25 @@ impl IPCCommunicator {
 
         // Also send to VSCode extension via IPC for unified logging
         let log_params = LogParams { level, message };
+        
+        // Create message payload with shell PID added for multi-window filtering
+        let mut payload = match serde_json::to_value(log_params) {
+            Ok(payload) => payload,
+            Err(e) => {
+                error!("Failed to serialize log message: {}", e);
+                return;
+            }
+        };
+        
+        // Add shell PID for filtering
+        {
+            let inner = self.inner.lock().await;
+            payload["terminal_shell_pid"] = serde_json::Value::Number(serde_json::Number::from(inner.terminal_shell_pid));
+        }
+        
         let ipc_message = IPCMessage {
             message_type: IPCMessageType::Log,
-            payload: match serde_json::to_value(log_params) {
-                Ok(payload) => payload,
-                Err(e) => {
-                    error!("Failed to serialize log message: {}", e);
-                    return;
-                }
-            },
+            payload,
             id: Uuid::new_v4().to_string(),
         };
 

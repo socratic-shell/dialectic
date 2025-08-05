@@ -7,7 +7,7 @@ import { ReviewWebviewProvider } from './reviewWebview';
 
 // 💡: Types for IPC communication with MCP server
 interface IPCMessage {
-    type: 'present_review' | 'log' | 'get_selection';
+    type: 'present_review' | 'log' | 'get_selection' | 'response';
     payload: {
         content: string;
         mode: 'replace' | 'update-section' | 'append';
@@ -31,7 +31,7 @@ class DaemonClient implements vscode.Disposable {
         private context: vscode.ExtensionContext,
         private reviewProvider: ReviewWebviewProvider,
         private outputChannel: vscode.OutputChannel
-    ) {}
+    ) { }
 
     start(): void {
         this.outputChannel.appendLine('Starting daemon client...');
@@ -56,7 +56,7 @@ class DaemonClient implements vscode.Disposable {
 
         this.socket.on('error', (error) => {
             // Only log at debug level to avoid spam during normal startup
-            this.outputChannel.appendLine(`Daemon connection failed: ${error.message} (will retry in ${this.RECONNECT_INTERVAL_MS/1000}s)`);
+            this.outputChannel.appendLine(`Daemon connection failed: ${error.message} (will retry in ${this.RECONNECT_INTERVAL_MS / 1000}s)`);
             this.scheduleReconnect();
         });
 
@@ -73,11 +73,11 @@ class DaemonClient implements vscode.Disposable {
 
         this.socket.on('data', (data) => {
             this.buffer += data.toString();
-            
+
             // Process all complete messages (ending with \n)
             let lines = this.buffer.split('\n');
             this.buffer = lines.pop() || ''; // Keep incomplete line in buffer
-            
+
             for (const line of lines) {
                 if (line.trim()) { // Skip empty lines
                     try {
@@ -100,7 +100,7 @@ class DaemonClient implements vscode.Disposable {
     private async handleIncomingMessage(message: IPCMessage): Promise<void> {
         // Extract shell PID from message payload for filtering
         const shellPid = this.extractShellPidFromMessage(message);
-        
+
         if (shellPid) {
             // Check if this message is intended for our VSCode window
             const isForOurWindow = await this.isMessageForOurWindow(shellPid);
@@ -109,7 +109,6 @@ class DaemonClient implements vscode.Disposable {
                 return;
             }
         }
-        
         if (message.type === 'present_review') {
             try {
                 const reviewPayload = message.payload as {
@@ -119,10 +118,10 @@ class DaemonClient implements vscode.Disposable {
                     baseUri?: string;
                     terminal_shell_pid: number;
                 };
-                
+
                 this.reviewProvider.updateReview(
-                    reviewPayload.content, 
-                    reviewPayload.mode, 
+                    reviewPayload.content,
+                    reviewPayload.mode,
                     reviewPayload.baseUri
                 );
 
@@ -130,40 +129,56 @@ class DaemonClient implements vscode.Disposable {
                 this.sendResponse(message.id, { success: true });
             } catch (error) {
                 this.outputChannel.appendLine(`Error handling present_review: ${error}`);
-                this.sendResponse(message.id, { 
-                    success: false, 
-                    error: error instanceof Error ? error.message : String(error) 
+                this.sendResponse(message.id, {
+                    success: false,
+                    error: error instanceof Error ? error.message : String(error)
                 });
             }
         } else if (message.type === 'get_selection') {
             try {
                 const selectionData = this.getCurrentSelection();
-                this.sendResponse(message.id, { 
-                    success: true, 
-                    data: selectionData 
+                this.sendResponse(message.id, {
+                    success: true,
+                    data: selectionData
                 });
             } catch (error) {
                 this.outputChannel.appendLine(`Error handling get_selection: ${error}`);
-                this.sendResponse(message.id, { 
-                    success: false, 
-                    error: error instanceof Error ? error.message : String(error) 
+                this.sendResponse(message.id, {
+                    success: false,
+                    error: error instanceof Error ? error.message : String(error)
                 });
             }
+        } else if (message.type === 'log') {
+            // Handle log messages - no response needed, just display in output channel
+            try {
+                const logPayload = message.payload as {
+                    level: string;
+                    message: string;
+                    terminal_shell_pid: number;
+                };
+                
+                const levelPrefix = logPayload.level.toUpperCase();
+                this.outputChannel.appendLine(`[${levelPrefix}] ${logPayload.message}`);
+            } catch (error) {
+                this.outputChannel.appendLine(`Error handling log message: ${error}`);
+            }
+        } else if (message.type == 'response') {
+            // Ignore this, response messages are messages that WE send to clients.
         } else {
             this.outputChannel.appendLine(`Received unknown message type: ${message.type}`);
-            this.sendResponse(message.id, { 
-                success: false, 
-                error: `Unknown message type: ${message.type}` 
+            this.sendResponse(message.id, {
+                success: false,
+                error: `Unknown message type: ${message.type}`
             });
         }
     }
 
     private extractShellPidFromMessage(message: IPCMessage): number | null {
         try {
-            if (message.type === 'present_review' || message.type === 'get_selection') {
+            if (message.type === 'present_review' || message.type === 'get_selection' || message.type === 'log') {
                 const payload = message.payload as any;
                 const shellPid = payload.terminal_shell_pid;
-                
+
                 if (typeof shellPid === 'number') {
                     return shellPid;
                 } else {
@@ -181,7 +196,7 @@ class DaemonClient implements vscode.Disposable {
         try {
             // Get all terminal PIDs in the current VSCode window
             const terminals = vscode.window.terminals;
-            
+
             for (const terminal of terminals) {
                 try {
                     const terminalPid = await terminal.processId;
@@ -193,7 +208,7 @@ class DaemonClient implements vscode.Disposable {
                     continue;
                 }
             }
-            
+
             return false;
         } catch (error) {
             this.outputChannel.appendLine(`Error checking if message is for our window: ${error}`);
@@ -269,13 +284,13 @@ class DaemonClient implements vscode.Disposable {
             this.outputChannel.appendLine('Warning: Could not discover VSCode PID, using fallback');
             return crypto.randomUUID();
         })();
-        
+
         return `/tmp/dialectic-daemon-${vscodePid}.sock`;
     }
 
     private scheduleReconnect(): void {
         if (this.isDisposed) return;
-        
+
         this.clearReconnectTimer();
         this.reconnectTimer = setTimeout(() => {
             this.connectToDaemon();
@@ -292,12 +307,12 @@ class DaemonClient implements vscode.Disposable {
     dispose(): void {
         this.isDisposed = true;
         this.clearReconnectTimer();
-        
+
         if (this.socket) {
             this.socket.destroy();
             this.socket = null;
         }
-        
+
         this.outputChannel.appendLine('Daemon client disposed');
     }
 }
@@ -495,11 +510,11 @@ function formatSelectionMessage(
 // 💡: PID Discovery Testing - Log all relevant PIDs for debugging
 async function logPIDDiscovery(outputChannel: vscode.OutputChannel): Promise<void> {
     outputChannel.appendLine('=== PID DISCOVERY TESTING ===');
-    
+
     // Extension process info
     outputChannel.appendLine(`Extension process PID: ${process.pid}`);
     outputChannel.appendLine(`Extension parent PID: ${process.ppid}`);
-    
+
     // Try to find VSCode PID by walking up the process tree
     const vscodePid = findVSCodePID(outputChannel);
     if (vscodePid) {
@@ -507,11 +522,11 @@ async function logPIDDiscovery(outputChannel: vscode.OutputChannel): Promise<voi
     } else {
         outputChannel.appendLine('Could not find VSCode PID');
     }
-    
+
     // Log terminal PIDs (handle the Promise properly)
     const terminals = vscode.window.terminals;
     outputChannel.appendLine(`Found ${terminals.length} terminals:`);
-    
+
     for (let i = 0; i < terminals.length; i++) {
         const terminal = terminals[i];
         try {
@@ -522,7 +537,7 @@ async function logPIDDiscovery(outputChannel: vscode.OutputChannel): Promise<voi
             outputChannel.appendLine(`  Terminal ${i}: name="${terminal.name}", PID=<error: ${error}>`);
         }
     }
-    
+
     // Set up terminal monitoring
     const terminalListener = vscode.window.onDidOpenTerminal(async (terminal) => {
         try {
@@ -532,50 +547,50 @@ async function logPIDDiscovery(outputChannel: vscode.OutputChannel): Promise<voi
             outputChannel.appendLine(`NEW TERMINAL: name="${terminal.name}", PID=<error: ${error}>`);
         }
     });
-    
+
     outputChannel.appendLine('=== END PID DISCOVERY ===');
 }
 
 // 💡: Attempt to find VSCode PID by walking up process tree
 function findVSCodePID(outputChannel: vscode.OutputChannel): number | null {
     const { execSync } = require('child_process');
-    
+
     try {
         let currentPid = process.pid;
-        
+
         // Walk up the process tree
         for (let i = 0; i < 10; i++) { // Safety limit
             try {
                 // Get process info (works on macOS/Linux)
                 const psOutput = execSync(`ps -p ${currentPid} -o pid,ppid,comm,args`, { encoding: 'utf8' });
                 const lines = psOutput.trim().split('\n');
-                
+
                 if (lines.length < 2) break;
-                
+
                 const processLine = lines[1].trim();
                 const parts = processLine.split(/\s+/);
                 const pid = parseInt(parts[0]);
                 const ppid = parseInt(parts[1]);
                 const command = parts.slice(3).join(' '); // Full command line
-                
+
                 // Check if this looks like the main VSCode process (not helper processes)
-                if ((command.includes('Visual Studio Code') || command.includes('Code.app') || command.includes('Electron')) 
+                if ((command.includes('Visual Studio Code') || command.includes('Code.app') || command.includes('Electron'))
                     && !command.includes('Code Helper')) {
                     outputChannel.appendLine(`Found VSCode PID: ${pid}`);
                     return pid;
                 }
-                
+
                 currentPid = ppid;
                 if (ppid <= 1) break; // Reached init process
-                
+
             } catch (error) {
                 break;
             }
         }
-        
+
         outputChannel.appendLine('Could not find VSCode PID in process tree');
         return null;
-        
+
     } catch (error) {
         outputChannel.appendLine(`PID discovery error: ${error}`);
         return null;

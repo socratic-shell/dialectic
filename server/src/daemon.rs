@@ -107,33 +107,33 @@ pub async fn run_daemon_with_prefix(
     use std::path::Path;
 
     let socket_path = format!("/tmp/{}-{}.sock", socket_prefix, vscode_pid);
-    info!("Attempting to claim socket: {}", socket_path);
+    info!("daemon: attempting to claim socket: {}", socket_path);
 
     // Try to bind to the socket first - this is our "claim" operation
     let _listener = match UnixListener::bind(&socket_path) {
         Ok(listener) => {
-            info!("✅ Successfully claimed socket: {}", socket_path);
+            info!("✅ daemon: successfully claimed socket: {}", socket_path);
             listener
         }
         Err(e) => {
             if e.kind() == std::io::ErrorKind::AddrInUse {
-                error!("❌ Failed to claim socket {}: {}", socket_path, e);
+                error!("❌ daemon: failed to claim socket {}: {}", socket_path, e);
                 error!(
                     "Another daemon is already running for VSCode PID {}",
                     vscode_pid
                 );
             } else {
-                error!("❌ Failed to claim socket {}: {}", socket_path, e);
+                error!("❌ daemon: Failed to claim socket {}: {}", socket_path, e);
             }
             return Err(e.into());
         }
     };
 
     info!(
-        "🚀 Message bus daemon started for VSCode PID {}",
+        "🚀 daemon: message bus daemon started for VSCode PID {}",
         vscode_pid
     );
-    info!("📡 Listening on socket: {}", socket_path);
+    info!("📡 daemon: listening on socket: {}", socket_path);
 
     // Convert std::os::unix::net::UnixListener to tokio::net::UnixListener
     _listener.set_nonblocking(true)?;
@@ -148,7 +148,7 @@ pub async fn run_daemon_with_prefix(
     // Clean up socket file on exit
     if Path::new(&socket_path).exists() {
         std::fs::remove_file(&socket_path)?;
-        info!("🧹 Cleaned up socket file: {}", socket_path);
+        info!("🧹 daemon: Cleaned up socket file: {}", socket_path);
     }
 
     info!("🛑 Daemon shutdown complete");
@@ -164,7 +164,7 @@ pub async fn run_message_bus(
     use tokio::sync::broadcast;
     use tokio::time::{interval, Duration};
 
-    info!("Starting message bus loop");
+    info!("daemon: starting message bus loop");
 
     // Signal that daemon is ready to accept connections
     if let Some(barrier) = ready_barrier {
@@ -190,7 +190,7 @@ pub async fn run_message_bus(
                         let client_id = next_client_id;
                         next_client_id += 1;
 
-                        info!("Client {} connected", client_id);
+                        info!("daemon: client {} connected", client_id);
 
                         // Spawn task to handle this client
                         let tx_clone = tx.clone();
@@ -199,7 +199,7 @@ pub async fn run_message_bus(
                         clients.insert(client_id, handle);
                     }
                     Err(e) => {
-                        error!("Failed to accept client connection: {}", e);
+                        error!("daemon: failed to accept client connection: {}", e);
                     }
                 }
             }
@@ -211,11 +211,11 @@ pub async fn run_message_bus(
                         // Process exists, continue
                     }
                     Err(nix::errno::Errno::ESRCH) => {
-                        info!("VSCode process {} has died, shutting down daemon", vscode_pid);
+                        info!("daemon: VSCode process {} has died, shutting down daemon", vscode_pid);
                         break;
                     }
                     Err(e) => {
-                        error!("Error checking VSCode process {}: {}", vscode_pid, e);
+                        error!("daemon: Error checking VSCode process {}: {}", vscode_pid, e);
                     }
                 }
             }
@@ -224,7 +224,7 @@ pub async fn run_message_bus(
             _ = tokio::time::sleep(Duration::from_secs(1)) => {
                 clients.retain(|&client_id, handle| {
                     if handle.is_finished() {
-                        info!("Client {} disconnected", client_id);
+                        info!("daemon: client {} disconnected", client_id);
                         false
                     } else {
                         true
@@ -236,12 +236,12 @@ pub async fn run_message_bus(
 
     // Shutdown: wait for all client tasks to finish
     info!(
-        "Shutting down message bus, waiting for {} clients",
+        "daemon: shutting down message bus, waiting for {} clients",
         clients.len()
     );
     for (client_id, handle) in clients {
         handle.abort();
-        info!("Disconnected client {}", client_id);
+        info!("daemon: disconnected client {}", client_id);
     }
 
     Ok(())
@@ -267,23 +267,23 @@ pub async fn handle_client(
                 match result {
                     Ok(0) => {
                         // EOF - client disconnected
-                        info!("Client {} disconnected (EOF)", client_id);
+                        info!("daemon: client {} disconnected (EOF)", client_id);
                         break;
                     }
                     Ok(_) => {
                         let message = line.trim().to_string();
                         if !message.is_empty() {
-                            info!("Client {} sent: {}", client_id, message);
+                            info!("daemon: client {} sent: {}", client_id, message);
 
                             // Broadcast message to all other clients
                             if let Err(e) = tx.send(message) {
-                                error!("Failed to broadcast message from client {}: {}", client_id, e);
+                                error!("daemon: failed to broadcast message from client {}: {}", client_id, e);
                             }
                         }
                         line.clear();
                     }
                     Err(e) => {
-                        error!("Error reading from client {}: {}", client_id, e);
+                        error!("daemon: error reading from client {}: {}", client_id, e);
                         break;
                     }
                 }
