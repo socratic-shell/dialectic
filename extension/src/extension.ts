@@ -19,14 +19,233 @@ interface IPCMessage {
     id: string;
 }
 
-interface IPCResponse {
-    id: string;
-    success: boolean;
-    error?: string;
-    data?: any;
+// 💡: Daemon client for connecting to message bus
+class DaemonClient implements vscode.Disposable {
+    private socket: net.Socket | null = null;
+    private reconnectTimer: NodeJS.Timeout | null = null;
+    private isDisposed = false;
+    private buffer = '';
+    private readonly RECONNECT_INTERVAL_MS = 5000; // 5 seconds
+
+    constructor(
+        private context: vscode.ExtensionContext,
+        private reviewProvider: ReviewWebviewProvider,
+        private outputChannel: vscode.OutputChannel
+    ) {}
+
+    start(): void {
+        this.outputChannel.appendLine('Starting daemon client...');
+        this.connectToDaemon();
+    }
+
+    private connectToDaemon(): void {
+        if (this.isDisposed) return;
+
+        const socketPath = this.getDaemonSocketPath();
+        this.outputChannel.appendLine(`Attempting to connect to daemon: ${socketPath}`);
+
+        this.socket = new net.Socket();
+
+        // Set up all socket handlers immediately when socket is created
+        this.setupSocketHandlers();
+
+        this.socket.on('connect', () => {
+            this.outputChannel.appendLine('✅ Connected to message bus daemon');
+            this.clearReconnectTimer();
+        });
+
+        this.socket.on('error', (error) => {
+            // Only log at debug level to avoid spam during normal startup
+            this.outputChannel.appendLine(`Daemon connection failed: ${error.message} (will retry in ${this.RECONNECT_INTERVAL_MS/1000}s)`);
+            this.scheduleReconnect();
+        });
+
+        this.socket.on('close', () => {
+            this.outputChannel.appendLine('Daemon connection closed, reconnecting...');
+            this.scheduleReconnect();
+        });
+
+        this.socket.connect(socketPath);
+    }
+
+    private setupSocketHandlers(): void {
+        if (!this.socket) return;
+
+        this.socket.on('data', (data) => {
+            this.buffer += data.toString();
+            
+            // Process all complete messages (ending with \n)
+            let lines = this.buffer.split('\n');
+            this.buffer = lines.pop() || ''; // Keep incomplete line in buffer
+            
+            for (const line of lines) {
+                if (line.trim()) { // Skip empty lines
+                    try {
+                        const message: IPCMessage = JSON.parse(line);
+                        this.outputChannel.appendLine(`Received message: ${message.type} (${message.id})`);
+                        this.handleIncomingMessage(message);
+                    } catch (error) {
+                        const errorMsg = `Failed to parse message: ${error}`;
+                        this.outputChannel.appendLine(errorMsg);
+                        console.error(errorMsg);
+                    }
+                }
+            }
+        });
+    }
+
+    private handleIncomingMessage(message: IPCMessage): void {
+        // TODO: Add shell PID filtering once MCP server includes it
+        
+        if (message.type === 'present_review') {
+            try {
+                const reviewPayload = message.payload as {
+                    content: string;
+                    mode: 'replace' | 'update-section' | 'append';
+                    section?: string;
+                    baseUri?: string;
+                };
+                
+                this.reviewProvider.updateReview(
+                    reviewPayload.content, 
+                    reviewPayload.mode, 
+                    reviewPayload.baseUri
+                );
+
+                // Send success response back through daemon
+                this.sendResponse(message.id, { success: true });
+            } catch (error) {
+                this.outputChannel.appendLine(`Error handling present_review: ${error}`);
+                this.sendResponse(message.id, { 
+                    success: false, 
+                    error: error instanceof Error ? error.message : String(error) 
+                });
+            }
+        } else if (message.type === 'get_selection') {
+            try {
+                const selectionData = this.getCurrentSelection();
+                this.sendResponse(message.id, { 
+                    success: true, 
+                    data: selectionData 
+                });
+            } catch (error) {
+                this.outputChannel.appendLine(`Error handling get_selection: ${error}`);
+                this.sendResponse(message.id, { 
+                    success: false, 
+                    error: error instanceof Error ? error.message : String(error) 
+                });
+            }
+        } else {
+            this.outputChannel.appendLine(`Received unknown message type: ${message.type}`);
+            this.sendResponse(message.id, { 
+                success: false, 
+                error: `Unknown message type: ${message.type}` 
+            });
+        }
+    }
+
+    private getCurrentSelection(): any {
+        const activeEditor = vscode.window.activeTextEditor;
+
+        if (!activeEditor) {
+            return {
+                selectedText: null,
+                message: 'No active editor found'
+            };
+        }
+
+        const selection = activeEditor.selection;
+
+        if (selection.isEmpty) {
+            return {
+                selectedText: null,
+                filePath: activeEditor.document.fileName,
+                documentLanguage: activeEditor.document.languageId,
+                isUntitled: activeEditor.document.isUntitled,
+                message: 'No text selected in active editor'
+            };
+        }
+
+        const selectedText = activeEditor.document.getText(selection);
+        const startLine = selection.start.line + 1; // Convert to 1-based
+        const startColumn = selection.start.character + 1; // Convert to 1-based
+        const endLine = selection.end.line + 1;
+        const endColumn = selection.end.character + 1;
+
+        return {
+            selectedText,
+            filePath: activeEditor.document.fileName,
+            startLine,
+            startColumn,
+            endLine,
+            endColumn,
+            lineNumber: startLine === endLine ? startLine : undefined,
+            documentLanguage: activeEditor.document.languageId,
+            isUntitled: activeEditor.document.isUntitled,
+            message: `Selected ${selectedText.length} characters from ${startLine === endLine ? `line ${startLine}, columns ${startColumn}-${endColumn}` : `lines ${startLine}:${startColumn} to ${endLine}:${endColumn}`}`
+        };
+    }
+
+    private sendResponse(messageId: string, response: { success: boolean; error?: string; data?: any }): void {
+        if (!this.socket || this.socket.destroyed) {
+            this.outputChannel.appendLine(`Cannot send response - socket not connected`);
+            return;
+        }
+
+        const responseMessage = {
+            type: 'response',
+            payload: response,
+            id: messageId
+        };
+
+        try {
+            this.socket.write(JSON.stringify(responseMessage) + '\n');
+        } catch (error) {
+            this.outputChannel.appendLine(`Failed to send response: ${error}`);
+        }
+    }
+
+    private getDaemonSocketPath(): string {
+        const discoveredPid = findVSCodePID(this.outputChannel);
+        const vscodePid = discoveredPid || (() => {
+            this.outputChannel.appendLine('Warning: Could not discover VSCode PID, using fallback');
+            return crypto.randomUUID();
+        })();
+        
+        return `/tmp/dialectic-daemon-${vscodePid}.sock`;
+    }
+
+    private scheduleReconnect(): void {
+        if (this.isDisposed) return;
+        
+        this.clearReconnectTimer();
+        this.reconnectTimer = setTimeout(() => {
+            this.connectToDaemon();
+        }, this.RECONNECT_INTERVAL_MS);
+    }
+
+    private clearReconnectTimer(): void {
+        if (this.reconnectTimer) {
+            clearTimeout(this.reconnectTimer);
+            this.reconnectTimer = null;
+        }
+    }
+
+    dispose(): void {
+        this.isDisposed = true;
+        this.clearReconnectTimer();
+        
+        if (this.socket) {
+            this.socket.destroy();
+            this.socket = null;
+        }
+        
+        this.outputChannel.appendLine('Daemon client disposed');
+    }
 }
 
 export function activate(context: vscode.ExtensionContext) {
+
     // 💡: Create dedicated output channel for cleaner logging
     const outputChannel = vscode.window.createOutputChannel('Dialectic');
     outputChannel.appendLine('Dialectic extension is now active');
@@ -42,8 +261,9 @@ export function activate(context: vscode.ExtensionContext) {
 
     console.log('Webview provider created successfully');
 
-    // 💡: Set up IPC server for communication with MCP server
-    const server = createIPCServer(context, reviewProvider, outputChannel);
+    // 💡: Set up daemon client connection for message bus communication
+    const daemonClient = new DaemonClient(context, reviewProvider, outputChannel);
+    daemonClient.start();
 
     // 💡: Set up universal selection detection for interactive code review
     setupSelectionDetection(context, outputChannel);
@@ -65,206 +285,7 @@ export function activate(context: vscode.ExtensionContext) {
         vscode.window.showInformationMessage('PID information logged to Dialectic output channel');
     });
 
-    context.subscriptions.push(showReviewCommand, copyReviewCommand, logPIDsCommand, reviewProvider, {
-        dispose: () => {
-            server.close();
-        }
-    });
-}
-
-function createIPCServer(context: vscode.ExtensionContext, reviewProvider: ReviewWebviewProvider, outputChannel: vscode.OutputChannel): net.Server {
-    const socketPath = getSocketPath(context, outputChannel);
-    outputChannel.appendLine(`Setting up IPC server at: ${socketPath}`);
-
-    // 💡: Clean up any existing socket file
-    if (fs.existsSync(socketPath)) {
-        outputChannel.appendLine('Cleaning up existing socket file');
-        fs.unlinkSync(socketPath);
-    }
-
-    const server = net.createServer((socket) => {
-        outputChannel.appendLine('MCP server connected via IPC');
-        console.log('MCP server connected via IPC');
-
-        let buffer = '';
-
-        socket.on('data', (data) => {
-            buffer += data.toString();
-            
-            // Process all complete messages (ending with \n)
-            let lines = buffer.split('\n');
-            buffer = lines.pop() || ''; // Keep incomplete line in buffer
-            
-            for (const line of lines) {
-                if (line.trim()) { // Skip empty lines
-                    try {
-                        const message: IPCMessage = JSON.parse(line);
-                        outputChannel.appendLine(`Received IPC message: ${message.type} (${message.id})`);
-                        handleIPCMessage(message, socket, reviewProvider, outputChannel);
-                    } catch (error) {
-                        const errorMsg = `Failed to parse IPC message: ${error}`;
-                        outputChannel.appendLine(errorMsg);
-                        console.error(errorMsg);
-                        const response: IPCResponse = {
-                            id: 'unknown',
-                            success: false,
-                            error: 'Invalid JSON message'
-                        };
-                        socket.write(JSON.stringify(response) + '\n');
-                    }
-                }
-            }
-        });
-
-        socket.on('error', (error) => {
-            const errorMsg = `IPC socket error: ${error}`;
-            outputChannel.appendLine(errorMsg);
-            console.error(errorMsg);
-        });
-
-        socket.on('close', () => {
-            outputChannel.appendLine('MCP server disconnected from IPC');
-            console.log('MCP server disconnected from IPC');
-        });
-    });
-
-    server.listen(socketPath);
-    outputChannel.appendLine(`IPC server listening on: ${socketPath}`);
-    console.log('IPC server listening on:', socketPath);
-
-    return server;
-}
-
-function getSocketPath(context: vscode.ExtensionContext, outputChannel: vscode.OutputChannel): string {
-    // (1) Get PID
-    const discoveredPid = findVSCodePID(outputChannel);
-    
-    // (2) If failed, use UUID fallback and notify user
-    const vscodePid = discoveredPid || (() => {
-        vscode.window.showWarningMessage(
-            'Dialectic: Could not discover VSCode PID for reliable connection. Using fallback method.',
-            'View Logs'
-        ).then(selection => {
-            if (selection === 'View Logs') {
-                outputChannel.show();
-            }
-        });
-        return crypto.randomUUID();
-    })();
-    
-    // (3) Create platform-appropriate path
-    const socketPath = process.platform === 'win32' 
-        ? `\\\\.\\pipe\\dialectic-vscode-${vscodePid}`
-        : `/tmp/dialectic-vscode-${vscodePid}.sock`;
-    
-    // Log the final path
-    outputChannel.appendLine(`Using socket path: ${socketPath}`);
-    
-    return socketPath;
-}
-
-function handleIPCMessage(message: IPCMessage, socket: net.Socket, reviewProvider: ReviewWebviewProvider, outputChannel: vscode.OutputChannel): void {
-    outputChannel.appendLine(`Processing IPC message: ${message.type} (${message.id})`);
-    console.log('Received IPC message:', message.type, message.id);
-
-    let response: IPCResponse;
-
-    try {
-        switch (message.type) {
-            case 'present_review':
-                // 💡: Update the review provider with new content and optional baseUri
-                const reviewPayload = message.payload as {
-                    content: string;
-                    mode: 'replace' | 'update-section' | 'append';
-                    section?: string;
-                    baseUri?: string;
-                };
-                reviewProvider.updateReview(reviewPayload.content, reviewPayload.mode, reviewPayload.baseUri);
-                response = {
-                    id: message.id,
-                    success: true
-                };
-                break;
-            case 'log':
-                // 💡: Handle log messages from MCP server
-                const logPayload = message.payload as { level: 'info' | 'error' | 'debug'; message: string };
-                const logPrefix = `[MCP-${logPayload.level.toUpperCase()}]`;
-                outputChannel.appendLine(`${logPrefix} ${logPayload.message}`);
-                response = {
-                    id: message.id,
-                    success: true
-                };
-                break;
-            case 'get_selection':
-                // 💡: Get current selection from active editor
-                const activeEditor = vscode.window.activeTextEditor;
-
-                if (!activeEditor) {
-                    response = {
-                        id: message.id,
-                        success: true,
-                        data: {
-                            selectedText: null,
-                            message: 'No active editor found'
-                        }
-                    };
-                } else {
-                    const selection = activeEditor.selection;
-
-                    if (selection.isEmpty) {
-                        response = {
-                            id: message.id,
-                            success: true,
-                            data: {
-                                selectedText: null,
-                                filePath: activeEditor.document.fileName,
-                                documentLanguage: activeEditor.document.languageId,
-                                isUntitled: activeEditor.document.isUntitled,
-                                message: 'No text selected in active editor'
-                            }
-                        };
-                    } else {
-                        const selectedText = activeEditor.document.getText(selection);
-                        const startLine = selection.start.line + 1; // Convert to 1-based
-                        const startColumn = selection.start.character + 1; // Convert to 1-based
-                        const endLine = selection.end.line + 1;
-                        const endColumn = selection.end.character + 1;
-
-                        response = {
-                            id: message.id,
-                            success: true,
-                            data: {
-                                selectedText,
-                                filePath: activeEditor.document.fileName,
-                                startLine,
-                                startColumn,
-                                endLine,
-                                endColumn,
-                                lineNumber: startLine === endLine ? startLine : undefined,
-                                documentLanguage: activeEditor.document.languageId,
-                                isUntitled: activeEditor.document.isUntitled,
-                                message: `Selected ${selectedText.length} characters from ${startLine === endLine ? `line ${startLine}, columns ${startColumn}-${endColumn}` : `lines ${startLine}:${startColumn} to ${endLine}:${endColumn}`}`
-                            }
-                        };
-                    }
-                }
-                break;
-            default:
-                response = {
-                    id: message.id,
-                    success: false,
-                    error: `Unknown message type: ${message.type}`
-                };
-        }
-    } catch (error) {
-        response = {
-            id: message.id,
-            success: false,
-            error: error instanceof Error ? error.message : String(error)
-        };
-    }
-
-    socket.write(JSON.stringify(response) + '\n');
+    context.subscriptions.push(showReviewCommand, copyReviewCommand, logPIDsCommand, reviewProvider, daemonClient);
 }
 
 // 💡: Set up universal selection detection for interactive code review
