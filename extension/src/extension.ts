@@ -411,7 +411,7 @@ export function activate(context: vscode.ExtensionContext) {
     daemonClient.start();
 
     // 💡: Set up universal selection detection for interactive code review
-    setupSelectionDetection(context, outputChannel);
+    setupSelectionDetection(context, outputChannel, daemonClient);
 
     // Register commands
     const showReviewCommand = vscode.commands.registerCommand('dialectic.showReview', () => {
@@ -439,7 +439,7 @@ export function activate(context: vscode.ExtensionContext) {
 }
 
 // 💡: Set up universal selection detection for interactive code review
-function setupSelectionDetection(context: vscode.ExtensionContext, outputChannel: vscode.OutputChannel): void {
+function setupSelectionDetection(context: vscode.ExtensionContext, outputChannel: vscode.OutputChannel, daemonClient: DaemonClient): void {
     outputChannel.appendLine('Setting up universal selection detection...');
 
     // 💡: Track current selection state
@@ -491,7 +491,7 @@ function setupSelectionDetection(context: vscode.ExtensionContext, outputChannel
     );
 
     // 💡: Register command for when user clicks the code action
-    const chatIconCommand = vscode.commands.registerCommand('dialectic.chatAboutSelection', () => {
+    const chatIconCommand = vscode.commands.registerCommand('dialectic.chatAboutSelection', async () => {
         if (currentSelection) {
             const selectedText = currentSelection.editor.document.getText(currentSelection.selection);
             const filePath = currentSelection.editor.document.fileName;
@@ -505,7 +505,7 @@ function setupSelectionDetection(context: vscode.ExtensionContext, outputChannel
             outputChannel.appendLine(`Location: ${filePath}:${startLine}:${startColumn}-${endLine}:${endColumn}`);
 
             // 💡: Phase 4 & 5: Find Q chat terminal and inject formatted message
-            const targetTerminal = findQChatTerminal(outputChannel);
+            const targetTerminal = await findQChatTerminal(outputChannel, daemonClient, context);
             if (targetTerminal) {
                 const formattedMessage = formatSelectionMessage(selectedText, filePath, startLine, startColumn, endLine, endColumn);
                 targetTerminal.sendText(formattedMessage, false); // false = don't execute, just insert text
@@ -513,7 +513,7 @@ function setupSelectionDetection(context: vscode.ExtensionContext, outputChannel
                 outputChannel.appendLine(`Message injected into terminal: ${targetTerminal.name}`);
             } else {
                 outputChannel.appendLine('No suitable Q chat terminal found');
-                vscode.window.showWarningMessage('No suitable terminal found. Please ensure you have either: 1) Only one terminal open, or 2) A terminal named "Socratic Shell" or "AI".');
+                vscode.window.showWarningMessage('No suitable terminal found. Please ensure you have a terminal with an active MCP server (like Q chat) running.');
             }
         } else {
             outputChannel.appendLine('Chat action triggered but no current selection found');
@@ -524,8 +524,8 @@ function setupSelectionDetection(context: vscode.ExtensionContext, outputChannel
     outputChannel.appendLine('Selection detection with Code Actions setup complete');
 }
 
-// 💡: Phase 4 - Simplified terminal detection logic
-function findQChatTerminal(outputChannel: vscode.OutputChannel): vscode.Terminal | null {
+// 💡: Phase 4 - Intelligent terminal detection using registry
+async function findQChatTerminal(outputChannel: vscode.OutputChannel, daemonClient: DaemonClient, context: vscode.ExtensionContext): Promise<vscode.Terminal | null> {
     const terminals = vscode.window.terminals;
     outputChannel.appendLine(`Found ${terminals.length} open terminals`);
 
@@ -534,26 +534,119 @@ function findQChatTerminal(outputChannel: vscode.OutputChannel): vscode.Terminal
         return null;
     }
 
-    // 💡: Simple case - exactly one terminal
-    if (terminals.length === 1) {
-        const terminal = terminals[0];
-        outputChannel.appendLine(`Using single terminal: ${terminal.name}`);
+    // Get active terminals with MCP servers from registry
+    const activeTerminals = daemonClient.getActiveTerminals();
+    outputChannel.appendLine(`Active MCP server terminals: [${Array.from(activeTerminals).join(', ')}]`);
+
+    if (activeTerminals.size === 0) {
+        outputChannel.appendLine('No terminals with active MCP servers found');
+        return null;
+    }
+
+    // Filter terminals to only those with active MCP servers (async)
+    const terminalChecks = await Promise.all(
+        terminals.map(async (terminal) => {
+            // Extract the shell PID from the terminal (async)
+            const shellPID = await terminal.processId;
+            
+            // Log terminal for debugging
+            outputChannel.appendLine(`  Checking terminal: "${terminal.name}" (PID: ${shellPID})`);
+            
+            // Check if this terminal's shell PID is in our active registry
+            if (shellPID && activeTerminals.has(shellPID)) {
+                outputChannel.appendLine(`    ✅ Terminal "${terminal.name}" has active MCP server (PID: ${shellPID})`);
+                return { terminal, isAiEnabled: true };
+            } else {
+                outputChannel.appendLine(`    ❌ Terminal "${terminal.name}" has no active MCP server (PID: ${shellPID})`);
+                return { terminal, isAiEnabled: false };
+            }
+        })
+    );
+
+    // Extract only the AI-enabled terminals
+    const aiEnabledTerminals = terminalChecks
+        .filter(check => check.isAiEnabled)
+        .map(check => check.terminal);
+
+    outputChannel.appendLine(`AI-enabled terminals found: ${aiEnabledTerminals.length}`);
+
+    // 💡: Simple case - exactly one AI-enabled terminal
+    if (aiEnabledTerminals.length === 1) {
+        const terminal = aiEnabledTerminals[0];
+        outputChannel.appendLine(`Using single AI-enabled terminal: ${terminal.name}`);
         return terminal;
     }
 
-    // 💡: Multiple terminals - look for "Socratic Shell" or "AI" named terminal
+    // 💡: Multiple AI-enabled terminals - show picker UI with memory
+    if (aiEnabledTerminals.length > 1) {
+        outputChannel.appendLine(`Multiple AI-enabled terminals found: ${aiEnabledTerminals.length}`);
+        
+        // Get previously selected terminal PID from workspace state
+        const lastSelectedPID = context.workspaceState.get<number>('dialectic.lastSelectedTerminalPID');
+        outputChannel.appendLine(`Last selected terminal PID: ${lastSelectedPID}`);
+        
+        // Create picker items with terminal info
+        const terminalItems = await Promise.all(
+            aiEnabledTerminals.map(async (terminal) => {
+                const pid = await terminal.processId;
+                const isLastSelected = pid === lastSelectedPID;
+                return {
+                    label: isLastSelected ? `$(star-full) ${terminal.name}` : terminal.name,
+                    description: `PID: ${pid}${isLastSelected ? ' (last used)' : ''}`,
+                    detail: 'Terminal with active MCP server',
+                    terminal: terminal,
+                    pid: pid
+                };
+            })
+        );
+
+        // Sort items to put last selected first
+        terminalItems.sort((a, b) => {
+            if (a.pid === lastSelectedPID) return -1;
+            if (b.pid === lastSelectedPID) return 1;
+            return 0;
+        });
+
+        // Show the picker to user
+        const selectedItem = await vscode.window.showQuickPick(terminalItems, {
+            placeHolder: 'Select terminal for AI chat (⭐ = last used)',
+            title: 'Multiple AI-enabled terminals found'
+        });
+
+        if (selectedItem) {
+            outputChannel.appendLine(`User selected terminal: ${selectedItem.terminal.name} (PID: ${selectedItem.pid})`);
+            
+            // Remember this selection for next time
+            await context.workspaceState.update('dialectic.lastSelectedTerminalPID', selectedItem.pid);
+            outputChannel.appendLine(`Saved terminal PID ${selectedItem.pid} as last selected`);
+            
+            return selectedItem.terminal;
+        } else {
+            outputChannel.appendLine('User cancelled terminal selection');
+            return null;
+        }
+    }
+
+    // 💡: No AI-enabled terminals found - fall back to old logic for compatibility
+    outputChannel.appendLine('No AI-enabled terminals found, falling back to name-based detection');
+    
+    if (terminals.length === 1) {
+        const terminal = terminals[0];
+        outputChannel.appendLine(`Using single terminal (fallback): ${terminal.name}`);
+        return terminal;
+    }
+
     const targetTerminal = terminals.find(terminal => {
         const name = terminal.name.toLowerCase();
         return name.includes('socratic shell') || name.includes('ai');
     });
 
     if (targetTerminal) {
-        outputChannel.appendLine(`Found target terminal: ${targetTerminal.name}`);
+        outputChannel.appendLine(`Found target terminal (fallback): ${targetTerminal.name}`);
         return targetTerminal;
     }
 
-    // 💡: Multiple terminals, no clear choice - could present user with options in future
-    outputChannel.appendLine('Multiple terminals found, but none named "Socratic Shell" or "AI"');
+    outputChannel.appendLine('Multiple terminals found, but none are AI-enabled or named appropriately');
     return null;
 }
 
