@@ -586,8 +586,13 @@ async function findQChatTerminal(outputChannel: vscode.OutputChannel, daemonClie
         outputChannel.appendLine(`Last selected terminal PID: ${lastSelectedPID}`);
         
         // Create picker items with terminal info
-        const terminalItems = await Promise.all(
-            aiEnabledTerminals.map(async (terminal) => {
+        interface TerminalQuickPickItem extends vscode.QuickPickItem {
+            terminal: vscode.Terminal;
+            pid: number | undefined;
+        }
+        
+        const terminalItems: TerminalQuickPickItem[] = await Promise.all(
+            aiEnabledTerminals.map(async (terminal): Promise<TerminalQuickPickItem> => {
                 const pid = await terminal.processId;
                 const isLastSelected = pid === lastSelectedPID;
                 return {
@@ -600,20 +605,53 @@ async function findQChatTerminal(outputChannel: vscode.OutputChannel, daemonClie
             })
         );
 
-        // Sort items to put last selected first
-        terminalItems.sort((a, b) => {
-            if (a.pid === lastSelectedPID) return -1;
-            if (b.pid === lastSelectedPID) return 1;
-            return 0;
-        });
+        // Keep natural terminal order - don't sort, just use visual indicators
+
+        // Find the last selected terminal for the quick option
+        const lastSelectedItem = terminalItems.find(item => item.pid === lastSelectedPID);
+        
+        // Create picker items with optional "use last" entry at top
+        const pickerItems: TerminalQuickPickItem[] = [];
+        
+        // Add "use last terminal" option if we have a previous selection
+        if (lastSelectedItem) {
+            pickerItems.push({
+                label: `$(history) Use last terminal: ${lastSelectedItem.terminal.name}`,
+                description: `PID: ${lastSelectedItem.pid}`,
+                detail: 'Quick access to your previously used terminal',
+                terminal: lastSelectedItem.terminal,
+                pid: lastSelectedItem.pid
+            });
+            
+            // Add separator
+            pickerItems.push({
+                label: '$(dash) All available terminals',
+                description: '',
+                detail: '',
+                terminal: null as any, // This won't be selectable
+                pid: undefined,
+                kind: vscode.QuickPickItemKind.Separator
+            });
+        }
+        
+        // Add all terminals (keeping natural order)
+        pickerItems.push(...terminalItems);
 
         // Show the picker to user
-        const selectedItem = await vscode.window.showQuickPick(terminalItems, {
-            placeHolder: 'Select terminal for AI chat (⭐ = last used)',
+        const selectedItem = await vscode.window.showQuickPick(pickerItems, {
+            placeHolder: lastSelectedItem 
+                ? 'Select terminal for AI chat (first option = quick access to last used)'
+                : 'Select terminal for AI chat',
             title: 'Multiple AI-enabled terminals found'
         });
 
         if (selectedItem) {
+            // Safety check - ignore separator selections
+            if (selectedItem.kind === vscode.QuickPickItemKind.Separator || !selectedItem.terminal) {
+                outputChannel.appendLine('User selected separator or invalid item, ignoring');
+                return null;
+            }
+            
             outputChannel.appendLine(`User selected terminal: ${selectedItem.terminal.name} (PID: ${selectedItem.pid})`);
             
             // Remember this selection for next time
