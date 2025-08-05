@@ -145,9 +145,16 @@ impl IPCCommunicator {
         // Ensure connection is established before proceeding
         IPCCommunicatorInner::ensure_connection(Arc::clone(&self.inner)).await?;
 
+        // Create message payload with shell PID added for multi-window filtering
+        let mut payload = serde_json::to_value(params)?;
+        {
+            let inner = self.inner.lock().await;
+            payload["terminal_shell_pid"] = serde_json::Value::Number(serde_json::Number::from(inner.terminal_shell_pid));
+        }
+
         let message = IPCMessage {
             message_type: IPCMessageType::PresentReview,
-            payload: serde_json::to_value(params)?,
+            payload,
             id: Uuid::new_v4().to_string(),
         };
 
@@ -194,9 +201,17 @@ impl IPCCommunicator {
         // Ensure connection is established before proceeding
         IPCCommunicatorInner::ensure_connection(Arc::clone(&self.inner)).await?;
 
+        // Create message payload with shell PID for multi-window filtering
+        let payload = {
+            let inner = self.inner.lock().await;
+            serde_json::json!({
+                "terminal_shell_pid": inner.terminal_shell_pid
+            })
+        };
+
         let message = IPCMessage {
             message_type: IPCMessageType::GetSelection,
-            payload: serde_json::json!({}),
+            payload,
             id: Uuid::new_v4().to_string(),
         };
 

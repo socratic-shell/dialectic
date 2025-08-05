@@ -94,7 +94,7 @@ async fn main() -> Result<()> {
         Some(Command::Daemon { vscode_pid, prefix }) => {
             let prefix = match &prefix {
                 Some(s) => s,
-                None => "dialectic-mcp-daemon",
+                None => "dialectic-daemon",
             };
             info!(
                 "🚀 DAEMON MODE - Starting message bus daemon for VSCode PID {vscode_pid} with prefix {prefix}",

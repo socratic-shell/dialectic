@@ -83,7 +83,10 @@ class DaemonClient implements vscode.Disposable {
                     try {
                         const message: IPCMessage = JSON.parse(line);
                         this.outputChannel.appendLine(`Received message: ${message.type} (${message.id})`);
-                        this.handleIncomingMessage(message);
+                        // Handle message asynchronously for shell PID filtering
+                        this.handleIncomingMessage(message).catch(error => {
+                            this.outputChannel.appendLine(`Error handling message: ${error}`);
+                        });
                     } catch (error) {
                         const errorMsg = `Failed to parse message: ${error}`;
                         this.outputChannel.appendLine(errorMsg);
@@ -94,8 +97,18 @@ class DaemonClient implements vscode.Disposable {
         });
     }
 
-    private handleIncomingMessage(message: IPCMessage): void {
-        // TODO: Add shell PID filtering once MCP server includes it
+    private async handleIncomingMessage(message: IPCMessage): Promise<void> {
+        // Extract shell PID from message payload for filtering
+        const shellPid = this.extractShellPidFromMessage(message);
+        
+        if (shellPid) {
+            // Check if this message is intended for our VSCode window
+            const isForOurWindow = await this.isMessageForOurWindow(shellPid);
+            if (!isForOurWindow) {
+                this.outputChannel.appendLine(`Debug: Ignoring message from shell PID ${shellPid} (not in our window)`);
+                return;
+            }
+        }
         
         if (message.type === 'present_review') {
             try {
@@ -104,6 +117,7 @@ class DaemonClient implements vscode.Disposable {
                     mode: 'replace' | 'update-section' | 'append';
                     section?: string;
                     baseUri?: string;
+                    terminal_shell_pid: number;
                 };
                 
                 this.reviewProvider.updateReview(
@@ -141,6 +155,50 @@ class DaemonClient implements vscode.Disposable {
                 success: false, 
                 error: `Unknown message type: ${message.type}` 
             });
+        }
+    }
+
+    private extractShellPidFromMessage(message: IPCMessage): number | null {
+        try {
+            if (message.type === 'present_review' || message.type === 'get_selection') {
+                const payload = message.payload as any;
+                const shellPid = payload.terminal_shell_pid;
+                
+                if (typeof shellPid === 'number') {
+                    return shellPid;
+                } else {
+                    this.outputChannel.appendLine(`Warning: Message ${message.type} missing terminal_shell_pid field`);
+                    return null;
+                }
+            }
+        } catch (error) {
+            this.outputChannel.appendLine(`Error extracting shell PID from message: ${error}`);
+        }
+        return null;
+    }
+
+    private async isMessageForOurWindow(shellPid: number): Promise<boolean> {
+        try {
+            // Get all terminal PIDs in the current VSCode window
+            const terminals = vscode.window.terminals;
+            
+            for (const terminal of terminals) {
+                try {
+                    const terminalPid = await terminal.processId;
+                    if (terminalPid === shellPid) {
+                        return true;
+                    }
+                } catch (error) {
+                    // Some terminals might not have accessible PIDs, skip them
+                    continue;
+                }
+            }
+            
+            return false;
+        } catch (error) {
+            this.outputChannel.appendLine(`Error checking if message is for our window: ${error}`);
+            // On error, default to processing the message (fail open)
+            return true;
         }
     }
 
