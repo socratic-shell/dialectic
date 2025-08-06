@@ -188,12 +188,17 @@ function isMatchWithinConstraints(position: vscode.Position, lineConstraint?: Li
 
 /**
  * Get the best search result for navigation
- * Returns the first match, which is typically what users expect
+ * Returns the first match for single results, null for empty results
  */
 export function getBestSearchResult(results: SearchResult[]): SearchResult | null {
-    // 💡: Return first result as it appears earliest in the file
-    // Could be enhanced with ranking based on context or exact word matches
     return results.length > 0 ? results[0] : null;
+}
+
+/**
+ * Check if search results need disambiguation (multiple matches)
+ */
+export function needsDisambiguation(results: SearchResult[]): boolean {
+    return results.length > 1;
 }
 
 /**

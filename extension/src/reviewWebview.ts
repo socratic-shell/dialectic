@@ -5,7 +5,7 @@ import * as vscode from 'vscode';
 import * as crypto from 'crypto';
 import * as MarkdownIt from 'markdown-it';
 import { parseDialecticUrl, DialecticUrl } from './dialecticUrl';
-import { searchInFile, getBestSearchResult, formatSearchResults } from './searchEngine';
+import { searchInFile, getBestSearchResult, formatSearchResults, needsDisambiguation } from './searchEngine';
 
 export class ReviewWebviewProvider {
     private panel: vscode.WebviewPanel | undefined;
@@ -187,7 +187,17 @@ export class ReviewWebviewProvider {
                 return;
             }
 
-            // 💡: Open the document first
+            // 💡: Check if the resolved path is a directory
+            const stat = await vscode.workspace.fs.stat(fileUri);
+            if (stat.type === vscode.FileType.Directory) {
+                this.outputChannel.appendLine(`Revealing directory in Explorer: ${fileUri.fsPath}`);
+                
+                // 💡: Reveal the directory in the Explorer sidebar
+                await vscode.commands.executeCommand('revealInExplorer', fileUri);
+                return;
+            }
+
+            // 💡: Open the document first (it's a file)
             const document = await vscode.workspace.openTextDocument(fileUri);
 
             let targetLine = 1;
@@ -204,18 +214,49 @@ export class ReviewWebviewProvider {
 
                     this.outputChannel.appendLine(`Regex search results:\n${formatSearchResults(searchResults)}`);
 
-                    const bestResult = getBestSearchResult(searchResults);
-                    if (bestResult) {
-                        bestSearchResult = bestResult; // Store for decoration
-                        targetLine = bestResult.line;
-                        targetColumn = bestResult.column;
-                        this.outputChannel.appendLine(`Using regex result: line ${targetLine}, column ${targetColumn}`);
-                    } else {
+                    if (searchResults.length === 0) {
                         vscode.window.showWarningMessage(`Regex pattern "${dialecticUrl.regex}" not found in ${dialecticUrl.path}`);
                         // 💡: Fall back to line parameter if regex fails
                         if (dialecticUrl.line) {
                             targetLine = dialecticUrl.line.startLine;
                             targetColumn = dialecticUrl.line.startColumn || 1;
+                        }
+                    } else if (needsDisambiguation(searchResults)) {
+                        // 💡: Multiple matches - show disambiguation dialog
+                        try {
+                            const selectedResult = await this.showSearchDisambiguation(searchResults, dialecticUrl.regex, document);
+                            
+                            if (selectedResult) {
+                                bestSearchResult = selectedResult;
+                                targetLine = selectedResult.line;
+                                targetColumn = selectedResult.column;
+                            } else {
+                                // 💡: User cancelled - fall back to best result
+                                const bestResult = getBestSearchResult(searchResults);
+                                if (bestResult) {
+                                    bestSearchResult = bestResult;
+                                    targetLine = bestResult.line;
+                                    targetColumn = bestResult.column;
+                                }
+                            }
+                        } catch (error) {
+                            this.outputChannel.appendLine(`Disambiguation error: ${error}`);
+                            // 💡: Fall back to best result on error
+                            const bestResult = getBestSearchResult(searchResults);
+                            if (bestResult) {
+                                bestSearchResult = bestResult;
+                                targetLine = bestResult.line;
+                                targetColumn = bestResult.column;
+                            }
+                        }
+                    } else {
+                        // 💡: Single clear result or clear winner after prioritization
+                        const bestResult = getBestSearchResult(searchResults);
+                        if (bestResult) {
+                            bestSearchResult = bestResult;
+                            targetLine = bestResult.line;
+                            targetColumn = bestResult.column;
+                            this.outputChannel.appendLine(`Using best result: line ${targetLine}, column ${targetColumn}`);
                         }
                     }
                 } catch (error) {
@@ -240,7 +281,8 @@ export class ReviewWebviewProvider {
 
             const editor = await vscode.window.showTextDocument(document, {
                 selection,
-                viewColumn: vscode.ViewColumn.One
+                viewColumn: vscode.ViewColumn.One,
+                preview: false // Ensure final navigation creates a permanent tab
             });
             
             // 💡: Apply highlight decoration using the appropriate ranges
@@ -263,8 +305,108 @@ export class ReviewWebviewProvider {
     }
 
     /**
-     * Convert simplified URL syntax to dialectic: format
+     * Show disambiguation dialog for multiple search results
+     * Similar to VSCode's "Go to References" functionality with live preview
      */
+    private async showSearchDisambiguation(
+        results: import('./searchEngine').SearchResult[], 
+        searchTerm: string, 
+        document: vscode.TextDocument
+    ): Promise<import('./searchEngine').SearchResult | undefined> {
+        // 💡: Create QuickPick items with context
+        const items = results.map((result, index) => ({
+            label: `Line ${result.line}: ${result.text.trim()}`,
+            description: `$(search) Match ${index + 1} of ${results.length}`,
+            detail: `Column ${result.column}`,
+            result: result
+        }));
+
+        const quickPick = vscode.window.createQuickPick();
+        quickPick.title = `Multiple matches for "${searchTerm}"`;
+        quickPick.placeholder = 'Select the match you want to navigate to (preview updates as you navigate)';
+        quickPick.items = items;
+        quickPick.canSelectMany = false;
+
+        return new Promise((resolve) => {
+            let currentActiveItem: any = null;
+            let isResolved = false;
+
+            // 💡: Show live preview as user navigates through options
+            quickPick.onDidChangeActive((items) => {
+                if (items.length > 0) {
+                    currentActiveItem = items[0]; // Track the currently active item
+                    const selectedResult = (items[0] as any).result;
+                    
+                    // 💡: Show preview by revealing the location without committing to it
+                    vscode.window.showTextDocument(document, {
+                        selection: new vscode.Range(
+                            selectedResult.line - 1, 
+                            selectedResult.matchStart,
+                            selectedResult.line - 1, 
+                            selectedResult.matchEnd
+                        ),
+                        preview: true, // This keeps it as a preview tab
+                        preserveFocus: true, // Keep focus on the QuickPick
+                        viewColumn: vscode.ViewColumn.One // Ensure it opens in main editor area
+                    }).then((editor) => {
+                        // 💡: Add line decorations to preview just like final navigation
+                        const decorationRanges = this.createDecorationRanges(
+                            document, 
+                            undefined, // No line constraint for search results
+                            selectedResult.line, 
+                            selectedResult.column, 
+                            selectedResult
+                        );
+                        if (decorationRanges.length > 0) {
+                            editor.setDecorations(this.lineHighlightDecoration, decorationRanges);
+                            
+                            // 💡: Remove preview highlight after 2 seconds (shorter than final)
+                            setTimeout(() => {
+                                if (editor && !editor.document.isClosed) {
+                                    editor.setDecorations(this.lineHighlightDecoration, []);
+                                }
+                            }, 2000);
+                        }
+                    }, (error: any) => {
+                        this.outputChannel.appendLine(`Preview failed: ${error}`);
+                    });
+                }
+            });
+
+            quickPick.onDidAccept(() => {
+                if (isResolved) {
+                    return;
+                }
+
+                // 💡: Use the currently active item instead of selectedItems
+                const selected = currentActiveItem || quickPick.selectedItems[0];
+                
+                if (selected && (selected as any).result) {
+                    const result = (selected as any).result;
+                    isResolved = true;
+                    quickPick.dispose();
+                    resolve(result);
+                    return;
+                }
+                
+                // 💡: Fallback case
+                isResolved = true;
+                quickPick.dispose();
+                resolve(undefined);
+            });
+
+            quickPick.onDidHide(() => {
+                if (!isResolved) {
+                    isResolved = true;
+                    quickPick.dispose();
+                    resolve(undefined);
+                }
+            });
+
+            quickPick.show();
+        });
+    }
+
     private convertToDialecticUrl(href: string): string {
         // Handle path?regex format for search
         // Allow spaces in search patterns but exclude brackets and parentheses
@@ -378,7 +520,12 @@ export class ReviewWebviewProvider {
         if (this.baseUri) {
             const candidateUri = vscode.Uri.joinPath(this.baseUri, fileName);
             try {
-                await vscode.workspace.fs.stat(candidateUri);
+                const stat = await vscode.workspace.fs.stat(candidateUri);
+                // 💡: Check if it's a directory - we'll handle this differently
+                if (stat.type === vscode.FileType.Directory) {
+                    this.outputChannel.appendLine(`Found directory using baseUri: ${candidateUri.fsPath}`);
+                    return candidateUri;
+                }
                 this.outputChannel.appendLine(`Found file using baseUri: ${candidateUri.fsPath}`);
                 return candidateUri;
             } catch {
@@ -395,7 +542,12 @@ export class ReviewWebviewProvider {
         for (const folder of workspaceFolders) {
             const candidateUri = vscode.Uri.joinPath(folder.uri, fileName);
             try {
-                await vscode.workspace.fs.stat(candidateUri);
+                const stat = await vscode.workspace.fs.stat(candidateUri);
+                // 💡: Check if it's a directory - we'll handle this differently
+                if (stat.type === vscode.FileType.Directory) {
+                    this.outputChannel.appendLine(`Found directory in workspace: ${candidateUri.fsPath}`);
+                    return candidateUri;
+                }
                 this.outputChannel.appendLine(`Found file in workspace: ${candidateUri.fsPath}`);
                 return candidateUri;
             } catch {
