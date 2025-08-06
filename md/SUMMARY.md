@@ -8,7 +8,10 @@
 
 - [Installation](./installation.md) <!-- 💡: Step-by-step setup for both VSCode extension and MCP server components -->
 - [Quick start](./quick-start.md) <!-- 💡: Basic workflow example showing AI assistant → review display → navigation cycle -->
-- [Review format](./review-format.md) <!-- 💡: Explains file:line syntax, reference-style links [file:line][], and markdown conventions AI assistants should follow -->
+- [Features]()
+    - [Presenting a walkthrough](./walkthrough-presentation.md) <!-- 💡: Explain how presentation works, from a user's perspective -->
+    - [Ask Socratic Shell](./ask-socratic-shell.md) <!-- 💡: Explain how Ask Socratic Shell works, from a user's perspective -->
+    - [Review format](./review-format.md) <!-- 💡: Explains file:line syntax, reference-style links [file:line][], and markdown conventions AI assistants should follow -->
 - [Frequently asked questions](./faq.md) <!-- 💡: Anticipated user questions about common errors, expected workflow, purpose, comparisons with other tools, etc -->
 
 # Development and contribution guide <!-- 💡: Technical documentation for contributors and people wanting to understand system internals -->
@@ -16,10 +19,12 @@
 - [Building and testing](./design/build-and-test.md) <!-- 💡: Development environment setup, build process, and testing procedures -->
 - [System overview](./design/overview.md) <!-- 💡: High-level architecture showing MCP server ↔ VSCode extension communication via Unix sockets -->
     - [Communication protocol](./design/protocol.md) <!-- 💡: JSON message format, Unix socket/named pipe IPC, and error handling between components -->
+    - [Message flows](./design/message-flows.md) <!-- 💡: Detailed sequence diagrams and examples for review presentation and Ask Socratic Shell flows -->
     - [Security considerations](./design/security.md) <!-- 💡: CSP headers, DOMPurify sanitization, and secure webview practices for markdown rendering -->
     - [MCP Tool interface](./design/mcp-tool-interface.md) <!-- 💡: API specification for AI assistants calling present_review tool with markdown content -->
     - [AI Guidance design considerations](./design/ai-guidance.md) <!-- 💡: Design decisions made specifically to work well with AI collaboration patterns from socratic shell -->
 - [VSCode extension](./design/extension.md) <!-- 💡: Highlights of the VSCode Extension design and implementation: activation, establishing IPC protocol -->
+    - [Terminal registry](./design/terminal-registry.md) <!-- 💡: Implementation details for tracking active MCP servers, PID discovery, and capability-based routing -->
     - [Markdown rendering](./design/markdown-rendering.md) <!-- 💡: markdown-it pipeline, custom renderer rules for file references, and HTML generation process -->
 
 # In-progress RFCs <!-- 💡: Design proposals under active development and discussion -->

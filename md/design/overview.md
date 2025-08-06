@@ -4,93 +4,108 @@
 
 ## Architecture Summary
 
-Dialectic consists of two main components that communicate via Unix socket IPC:
+Dialectic consists of three main components that communicate via a [daemon message bus](./protocol.md):
 
-1. **VSCode Extension** - Provides the review panel UI, handles file navigation, and acts as IPC server
-2. **MCP Server** - Acts as a bridge between AI assistants and the VSCode extension via IPC client
-
-The AI assistant generates review content as structured markdown and uses the MCP server's `present-review` tool to display it in the VSCode interface through bidirectional IPC communication.
+1. **VSCode Extension** - Provides the review panel UI, handles file navigation, and manages [terminal registry](./terminal-registry.md)
+2. **Daemon Message Bus** - Routes messages between MCP servers and VSCode extensions across multiple windows; there is one per IDE process
+3. **MCP Server** - Acts as a bridge between AI assistants and the VSCode extension via daemon communication
 
 ## Communication Architecture
 
+```mermaid
+graph TD
+    AI[AI Assistant]
+    
+    subgraph IDE[" IDE Process (e.g., VSCode) "]
+        subgraph Window[" Window "]
+            Ext[Extension]
+            Term1[Terminal 1]
+            Server1[MCP Server 1]
+            Term2[Terminal 2]
+            Server2[MCP Server 2]
+        end
+        subgraph Window2[" Other window "]
+            DotDotDot[...]
+        end
+    end
+
+    Daemon[Daemon Message Bus]
+
+    AI --> Server1
+    AI --> Server2
+    
+    Ext <--> Daemon
+    Server1 <--> Daemon
+    Server2 <--> Daemon
+    DotDotDot <--> Daemon
+
+    %% Terminal connections within windows
+    Term1 -.-> Server1
+    Term2 -.-> Server2
+
+    %% Styling
+    classDef daemon fill:#e1f5fe,stroke:#01579b,stroke-width:3px,color:#000
+    classDef extension fill:#f3e5f5,stroke:#4a148c,stroke-width:2px,color:#000
+    classDef server fill:#e8f5e8,stroke:#1b5e20,stroke-width:2px,color:#000
+    classDef terminal fill:#fff3e0,stroke:#e65100,stroke-width:1px,color:#000
+    classDef window fill:#fafafa,stroke:#424242,stroke-width:1px,stroke-dasharray: 5 5
+    classDef ai fill:#fff9c4,stroke:#f57f17,stroke-width:2px,color:#000
+
+    class Daemon daemon
+    class Ext extension
+    class Server1,Server2 server
+    class Term1,Term2 terminal
+    class Window window
+    class AI ai
 ```
-AI Assistant → MCP Tool → Unix Socket → VSCode Extension → Review Panel → User
-     ↑                                                                      ↓
-     └─────────── Response ←─────── IPC Response ←─────── User Interaction ←┘
-```
 
-### IPC Communication
+## Example flow
 
-The MCP server and VSCode extension communicate via Unix socket IPC using environment variable discovery. The VSCode extension creates a socket server and sets `DIALECTIC_IPC_PATH` for the MCP server to find and connect to.
+Here is a high-level overview of how the flow works when the user requests a review:
 
-For detailed information about how the IPC connection is established and what messages are exchanged, see the [Communication Protocol](./protocol.md) chapter.
+* User requests a walkthrough. LLM invokes the "present review" [MCP tool](./mcp-tool-interface.md).
+* The MCP server sends a message to the [daemon bus](./protocol.md). The daemon bus broadcasts the message to all connected clients. The message includes the PID of the shell in which the MCP server is running.
+* The extension receives the message from the daemon bus. It identifies that the shell PID belongs to one of the terminals in its window, so it processes the request and creates a webview.
 
-**Key Design Decisions:**
-- **Unix Socket/Named Pipe**: Secure, efficient local IPC following VSCode extension patterns
-- **Newline-Delimited JSON**: Simple, debuggable message format with reliable boundaries
-- **Promise-Based Tracking**: Supports concurrent operations with unique message IDs
-- **Environment Variable Discovery**: Automatic connection without configuration complexity
-
-## Design Philosophy
-
-Dialectic embodies the collaborative patterns from the [socratic shell project](https://socratic-shell.github.io/socratic-shell/). The goal is to enable genuine pair programming partnerships with AI assistants, not create another tool for giving commands to a servant.
-
-**Collaborative Review** - Instead of accepting hunks blindly or micro-managing every change, we work together to understand what was built and why, just like reviewing a colleague's PR.
-
-**Thoughtful Interaction** - The review format encourages narrative explanation and reasoning, not just "what changed" but "how it works" and "why these decisions were made."
-
-**Preserved Context** - Reviews become part of your git history, retaining the collaborative thinking process for future reference and team members.
-
-**Iterative Refinement** - Nothing is right the first time. The review process expects and supports ongoing dialogue, suggestions, and improvements rather than assuming the initial implementation is final.
-
-## Implementation Status
-
-**✅ MVP Complete** - All core features implemented and tested:
-- **Review Display**: Tree-based markdown rendering in VSCode sidebar
-- **Code Navigation**: Clickable `file:line` references that jump to code locations
-- **Content Export**: Copy button to export review content for commit messages
-- **IPC Communication**: Full bidirectional communication between AI and extension
-
-**Current State**: Ready for end-to-end testing with real AI assistants in VSCode environments.
-
-**Next Phase**: Package extension for distribution and create installation documentation.
-
-## Technical Stack
-
-- **MCP Server**: TypeScript/Node.js with comprehensive unit testing (49/49 tests passing)
-- **VSCode Extension**: TypeScript with VSCode Extension API
-- **Communication**: Unix domain sockets (macOS/Linux) and named pipes (Windows)
-- **Protocol**: JSON messages with unique ID tracking and timeout protection
-- **Testing**: Jest for unit tests with test mode for IPC-free testing
+Read more details in the [communication protocol](./protocol.md) section.
 
 ## Component Responsibilities
 
 ### MCP Server (`server/`)
 - Exposes `present-review` tool to AI assistants
-- Validates parameters and handles errors gracefully
-- Manages IPC client connection to VSCode extension
-- Supports concurrent operations with Promise-based tracking
-- See `server/src/index.ts` for main server implementation
+- Discovers terminal shell PID through process tree walking
+- Announces presence to daemon via Marco-Polo protocol
+- Handles graceful disconnection and cleanup
+- See `server/src/main.rs` for main server implementation
+
+### Daemon Message Bus (`server/src/daemon.rs`)
+- Routes messages between MCP servers and VSCode extensions
+- Manages client connections and handles disconnections
+- Broadcasts messages to appropriate VSCode windows
+- Provides process lifecycle management
+- Runs as background process tied to VSCode instance
 
 ### VSCode Extension (`extension/`)
-- Creates IPC server and sets environment variables
-- Provides tree-based review display in sidebar
-- Handles clickable navigation to code locations
-- Manages copy-to-clipboard functionality
-- See `extension/src/extension.ts` for activation logic
+- Creates daemon client connection and manages terminal registry
+- Provides tree-based review display in sidebar with navigation
+- Implements Ask Socratic Shell integration with intelligent terminal routing
+- Manages terminal picker UI with memory and quick access options
+- Handles workspace state persistence for user preferences
+- See `extension/src/extension.ts` for activation and daemon client logic
 
-### Shared Types (`server/src/types.ts`)
-- Defines communication protocol interfaces
-- Ensures type safety across IPC boundary
-- Prevents protocol mismatches during development
+### Terminal Registry (`extension/src/extension.ts`)
+- Tracks active terminals with MCP servers using shell PIDs
+- Updates registry based on Marco-Polo discovery messages
+- Provides API for Ask Socratic Shell to query AI-enabled terminals
+- Maintains workspace-specific preferences and memory
 
 ## Key Implementation Files
 
-- `server/src/index.ts` - Main MCP server with tool handlers
-- `server/src/ipc.ts` - IPC client communication logic
-- `server/src/validation.ts` - Parameter validation and error handling
-- `extension/src/extension.ts` - VSCode extension activation and IPC server
+- `server/src/main.rs` - Main MCP server with tool handlers and process discovery
+- `server/src/daemon.rs` - Daemon message bus with client management
+- `server/src/pid_discovery.rs` - Process tree walking for terminal shell PID detection
+- `extension/src/extension.ts` - VSCode extension with daemon client and terminal registry
 - `extension/src/reviewProvider.ts` - Tree view implementation and markdown parsing
-- `server/src/__tests__/` - Comprehensive unit test suite
+- `server/tests/` - Integration tests with real daemon and terminal scenarios
 
-For detailed implementation specifics, refer to the source code and inline comments marked with `💡` that explain non-obvious design decisions.
+For detailed implementation specifics, refer to the source code and inline comments that explain design decisions and architectural patterns.
