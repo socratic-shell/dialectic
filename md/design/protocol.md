@@ -1,125 +1,64 @@
 # Communication Protocol
 
-*This chapter defines how the MCP server and VSCode extension communicate via Unix socket IPC.*
+The communication follows a hub-and-spoke pattern with a [central daemon process](./daemon.md). The daemon acts as a message bus, receiving messages from both [MCP servers](./mcp-server.md) and active [extensions](./extension.md) and rebroadcasting them so that everyone can receive them. For detailed message flows and sequence diagrams, see the [Message Flows](./message-flows.md) chapter.
 
-## Architecture Overview
+## Protocol
 
-The communication follows a client-server pattern:
-- **VSCode Extension** = IPC Server (creates socket, listens for connections)
-- **MCP Server** = IPC Client (connects to socket, sends messages)
-- **Discovery** = Environment variable `DIALECTIC_IPC_PATH` set by extension
+The protocol is very simple. Each message is a JSON structure formatted on a single line. Clients connect to a shared IPC socket. Each message sent by any client is broadcast back to all other clients. Clients are responsible for filtering out their own messages and messages that don't pertain to them.
 
-## Message Flow
+### Identifying the target of a message
 
-1. **VSCode Extension** starts and creates Unix socket/named pipe
-2. **VSCode Extension** sets `DIALECTIC_IPC_PATH` environment variable
-3. **AI Assistant** calls `present-review` MCP tool with review content
-4. **MCP Server** validates parameters and creates IPC message with unique ID
-5. **MCP Server** connects to socket (if not already connected) and sends JSON message
-6. **VSCode Extension** receives message, processes it, and updates review panel
-7. **VSCode Extension** sends JSON response back through socket
-8. **MCP Server** receives response, resolves Promise, and returns result to AI
+Our [message types](#message-types) include PIDs as needed to help clients filter out messages. For example, when an MCP server initiatives a message, it includes the `shellPid` field to identify which shell it is running inside of. An extension can use this to decide whether that shell is part of its window or some other window within the same IDE. 
 
-## Socket Management
+## Message Types
 
-### Platform Compatibility
-- **Unix Domain Sockets** (macOS/Linux): Socket files in VSCode extension storage
-- **Named Pipes** (Windows): Windows pipe format with automatic cleanup
-- **Discovery**: Extension sets environment variable for MCP server connection
-
-### Connection Lifecycle
-- Extension creates socket on activation and sets environment variable
-- MCP server connects when first `present-review` tool is called
-- Connection persists for multiple operations to avoid reconnection overhead
-- Automatic cleanup when extension deactivates or MCP server closes
-
-## Message Protocol
-
-### Message Format
-All communication uses **newline-delimited JSON** messages over the Unix socket/named pipe:
-
-- **Format**: Each message is a single line of JSON terminated by `\n`
-- **Parsing**: Receivers split incoming data on newlines and parse each line as JSON
-- **Buffering**: TCP streams may deliver partial messages, so receivers must buffer until complete lines
-
-**Example Message Stream:**
-```
-{"type":"present-review","id":"abc123","payload":{...}}\n
-{"id":"abc123","success":true}\n
+### PresentReview Message
+```json
+{
+  "type": "PresentReview",
+  "id": "unique-message-id",
+  "content": "# Review markdown content...",
+  "mode": "replace",
+  "baseUri": "/path/to/project",
+  "shellPid": 12345
+}
 ```
 
-This format ensures reliable message boundaries in TCP streams and handles cases where multiple messages arrive in a single data chunk or messages arrive in fragments.
+### Discovery Messages
+```json
+// MCP server announces presence
+{
+  "type": "Polo",
+  "shellPid": 12345
+}
 
-### Request/Response Pattern
-All communication uses JSON messages with unique IDs for request/response correlation:
+// MCP server announces departure
+{
+  "type": "Goodbye", 
+  "shellPid": 12345
+}
 
-**Request Message Structure:**
-- `type`: Message type identifier (currently only 'present-review')
-- `payload`: Tool parameters (content, mode, optional section)
-- `id`: UUID for response tracking
+// Extension requests discovery
+{
+  "type": "Marco"
+}
+```
 
-**Response Message Structure:**
-- `id`: Matches request message ID
-- `success`: Boolean indicating operation result
-- `error`: Optional error message when success is false
+### Response Messages
+```json
+// Success response
+{
+  "id": "unique-message-id",
+  "success": true
+}
 
-### Review Update Modes
-- **replace**: Complete content replacement (most common)
-- **append**: Add content to end (for incremental reviews)
-- **update-section**: Update specific section (MVP: append with header)
-
-## Error Handling
-
-### Connection Errors
-- **Missing Environment Variable**: Clear error when not running in VSCode
-- **Socket Connection Failed**: Network-level errors propagated to AI
-- **Extension Not Running**: Connection refused handled gracefully
-
-### Message Errors
-- **Invalid JSON**: Extension responds with error for malformed messages
-- **Unknown Message Type**: Error response for unsupported operations
-- **Validation Failures**: Parameter validation errors returned clearly
-
-### Timeout Protection
-- 5-second timeout prevents hanging requests
-- Automatic cleanup of timed-out operations
-- Clear error messages for timeout scenarios
-
-## Concurrency Support
-
-### Request Tracking
-- Map-based tracking of pending requests by unique ID
-- Support for multiple simultaneous `present-review` calls
-- Proper cleanup of completed or failed requests
-
-### Resource Management
-- Single persistent connection per MCP server instance
-- Automatic socket cleanup on extension deactivation
-- Proper disposal of VSCode API resources
-
-## Security Considerations
-
-### Local-Only Communication
-- Unix sockets and named pipes are local-only by design
-- No network exposure or remote access possible
-- Socket files created with appropriate permissions
-
-### Input Validation
-- All message parameters validated before processing
-- TypeScript interfaces provide compile-time type safety
-- Runtime validation prevents malformed message processing
-
-## Testing Strategy
-
-### Unit Testing
-- Test mode bypasses real socket connections for unit tests
-- Mock responses simulate success/error scenarios
-- Comprehensive coverage of error conditions and edge cases
-
-### Integration Testing
-- Environment detection verification
-- Platform-specific socket path generation testing
-- Message protocol serialization/deserialization validation
+// Error response
+{
+  "id": "unique-message-id", 
+  "success": false,
+  "error": "Error description"
+}
+```
 
 ## Implementation References
 

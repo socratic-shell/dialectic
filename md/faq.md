@@ -1,21 +1,14 @@
 # Frequently asked questions
 
-## MCP Server Connection Issues
+## The Dialectic MCP server won't load!
 
-**Q: I'm getting "connect ENOENT" errors when starting the MCP server**
+Are you running from a terminal inside of your IDE? You must use a terminal from within the IDE or else the MCP server can't identify which IDE window to connect to.
 
-**A:** This is usually caused by a race condition during VSCode startup. The MCP server tries to connect before the Dialectic extension has fully activated and created the IPC socket.
+## When I active "Ask Socratic Shell", how does it know which terminal to send the message to?
 
-**Solution:**
-1. Check the VSCode "OUTPUT" tab and select "Dialectic" from the dropdown
-2. Verify you see messages like:
-   ```
-   Dialectic extension is now active
-   Setting up IPC server at: /tmp/dialectic-[uuid].sock
-   IPC server listening on: /tmp/dialectic-[uuid].sock
-   Set DIALECTIC_IPC_PATH environment variable to: /tmp/dialectic-[uuid].sock
-   ```
-3. Open a **new terminal** in VSCode (`Terminal > New Terminal`)
-4. Run `dialectic-mcp-server` from the new terminal
+The extension tracks which terminal windows have active MCP servers. If there is exactly one, it will use that, but if there are multiple, it should give you a choice.
 
-The new terminal will inherit the updated `DIALECTIC_IPC_PATH` environment variable that the extension set after activation.
+## "Ask Socratic Shell" stopped working after reloading VSCode
+
+When you reload VSCode, the extension restarts but your AI assistants keep running. The system *should* rediscover active terminals automatically. You can check the `Output > Dialectic` window to see whether the extension has started yet. If it has, and it fails to discover active terminals, please file an issue!
+

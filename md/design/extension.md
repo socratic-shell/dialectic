@@ -4,50 +4,133 @@
 
 ## Goal
 
-The VSCode extension provides a simple, focused interface for displaying and interacting with AI-generated code reviews. It eliminates the need to scroll through terminal output by bringing reviews directly into the IDE as a first-class citizen.
+The VSCode extension provides intelligent AI integration with two core capabilities:
 
-### Core Functionality
-
-The extension enables three essential capabilities:
-
-1. **Review Display** - Pop up a dedicated panel when the AI assistant presents a review, showing the structured markdown content with proper formatting
-
-2. **Code Navigation** - Make `file:line` references in the review clickable, allowing instant navigation to the referenced code locations in the editor
-
-3. **Content Export** - Provide a "Copy" button to copy the review content to the clipboard for use in commit messages, documentation, or sharing
-
-These three features support the core workflow: AI generates review → user reads and navigates → user exports for further use.
+1. **Review Display** - Present AI-generated code reviews in a dedicated sidebar panel with clickable navigation
+2. **Ask Socratic Shell** - Route selected code to AI assistants with intelligent terminal detection and routing
 
 ## Architecture
 
-The extension operates as both a UI component and an IPC server:
+The extension operates as a daemon client and UI component:
 
 ```
-┌─────────────────┐    IPC Server     ┌─────────────────┐    Tree View API    ┌─────────────────┐
-│   MCP Server    │ ←─────────────────→ │ VSCode Extension│ ←─────────────────→ │   VSCode UI     │
-└─────────────────┘                    └─────────────────┘                    └─────────────────┘
+┌─────────────────┐    Daemon Client    ┌─────────────────┐    VSCode APIs    ┌─────────────────┐
+│ Daemon Bus      │ ←─────────────────→ │ VSCode Extension│ ←───────────────→ │   VSCode UI     │
+└─────────────────┘                    └─────────────────┘                  └─────────────────┘
+                                               │
+                                               ▼
+                                        ┌─────────────────┐
+                                        │Terminal Registry│
+                                        └─────────────────┘
 ```
 
 **Key Responsibilities:**
-- Create and manage Unix socket IPC server for MCP communication
-- Set environment variables for MCP server discovery
-- Process incoming review messages and update UI components
+- Connect to daemon message bus as client
+- Maintain terminal registry of AI-enabled terminals
+- Process review presentation messages and update UI
+- Implement Ask Socratic Shell with intelligent terminal routing
 - Provide tree-based review display with clickable navigation
-- Handle copy-to-clipboard functionality
 
-## Implementation Approach
+## Core Components
 
-### Technology Stack
+### Daemon Client
+Manages connection to the daemon message bus:
+- **Connection management** - Connects to daemon Unix socket on activation
+- **Message handling** - Processes PresentReview, Polo, Goodbye, and Marco messages
+- **Response routing** - Sends success/error responses back through daemon
+- **Reconnection logic** - Handles daemon restarts gracefully
+
+### Terminal Registry
+Tracks which terminals have active AI assistants:
+- **PID tracking** - Maintains `Set<number>` of shell PIDs with active MCP servers
+- **Discovery updates** - Updates registry based on Polo/Goodbye messages from daemon
+- **Terminal matching** - Maps VSCode terminals to shell PIDs for routing decisions
+- **Workspace isolation** - Each window maintains independent registry
+
+### Ask Socratic Shell Integration
+Routes selected code to AI assistants:
+- **Code selection** - Captures selected text with file location context
+- **Terminal detection** - Queries terminal registry for AI-enabled terminals
+- **Smart routing** - Auto-routes to single terminal or shows picker for multiple
+- **Terminal picker** - VSCode QuickPick with memory and quick access options
+- **Message formatting** - Formats code with context for AI consumption
+
+### Review Provider
+Displays AI-generated reviews in sidebar:
+- **Tree structure** - Hierarchical display of review sections and content
+- **Markdown rendering** - Processes markdown with custom link handling
+- **Navigation** - Clickable file:line references that jump to code locations
+- **Content management** - Supports replace, update, and append modes
+
+## Implementation Details
+
+### Terminal Registry Implementation
+```typescript
+class DaemonClient {
+    private activeTerminals = new Set<number>();
+    
+    private handlePoloMessage(message: PoloMessage) {
+        this.activeTerminals.add(message.shellPid);
+        this.outputChannel.appendLine(`Added terminal PID ${message.shellPid} to registry`);
+    }
+    
+    private handleGoodbyeMessage(message: GoodbyeMessage) {
+        this.activeTerminals.delete(message.shellPid);
+        this.outputChannel.appendLine(`Removed terminal PID ${message.shellPid} from registry`);
+    }
+}
+```
+
+### Ask Socratic Shell Flow
+1. **User selects code** - Context menu or quick action triggers command
+2. **Query registry** - Get list of terminals with active AI assistants
+3. **Route intelligently**:
+   - **Single terminal** - Send message directly
+   - **Multiple terminals** - Show picker with memory
+   - **No terminals** - Display helpful error message
+4. **Format message** - Include file location and selected code
+5. **Send to terminal** - Use VSCode terminal API to inject formatted text
+
+### Terminal Picker UX
+- **Quick access option** - "Use last terminal: [Name]" appears first
+- **Visual indicators** - Star icons and "(last used)" labels
+- **Natural ordering** - Terminals appear in same order as VSCode terminal list
+- **Workspace memory** - Remembers preference per VSCode window
+- **Graceful fallbacks** - Handles terminal closures and MCP server disconnections
+
+### Message Processing
+The extension filters daemon broadcasts based on shell PID matching:
+```typescript
+private async handlePresentReviewMessage(message: PresentReviewMessage) {
+    // Check if this message is for a terminal in our window
+    const matchingTerminal = await this.findTerminalByPID(message.shellPid);
+    if (matchingTerminal) {
+        // Process the review for our window
+        await this.reviewProvider.presentReview(message);
+        return { success: true };
+    }
+    // Ignore - another window will handle it
+    return null;
+}
+```
+
+## Multi-Window Support
+
+Each VSCode window runs an independent extension instance:
+- **Separate daemon connections** - Each window connects to the same daemon
+- **Independent registries** - Each tracks its own terminals
+- **Automatic routing** - Messages route to correct window based on shell PID
+- **Isolated preferences** - Terminal picker memory is per-window
+
+## Technology Stack
+
 - **Language**: TypeScript with VSCode Extension API
-- **UI Framework**: VSCode TreeView API for hierarchical review display
-- **IPC**: Node.js `net` module for Unix socket server
-- **Markdown Processing**: Custom parser for tree structure generation
-- **Navigation**: VSCode editor commands for file/line jumping
+- **IPC**: Node.js Unix socket client for daemon communication
+- **UI**: VSCode TreeView API for review display, QuickPick for terminal selection
+- **Terminal Integration**: VSCode Terminal API for message injection
+- **State Management**: VSCode workspace state for terminal picker memory
 
-### Core Components
-
-**Extension Activation**: Main entry point that sets up all functionality
-- Creates review provider for tree-based display
+The extension provides seamless AI integration that eliminates configuration while supporting sophisticated multi-window workflows.
 - Registers tree view with VSCode's sidebar
 - Sets up IPC server for MCP communication
 - Registers commands and cleanup handlers

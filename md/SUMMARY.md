@@ -20,6 +20,8 @@
 - [System overview](./design/overview.md) <!-- 💡: High-level architecture showing MCP server ↔ VSCode extension communication via Unix sockets -->
     - [Communication protocol](./design/protocol.md) <!-- 💡: JSON message format, Unix socket/named pipe IPC, and error handling between components -->
     - [Message flows](./design/message-flows.md) <!-- 💡: Detailed sequence diagrams and examples for review presentation and Ask Socratic Shell flows -->
+    - [Daemon message bus](./design/daemon.md) <!-- 💡: Central message router implementation, client management, process lifecycle, and Unix socket server architecture -->
+    - [MCP server](./design/mcp-server.md) <!-- 💡: AI assistant bridge implementation, process discovery, tool handlers, and daemon client functionality -->
     - [Security considerations](./design/security.md) <!-- 💡: CSP headers, DOMPurify sanitization, and secure webview practices for markdown rendering -->
     - [MCP Tool interface](./design/mcp-tool-interface.md) <!-- 💡: API specification for AI assistants calling present_review tool with markdown content -->
     - [AI Guidance design considerations](./design/ai-guidance.md) <!-- 💡: Design decisions made specifically to work well with AI collaboration patterns from socratic shell -->

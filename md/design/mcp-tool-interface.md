@@ -1,33 +1,66 @@
 # MCP Tool Interface
 
-*This section documents the `present_review` tool that AI assistants use to display code reviews in VSCode.*
-
-## Tool Overview
-
-The `present_review` tool is the primary interface between AI assistants and the Dialectic system. It accepts markdown content and displays it in the VSCode review panel with clickable file references and proper formatting.
+*Reference documentation for the `present_review` tool exposed to AI assistants.*
 
 ## Tool Definition
 
-The tool is registered with the MCP server and exposed to AI assistants:
-
-```typescript
-{{#include ../../server/src/index.ts:tool_definition}}
+```rust
+{{#include ../../server/src/server.rs:present_review_tool}}
 ```
 
 ## Parameters
 
-The tool accepts parameters defined by the `PresentReviewParams` interface:
+### `content` (required)
+Markdown content of the review to display with support for clickable file references.
 
-```typescript
-{{#include ../../server/src/types.ts:present_review_params}}
+### `mode` (optional, default: "replace")
+- `"replace"` - Replace entire review content
+- `"update-section"` - Update specific section of existing review  
+- `"append"` - Add content to end of existing review
+
+### `baseUri` (required)
+Base directory path for resolving relative file references.
+
+### `section` (optional)
+Section name for `update-section` mode.
+
+## File Reference Formats
+
+```markdown
+[auth.ts](src/auth.ts)                    # Opens file
+[auth.ts:42](src/auth.ts#L42)             # Jumps to line 42
+[auth.ts:42-50](src/auth.ts#L42-L50)      # Highlights line range
+[validateUser](src/auth.ts?validateUser)  # Finds pattern in file
 ```
 
-### Parameter Details
+## Usage Examples
 
-**`content` (required)**
-- **Type**: `string`
-- **Description**: Markdown content of the review to display
-- **Format**: Standard markdown with support for file references using `[filename:line][]` syntax
+### Basic Review
+```javascript
+await use_mcp_tool("present_review", {
+    content: "# Code Review\n\nImplemented user authentication...",
+    baseUri: "/workspace/myapp"
+});
+```
+
+### Section Update
+```javascript
+await use_mcp_tool("present_review", {
+    content: "## Updated Error Handling\n\nImproved validation...",
+    mode: "update-section",
+    section: "Error Handling", 
+    baseUri: "/workspace/myapp"
+});
+```
+
+### Append Mode
+```javascript
+await use_mcp_tool("present_review", {
+    content: "## Next Steps\n\n- Add rate limiting\n- Implement caching",
+    mode: "append",
+    baseUri: "/workspace/myapp"
+});
+```
 - **Example**: 
   ```markdown
   # Authentication System Implementation
