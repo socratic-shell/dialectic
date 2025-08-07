@@ -1,6 +1,6 @@
 //! Dialectic MCP Server implementation using the official rmcp SDK
 //!
-//! Provides present_review and get_selection tools for AI assistants
+//! Provides present_review, get_selection, and ide_operation tools for AI assistants
 //! to interact with the VSCode extension via IPC.
 
 use anyhow::Result;
@@ -14,8 +14,17 @@ use serde_json;
 use std::future::Future;
 use tracing::info;
 
+use crate::dialect::DialectInterpreter;
 use crate::ipc::IPCCommunicator;
 use crate::types::{LogLevel, PresentReviewParams};
+use serde::{Deserialize, Serialize};
+
+/// Parameters for the ide_operation tool
+#[derive(Debug, Deserialize, Serialize, schemars::JsonSchema)]
+struct IdeOperationParams {
+    /// JsonScript program to execute
+    program: serde_json::Value,
+}
 
 /// Dialectic MCP Server
 ///
@@ -24,6 +33,7 @@ use crate::types::{LogLevel, PresentReviewParams};
 #[derive(Clone)]
 pub struct DialecticServer {
     ipc: IPCCommunicator,
+    interpreter: DialectInterpreter<IPCCommunicator>,
     tool_router: ToolRouter<DialecticServer>,
 }
 
@@ -53,8 +63,18 @@ impl DialecticServer {
         ipc.send_polo(shell_pid).await?;
         info!("Sent Polo discovery message with shell PID: {}", shell_pid);
 
+        // Initialize JsonScript interpreter with IDE functions
+        let mut interpreter = DialectInterpreter::new(ipc.clone());
+        interpreter.add_function(crate::ide::FindDefinition { 
+            symbol: crate::ide::Symbol::Name(String::new()) 
+        });
+        interpreter.add_function(crate::ide::FindReferences { 
+            symbol: crate::ide::Symbol::Name(String::new()) 
+        });
+
         Ok(Self {
-            ipc,
+            ipc: ipc.clone(),
+            interpreter,
             tool_router: Self::tool_router(),
         })
     }
@@ -75,8 +95,18 @@ impl DialecticServer {
         let ipc = IPCCommunicator::new_test();
         info!("DialecticServer initialized in test mode");
 
+        // Initialize JsonScript interpreter with IDE functions for test mode
+        let mut interpreter = DialectInterpreter::new(ipc.clone());
+        interpreter.add_function(crate::ide::FindDefinition { 
+            symbol: crate::ide::Symbol::Name(String::new()) 
+        });
+        interpreter.add_function(crate::ide::FindReferences { 
+            symbol: crate::ide::Symbol::Name(String::new()) 
+        });
+
         Self {
             ipc,
+            interpreter,
             tool_router: Self::tool_router(),
         }
     }
@@ -227,6 +257,88 @@ impl DialecticServer {
 
         Ok(CallToolResult::success(vec![json_content]))
     }
+
+    /// Execute IDE operations using JsonScript mini-language
+    ///
+    /// Provides access to VSCode's Language Server Protocol (LSP) capabilities
+    /// through a composable function system for symbol resolution and reference finding.
+    // ANCHOR: ide_operation_tool
+    #[tool(
+        description = "Execute IDE operations using a structured JSON mini-language. \
+                       This tool provides access to VSCode's Language Server Protocol (LSP) capabilities \
+                       through a composable function system.\n\n\
+                       Common operations:\n\
+                       - {\"findDefinition\": {\"symbol\": \"MyFunction\"}} - Find where a symbol is defined\n\
+                       - {\"findReferences\": {\"symbol\": \"MyFunction\"}} - Find all uses of a symbol\n\
+                       - {\"findDefinition\": {\"symbol\": {\"name\": \"User\", \"file\": \"models.rs\", \"line\": 42}}} - Find definition with location hint\n\n\
+                       The system handles ambiguity automatically - if multiple symbols match a name, \
+                       you'll get refinement suggestions with specific locations to choose from.\n\n\
+                       Functions can be composed: {\"findReferences\": {\"findDefinition\": {\"symbol\": \"login\"}}} \
+                       will first find the definition of \"login\", then find all references to that specific definition."
+    )]
+    async fn ide_operation(
+        &self,
+        Parameters(params): Parameters<IdeOperationParams>,
+    ) -> Result<CallToolResult, McpError> {
+        // ANCHOR_END: ide_operation_tool
+        // Log the tool call via IPC (also logs locally)
+        self.ipc
+            .send_log(
+                LogLevel::Debug,
+                format!("Received ide_operation tool call with program: {:?}", params.program),
+            )
+            .await;
+
+        // Execute the JsonScript program using spawn_blocking to handle non-Send future
+        self.ipc
+            .send_log(
+                LogLevel::Info,
+                "Executing JsonScript program...".to_string(),
+            )
+            .await;
+
+        let program = params.program;
+        let mut interpreter = self.interpreter.clone();
+        
+        let result = tokio::task::spawn_blocking(move || {
+            tokio::runtime::Handle::current().block_on(async move {
+                interpreter.evaluate(program).await
+            })
+        }).await.map_err(|e| {
+            McpError::internal_error(
+                "Task execution failed",
+                Some(serde_json::json!({
+                    "error": e.to_string()
+                })),
+            )
+        })?.map_err(|e| {
+            McpError::internal_error(
+                "JsonScript execution failed",
+                Some(serde_json::json!({
+                    "error": e.to_string()
+                })),
+            )
+        })?;
+
+        self.ipc
+            .send_log(
+                LogLevel::Info,
+                format!("JsonScript execution completed successfully"),
+            )
+            .await;
+
+        // Convert result to JSON and return
+        let json_content = Content::json(result).map_err(|e| {
+            McpError::internal_error(
+                "Serialization failed",
+                Some(serde_json::json!({
+                    "error": format!("Failed to serialize JsonScript result: {}", e)
+                })),
+            )
+        })?;
+
+        Ok(CallToolResult::success(vec![json_content]))
+    }
 }
 
 #[tool_handler]
@@ -240,9 +352,10 @@ impl ServerHandler for DialecticServer {
                 version: "0.1.0".to_string(),
             },
             instructions: Some(
-                "This server provides tools for AI assistants to display code reviews in VSCode. \
+                "This server provides tools for AI assistants to display code reviews and perform IDE operations in VSCode. \
                 Use 'present_review' to display structured markdown reviews with file references, \
-                and 'get_selection' to retrieve currently selected text from the active editor."
+                'get_selection' to retrieve currently selected text from the active editor, \
+                and 'ide_operation' to execute IDE operations like finding symbol definitions and references using JsonScript."
                     .to_string(),
             ),
         }

@@ -7,6 +7,7 @@ use async_trait::async_trait;
 use serde::{de::DeserializeOwned, Serialize};
 use serde_json::Value;
 
+#[derive(Clone)]
 pub struct DialectInterpreter<U> {
     functions: BTreeMap<String, fn(&mut DialectInterpreter<U>, Value) -> Pin<Box<dyn Future<Output = anyhow::Result<Value>> + '_>>>,
     userdata: U,

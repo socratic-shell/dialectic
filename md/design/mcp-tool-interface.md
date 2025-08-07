@@ -1,30 +1,32 @@
 # MCP Tool Interface
 
-*Reference documentation for the `present_review` tool exposed to AI assistants.*
+*Reference documentation for the tools exposed to AI assistants.*
 
-## Tool Definition
+## present_review Tool
+
+### Tool Definition
 
 ```rust
 {{#include ../../server/src/server.rs:present_review_tool}}
 ```
 
-## Parameters
+### Parameters
 
-### `content` (required)
+#### `content` (required)
 Markdown content of the review to display with support for clickable file references.
 
-### `mode` (optional, default: "replace")
+#### `mode` (optional, default: "replace")
 - `"replace"` - Replace entire review content
 - `"update-section"` - Update specific section of existing review  
 - `"append"` - Add content to end of existing review
 
-### `baseUri` (required)
+#### `baseUri` (required)
 Base directory path for resolving relative file references.
 
-### `section` (optional)
+#### `section` (optional)
 Section name for `update-section` mode.
 
-## File Reference Formats
+### File Reference Formats
 
 ```markdown
 [auth.ts](src/auth.ts)                    # Opens file
@@ -33,9 +35,9 @@ Section name for `update-section` mode.
 [validateUser](src/auth.ts?validateUser)  # Finds pattern in file
 ```
 
-## Usage Examples
+### Usage Examples
 
-### Basic Review
+#### Basic Review
 ```javascript
 await use_mcp_tool("present_review", {
     content: "# Code Review\n\nImplemented user authentication...",
@@ -43,7 +45,7 @@ await use_mcp_tool("present_review", {
 });
 ```
 
-### Section Update
+#### Section Update
 ```javascript
 await use_mcp_tool("present_review", {
     content: "## Updated Error Handling\n\nImproved validation...",
@@ -192,5 +194,206 @@ The tool validates all parameters and returns appropriate error messages:
 - Use `append` mode to add context or respond to questions
 - Use `update-section` mode sparingly, only for targeted updates
 - Keep individual tool calls focused and coherent
+
+## ide_operation Tool
+
+### Tool Definition
+
+```rust
+{{#include ../../server/src/server.rs:ide_operation_tool}}
+```
+
+### Parameters
+
+#### `program` (required)
+JsonScript program as a JSON object that defines the IDE operation to perform.
+
+### JsonScript Language
+
+The `ide_operation` tool uses a JSON-based mini-language for composable IDE operations:
+
+#### Basic Operations
+
+**Find Definition**
+```json
+{"findDefinition": {"symbol": "MyFunction"}}
+```
+Finds where a symbol is defined in the codebase.
+
+**Find References**
+```json
+{"findReferences": {"symbol": "MyFunction"}}
+```
+Finds all uses of a symbol across the workspace.
+
+#### Symbol Specification
+
+Symbols can be specified as strings or objects:
+
+**String form** (searches by name):
+```json
+{"findDefinition": {"symbol": "UserModel"}}
+```
+
+**Object form** (with location hint):
+```json
+{"findDefinition": {"symbol": {"name": "User", "file": "models.rs", "line": 42}}}
+```
+
+#### Function Composition
+
+Operations can be composed to create complex workflows:
+
+```json
+{"findReferences": {"findDefinition": {"symbol": "login"}}}
+```
+This first finds the definition of "login", then finds all references to that specific definition.
+
+#### Ambiguity Handling
+
+When multiple symbols match a name, the system returns refinement suggestions:
+
+```json
+{
+  "ambiguous": true,
+  "message": "Multiple symbols found for 'User'",
+  "suggestions": [
+    {"name": "User", "file": "models/user.rs", "line": 15, "context": "struct User {"},
+    {"name": "User", "file": "types.rs", "line": 8, "context": "type User = UserModel;"}
+  ]
+}
+```
+
+### Usage Examples
+
+#### Find Function Definition
+```javascript
+await use_mcp_tool("ide_operation", {
+    program: {"findDefinition": {"symbol": "authenticate"}}
+});
+```
+
+#### Find All References to a Variable
+```javascript
+await use_mcp_tool("ide_operation", {
+    program: {"findReferences": {"symbol": "DATABASE_URL"}}
+});
+```
+
+#### Complex Composition
+```javascript
+await use_mcp_tool("ide_operation", {
+    program: {
+        "findReferences": {
+            "findDefinition": {
+                "symbol": {"name": "validateUser", "file": "auth.rs", "line": 45}
+            }
+        }
+    }
+});
+```
+
+### Response Format
+
+#### Successful Definition Result
+```json
+[
+  {
+    "name": "authenticate",
+    "location": {
+      "file": "src/auth.rs",
+      "line": 23,
+      "column": 0,
+      "context": "pub fn authenticate(username: &str, password: &str) -> Result<User> {"
+    },
+    "extra": {
+      "kind": "Function",
+      "containerName": "auth"
+    }
+  }
+]
+```
+
+#### Successful References Result
+```json
+[
+  {
+    "file": "src/handlers/login.rs",
+    "line": 15,
+    "column": 8,
+    "context": "    let user = authenticate(username, password)?;"
+  },
+  {
+    "file": "src/middleware/auth.rs", 
+    "line": 32,
+    "column": 12,
+    "context": "        authenticate(token.username, token.password)"
+  }
+]
+```
+
+#### Ambiguous Symbol Result
+```json
+{
+  "ambiguous": true,
+  "message": "Multiple symbols found for 'User'. Please specify location:",
+  "suggestions": [
+    {
+      "name": "User",
+      "location": {
+        "file": "src/models/user.rs",
+        "line": 15,
+        "column": 0,
+        "context": "pub struct User {"
+      },
+      "extra": {
+        "kind": "Struct",
+        "containerName": "models::user"
+      }
+    }
+  ]
+}
+```
+
+### Best Practices for AI Assistants
+
+#### When to Use ide_operation
+- Exploring unfamiliar codebases
+- Understanding function usage patterns
+- Tracing data flow through the application
+- Finding all implementations of an interface
+- Locating configuration or constant definitions
+
+#### Effective Symbol Queries
+- Start with simple string searches: `{"symbol": "functionName"}`
+- Use location hints when you know approximate location: `{"symbol": {"name": "User", "file": "models.rs"}}`
+- Compose operations to follow code paths: find definition → find references
+- Handle ambiguity by using the suggestions to refine queries
+
+#### Integration with Reviews
+The ide_operation tool pairs well with present_review for comprehensive code analysis:
+
+1. Use ide_operation to gather information about symbols
+2. Use present_review to display findings with clickable references
+3. Include both the JsonScript query and results in review documentation
+
+```javascript
+// First, find all references to a function
+const references = await use_mcp_tool("ide_operation", {
+    program: {"findReferences": {"symbol": "processPayment"}}
+});
+
+// Then present findings in a review
+await use_mcp_tool("present_review", {
+    content: `# Payment Processing Analysis
+    
+Found ${references.length} references to processPayment:
+${references.map(ref => `- [${ref.file}:${ref.line}](${ref.file}#L${ref.line})`).join('\n')}
+    
+## Usage Patterns
+The function is primarily called from...`,
+    baseUri: "/workspace/myapp"
+});
+```
 
 This tool interface enables rich, interactive code reviews that bridge the gap between AI-generated insights and IDE-native navigation.
