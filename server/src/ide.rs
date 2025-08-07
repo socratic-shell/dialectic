@@ -10,15 +10,7 @@ pub mod ambiguity;
 #[serde(untagged)]
 pub enum Symbol {
     Name(String),
-    Resolved {
-        /// The symbol name (e.g., "User", "validateToken")
-        name: String,
-        /// Location where this symbol is defined
-        #[serde(flatten)]
-        location: FileLocation,
-        /// Additional metadata from the LSP (type info, documentation, etc.)
-        extra: Value,
-    },
+    Resolved(ResolvedSymbol),
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -68,13 +60,7 @@ impl Symbol {
                         // Create ambiguity error with refinement suggestions
                         let alternatives: Vec<Value> = candidates
                             .into_iter()
-                            .map(|c| {
-                                serde_json::to_value(Symbol::Resolved {
-                                    name: c.name.clone(),
-                                    location: c.location.clone(),
-                                    extra: c.extra.clone(),
-                                })
-                            })
+                            .map(|c| serde_json::to_value(Symbol::Resolved(c)))
                             .collect::<Result<Vec<_>, _>>()?;
 
                         Err(ambiguity::AmbiguityError::new(
@@ -85,17 +71,7 @@ impl Symbol {
                     }
                 }
             }
-            Symbol::Resolved {
-                name,
-                location,
-                extra,
-            } => {
-                Ok(ResolvedSymbol {
-                    name: name.clone(),
-                    location: location.clone(),
-                    extra: extra.clone(),
-                })
-            }
+            Symbol::Resolved(resolved_symbol) => Ok(resolved_symbol.clone()),
         }
     }
 }
