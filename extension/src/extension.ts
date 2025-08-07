@@ -7,7 +7,7 @@ import { ReviewWebviewProvider } from './reviewWebview';
 
 // 💡: Types for IPC communication with MCP server
 interface IPCMessage {
-    type: 'present_review' | 'log' | 'get_selection' | 'response' | 'marco' | 'polo' | 'goodbye';
+    type: 'present_review' | 'log' | 'get_selection' | 'response' | 'marco' | 'polo' | 'goodbye' | 'resolve_symbol_by_name' | 'find_all_references';
     payload: {
         content: string;
         mode: 'replace' | 'update-section' | 'append';
@@ -15,6 +15,19 @@ interface IPCMessage {
     } | {
         level: 'info' | 'error' | 'debug';
         message: string;
+    } | {
+        name: string;
+    } | {
+        symbol: {
+            name: string;
+            location: {
+                file: string;
+                line: number;
+                column: number;
+                context: string;
+            };
+            extra: any;
+        };
     } | {};
     id: string;
 }
@@ -204,6 +217,61 @@ class DaemonClient implements vscode.Disposable {
         } else if (message.type === 'marco') {
             // Ignore Marco messages - these are broadcasts we send, MCP servers respond to them
             // Extensions don't need to respond to Marco broadcasts
+        } else if (message.type === 'resolve_symbol_by_name') {
+            // Handle symbol resolution requests from MCP server
+            try {
+                const symbolPayload = message.payload as {
+                    name: string;
+                };
+
+                this.outputChannel.appendLine(`[LSP] Resolving symbol: ${symbolPayload.name}`);
+                
+                // Call VSCode's LSP to find symbol definitions
+                const symbols = await this.resolveSymbolByName(symbolPayload.name);
+                
+                this.sendResponse(message.id, {
+                    success: true,
+                    data: symbols
+                });
+            } catch (error) {
+                this.outputChannel.appendLine(`Error handling resolve_symbol_by_name: ${error}`);
+                this.sendResponse(message.id, {
+                    success: false,
+                    error: error instanceof Error ? error.message : String(error)
+                });
+            }
+        } else if (message.type === 'find_all_references') {
+            // Handle find references requests from MCP server
+            try {
+                const referencesPayload = message.payload as {
+                    symbol: {
+                        name: string;
+                        location: {
+                            file: string;
+                            line: number;
+                            column: number;
+                            context: string;
+                        };
+                        extra: any;
+                    };
+                };
+
+                this.outputChannel.appendLine(`[LSP] Finding references for symbol: ${referencesPayload.symbol.name}`);
+                
+                // Call VSCode's LSP to find all references
+                const references = await this.findAllReferences(referencesPayload.symbol);
+                
+                this.sendResponse(message.id, {
+                    success: true,
+                    data: references
+                });
+            } catch (error) {
+                this.outputChannel.appendLine(`Error handling find_all_references: ${error}`);
+                this.sendResponse(message.id, {
+                    success: false,
+                    error: error instanceof Error ? error.message : String(error)
+                });
+            }
         } else if (message.type == 'response') {
             // Ignore this, response messages are messages that WE send to clients.
         } else {
@@ -365,6 +433,104 @@ class DaemonClient implements vscode.Disposable {
         if (this.reconnectTimer) {
             clearTimeout(this.reconnectTimer);
             this.reconnectTimer = null;
+        }
+    }
+
+    /**
+     * Resolve symbol by name using VSCode's LSP
+     */
+    private async resolveSymbolByName(symbolName: string): Promise<any[]> {
+        try {
+            // Get all workspace symbols matching the name
+            const symbols = await vscode.commands.executeCommand<vscode.SymbolInformation[]>(
+                'vscode.executeWorkspaceSymbolProvider',
+                symbolName
+            );
+
+            if (!symbols || symbols.length === 0) {
+                return [];
+            }
+
+            // Convert VSCode symbols to our format
+            const resolvedSymbols = symbols.map(symbol => ({
+                name: symbol.name,
+                location: {
+                    file: vscode.workspace.asRelativePath(symbol.location.uri),
+                    line: symbol.location.range.start.line + 1, // Convert to 1-based
+                    column: symbol.location.range.start.character, // Keep 0-based
+                    context: this.getContextAroundLocation(symbol.location.uri, symbol.location.range.start.line)
+                },
+                extra: {
+                    kind: vscode.SymbolKind[symbol.kind],
+                    containerName: symbol.containerName
+                }
+            }));
+
+            return resolvedSymbols;
+        } catch (error) {
+            this.outputChannel.appendLine(`Error in resolveSymbolByName: ${error}`);
+            throw error;
+        }
+    }
+
+    /**
+     * Find all references to a symbol using VSCode's LSP
+     */
+    private async findAllReferences(symbol: any): Promise<any[]> {
+        try {
+            // Convert relative path back to URI
+            const workspaceFolder = vscode.workspace.workspaceFolders?.[0];
+            if (!workspaceFolder) {
+                throw new Error('No workspace folder found');
+            }
+
+            const fileUri = vscode.Uri.joinPath(workspaceFolder.uri, symbol.location.file);
+            const position = new vscode.Position(
+                symbol.location.line - 1, // Convert from 1-based to 0-based
+                symbol.location.column    // Already 0-based
+            );
+
+            // Find all references using LSP
+            const references = await vscode.commands.executeCommand<vscode.Location[]>(
+                'vscode.executeReferenceProvider',
+                fileUri,
+                position
+            );
+
+            if (!references || references.length === 0) {
+                return [];
+            }
+
+            // Convert VSCode locations to our format
+            const referenceLocations = references.map(ref => ({
+                file: vscode.workspace.asRelativePath(ref.uri),
+                line: ref.range.start.line + 1, // Convert to 1-based
+                column: ref.range.start.character, // Keep 0-based
+                context: this.getContextAroundLocation(ref.uri, ref.range.start.line)
+            }));
+
+            return referenceLocations;
+        } catch (error) {
+            this.outputChannel.appendLine(`Error in findAllReferences: ${error}`);
+            throw error;
+        }
+    }
+
+    /**
+     * Get context around a specific location for display purposes
+     */
+    private getContextAroundLocation(uri: vscode.Uri, line: number): string {
+        try {
+            // Try to get the document if it's already open
+            const document = vscode.workspace.textDocuments.find(doc => doc.uri.toString() === uri.toString());
+            if (document && line < document.lineCount) {
+                return document.lineAt(line).text.trim();
+            }
+            
+            // If document isn't open, return a placeholder
+            return `Line ${line + 1}`;
+        } catch (error) {
+            return `Line ${line + 1}`;
         }
     }
 
