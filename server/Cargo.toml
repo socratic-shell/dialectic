@@ -30,6 +30,7 @@ tokio = { workspace = true, features = ["net", "io-util"] }
 
 # Async utilities
 futures = "0.3"
+async-trait = "0.1"
 
 # UUID generation for IPC message tracking
 uuid = { workspace = true }

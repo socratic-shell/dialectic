@@ -723,3 +723,19 @@ impl IPCCommunicator {
         }
     }
 }
+
+// Implementation of IpcClient trait for IDE operations
+#[async_trait::async_trait]
+impl crate::ide::IpcClient for IPCCommunicator {
+    async fn resolve_symbol_by_name(&mut self, _name: &str) -> anyhow::Result<Vec<crate::ide::ResolvedSymbol>> {
+        // TODO: Implement actual IPC call to VSCode extension
+        // For now, return empty result
+        Ok(vec![])
+    }
+
+    async fn find_all_references(&mut self, _symbol: &crate::ide::ResolvedSymbol) -> anyhow::Result<Vec<crate::ide::FileLocation>> {
+        // TODO: Implement actual IPC call to VSCode extension  
+        // For now, return empty result
+        Ok(vec![])
+    }
+}

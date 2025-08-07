@@ -168,4 +168,8 @@ pub enum IPCMessageType {
     Goodbye,
     /// Response to any message (replaces IPCResponse struct)
     Response,
+    /// Resolve symbol by name - returns Vec<ResolvedSymbol>
+    ResolveSymbolByName,
+    /// Find all references to a symbol - returns Vec<FileLocation>
+    FindAllReferences,
 }

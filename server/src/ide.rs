@@ -36,23 +36,26 @@ pub struct ResolvedSymbol {
     pub extra: Value,
 }
 
+use async_trait::async_trait;
+
 // IPC client trait that the userdata must implement
-pub trait IpcClient {
-    fn resolve_symbol_by_name(&mut self, name: &str) -> anyhow::Result<Vec<ResolvedSymbol>>;
-    fn find_all_references(&mut self, symbol: &ResolvedSymbol)
+#[async_trait]
+pub trait IpcClient: Send {
+    async fn resolve_symbol_by_name(&mut self, name: &str) -> anyhow::Result<Vec<ResolvedSymbol>>;
+    async fn find_all_references(&mut self, symbol: &ResolvedSymbol)
         -> anyhow::Result<Vec<FileLocation>>;
 }
 
 // Symbol implementation
 impl Symbol {
-    pub fn resolve<U: IpcClient>(
+    pub async fn resolve<U: IpcClient>(
         &self,
         interpreter: &mut DialectInterpreter<U>,
     ) -> anyhow::Result<ResolvedSymbol> {
         match self {
             Symbol::Name(name) => {
                 // Call IPC: resolve-symbol-by-name (using Deref to access userdata directly)
-                let candidates = interpreter.resolve_symbol_by_name(name)?;
+                let candidates = interpreter.resolve_symbol_by_name(name).await?;
                 match candidates.len() {
                     0 => Err(anyhow::anyhow!("Symbol '{}' not found", name)),
                     1 => Ok(candidates.into_iter().next().unwrap()),
@@ -82,11 +85,12 @@ pub struct FindDefinition {
     pub symbol: Symbol,
 }
 
+#[async_trait]
 impl<U: IpcClient> DialectFunction<U> for FindDefinition {
     type Output = Vec<ResolvedSymbol>;
 
-    fn execute(self, interpreter: &mut DialectInterpreter<U>) -> anyhow::Result<Self::Output> {
-        let resolved_symbol = self.symbol.resolve(interpreter)?;
+    async fn execute(self, interpreter: &mut DialectInterpreter<U>) -> anyhow::Result<Self::Output> {
+        let resolved_symbol = self.symbol.resolve(interpreter).await?;
         // For findDefinition, we return the resolved symbol itself (it represents the definition)
         Ok(vec![resolved_symbol])
     }
@@ -97,11 +101,12 @@ pub struct FindReferences {
     pub symbol: Symbol,
 }
 
+#[async_trait]
 impl<U: IpcClient> DialectFunction<U> for FindReferences {
     type Output = Vec<FileLocation>;
 
-    fn execute(self, interpreter: &mut DialectInterpreter<U>) -> anyhow::Result<Self::Output> {
-        let resolved_symbol = self.symbol.resolve(interpreter)?;
-        interpreter.find_all_references(&resolved_symbol)
+    async fn execute(self, interpreter: &mut DialectInterpreter<U>) -> anyhow::Result<Self::Output> {
+        let resolved_symbol = self.symbol.resolve(interpreter).await?;
+        interpreter.find_all_references(&resolved_symbol).await
     }
 }

@@ -1,11 +1,14 @@
 use std::collections::BTreeMap;
+use std::future::Future;
 use std::ops::{Deref, DerefMut};
+use std::pin::Pin;
 
+use async_trait::async_trait;
 use serde::{de::DeserializeOwned, Serialize};
 use serde_json::Value;
 
 pub struct DialectInterpreter<U> {
-    functions: BTreeMap<String, fn(&mut DialectInterpreter<U>, Value) -> anyhow::Result<Value>>,
+    functions: BTreeMap<String, fn(&mut DialectInterpreter<U>, Value) -> Pin<Box<dyn Future<Output = anyhow::Result<Value>> + '_>>>,
     userdata: U,
 }
 
@@ -25,68 +28,74 @@ impl<U> DialectInterpreter<U> {
         // Extract just the struct name from the full path (e.g., "module::Uppercase" -> "uppercase")
         let struct_name = type_name.split("::").last().unwrap_or(type_name);
         let type_name_lower = struct_name.to_ascii_lowercase();
-        self.functions.insert(type_name_lower, Self::execute::<F>);
+        self.functions.insert(type_name_lower, |interpreter, value| {
+            Box::pin(async move {
+                interpreter.execute::<F>(value).await
+            })
+        });
     }
 
-    pub fn evaluate(&mut self, value: Value) -> anyhow::Result<Value> {
-        match value {
-            Value::Null | Value::Bool(_) | Value::Number(_) | Value::String(_) => Ok(value),
-            Value::Array(values) => Ok(Value::Array(
-                values
-                    .into_iter()
-                    .map(|v| self.evaluate(v))
-                    .collect::<Result<Vec<Value>, _>>()?,
-            )),
-            Value::Object(map) => {
-                // We expect the `arg` to look like
-                //
-                // `{"func": { "arg0": json0, ..., "argN": jsonN }`
-                //
-                // We begin by
-                //
-                // (1) extracting the inner object.
-                // (2) map the fields in the inner object using recursive evaluation, yielding `R = {"arg0": val0, ..}`;
-                // (3) deserialize from `R` to the input type `I`
-                // (4) invoke the function to get the result struct and then serialize it to JSON
-
-                if map.len() != 1 {
-                    anyhow::bail!(
-                        "[invalid dialect program] object must have exactly one key: {map:#?}"
-                    );
+    pub fn evaluate(&mut self, value: Value) -> Pin<Box<dyn Future<Output = anyhow::Result<Value>> + '_>> {
+        Box::pin(async move {
+            match value {
+                Value::Null | Value::Bool(_) | Value::Number(_) | Value::String(_) => Ok(value),
+                Value::Array(values) => {
+                    let mut results = Vec::new();
+                    for v in values {
+                        results.push(self.evaluate(v).await?);
+                    }
+                    Ok(Value::Array(results))
                 }
+                Value::Object(map) => {
+                    // We expect the `arg` to look like
+                    //
+                    // `{"func": { "arg0": json0, ..., "argN": jsonN }`
+                    //
+                    // We begin by
+                    //
+                    // (1) extracting the inner object.
+                    // (2) map the fields in the inner object using recursive evaluation, yielding `R = {"arg0": val0, ..}`;
+                    // (3) deserialize from `R` to the input type `I`
+                    // (4) invoke the function to get the result struct and then serialize it to JSON
 
-                let (mut fn_name, fn_arg) = map.into_iter().next().unwrap();
-                fn_name.make_ascii_lowercase();
+                    if map.len() != 1 {
+                        anyhow::bail!(
+                            "[invalid dialect program] object must have exactly one key: {map:#?}"
+                        );
+                    }
 
-                let evaluated_arg = match fn_arg {
-                    Value::Object(fn_map) => Value::Object(
-                        fn_map
-                            .into_iter()
-                            .map(|(name, value)| {
-                                let value1 = self.evaluate(value)?;
-                                Ok((name, value1))
-                            })
-                            .collect::<anyhow::Result<_>>()?,
-                        ),
-                _ => anyhow::bail!("[invalid dialect program] function `{fn_name}` must have a JSON object as argument, not `{fn_arg}`")
-            };
+                    let (mut fn_name, fn_arg) = map.into_iter().next().unwrap();
+                    fn_name.make_ascii_lowercase();
 
-                match self.functions.get(&fn_name) {
-                    Some(func) => func(self, evaluated_arg),
-                    None => {
-                        anyhow::bail!("[invalid dialect program] unknown function: {fn_name}")
+                    let evaluated_arg = match fn_arg {
+                        Value::Object(fn_map) => {
+                            let mut result_map = serde_json::Map::new();
+                            for (name, value) in fn_map {
+                                let evaluated_value = self.evaluate(value).await?;
+                                result_map.insert(name, evaluated_value);
+                            }
+                            Value::Object(result_map)
+                        }
+                        _ => anyhow::bail!("[invalid dialect program] function `{fn_name}` must have a JSON object as argument, not `{fn_arg}`")
+                    };
+
+                    match self.functions.get(&fn_name) {
+                        Some(func) => func(self, evaluated_arg).await,
+                        None => {
+                            anyhow::bail!("[invalid dialect program] unknown function: {fn_name}")
+                        }
                     }
                 }
             }
-        }
+        })
     }
 
-    fn execute<F>(&mut self, value: Value) -> anyhow::Result<Value>
+    async fn execute<F>(&mut self, value: Value) -> anyhow::Result<Value>
     where
         F: DialectFunction<U>,
     {
         let input: F = serde_json::from_value(value)?;
-        let output: F::Output = input.execute(self)?;
+        let output: F::Output = input.execute(self).await?;
         Ok(serde_json::to_value(output)?)
     }
 }
@@ -112,10 +121,11 @@ impl<U> DerefMut for DialectInterpreter<U> {
 ///    name: String
 /// }
 /// ```
-pub trait DialectFunction<U>: DeserializeOwned {
-    type Output: Serialize;
+#[async_trait]
+pub trait DialectFunction<U>: DeserializeOwned + Send {
+    type Output: Serialize + Send;
 
-    fn execute(self, interpreter: &mut DialectInterpreter<U>) -> anyhow::Result<Self::Output>;
+    async fn execute(self, interpreter: &mut DialectInterpreter<U>) -> anyhow::Result<Self::Output>;
 }
 
 #[cfg(test)]
@@ -191,19 +201,20 @@ mod tests {
         }
     }
 
+    #[async_trait]
     impl IpcClient for MockIpcClient {
-        fn resolve_symbol_by_name(&mut self, name: &str) -> anyhow::Result<Vec<ResolvedSymbol>> {
+        async fn resolve_symbol_by_name(&mut self, name: &str) -> anyhow::Result<Vec<ResolvedSymbol>> {
             Ok(self.symbols.get(name).cloned().unwrap_or_default())
         }
 
-        fn find_all_references(&mut self, symbol: &ResolvedSymbol) -> anyhow::Result<Vec<FileLocation>> {
+        async fn find_all_references(&mut self, symbol: &ResolvedSymbol) -> anyhow::Result<Vec<FileLocation>> {
             Ok(self.references.get(&symbol.name).cloned().unwrap_or_default())
         }
     }
 
     // IDE Function Tests
-    #[test]
-    fn test_find_definition_with_string_symbol() {
+    #[tokio::test]
+    async fn test_find_definition_with_string_symbol() {
         let mut interpreter = DialectInterpreter::new(MockIpcClient::new());
         interpreter.add_function(FindDefinition { symbol: Symbol::Name(String::new()) });
 
@@ -213,7 +224,7 @@ mod tests {
             }
         });
 
-        let result = interpreter.evaluate(input).unwrap();
+        let result = interpreter.evaluate(input).await.unwrap();
         let definitions: Vec<ResolvedSymbol> = serde_json::from_value(result).unwrap();
         
         assert_eq!(definitions.len(), 1);
@@ -222,8 +233,8 @@ mod tests {
         assert_eq!(definitions[0].location.line, 10);
     }
 
-    #[test]
-    fn test_find_definition_ambiguous_symbol() {
+    #[tokio::test]
+    async fn test_find_definition_ambiguous_symbol() {
         let mut interpreter = DialectInterpreter::new(MockIpcClient::new());
         interpreter.add_function(FindDefinition { symbol: Symbol::Name(String::new()) });
 
@@ -233,15 +244,15 @@ mod tests {
             }
         });
 
-        let result = interpreter.evaluate(input);
+        let result = interpreter.evaluate(input).await;
         assert!(result.is_err());
         
         let error_msg = result.unwrap_err().to_string();
         assert!(error_msg.contains("Ambiguous operation"));
     }
 
-    #[test]
-    fn test_find_references() {
+    #[tokio::test]
+    async fn test_find_references() {
         let mut interpreter = DialectInterpreter::new(MockIpcClient::new());
         interpreter.add_function(FindReferences { symbol: Symbol::Name(String::new()) });
 
@@ -251,7 +262,7 @@ mod tests {
             }
         });
 
-        let result = interpreter.evaluate(input).unwrap();
+        let result = interpreter.evaluate(input).await.unwrap();
         let references: Vec<FileLocation> = serde_json::from_value(result).unwrap();
         
         assert_eq!(references.len(), 2);
@@ -261,8 +272,8 @@ mod tests {
         assert_eq!(references[1].line, 23);
     }
 
-    #[test]
-    fn test_symbol_not_found() {
+    #[tokio::test]
+    async fn test_symbol_not_found() {
         let mut interpreter = DialectInterpreter::new(MockIpcClient::new());
         interpreter.add_function(FindDefinition { symbol: Symbol::Name(String::new()) });
 
@@ -272,7 +283,7 @@ mod tests {
             }
         });
 
-        let result = interpreter.evaluate(input);
+        let result = interpreter.evaluate(input).await;
         assert!(result.is_err());
         
         let error_msg = result.unwrap_err().to_string();
@@ -285,10 +296,11 @@ mod tests {
         text: String,
     }
 
+    #[async_trait]
     impl DialectFunction<()> for Uppercase {
         type Output = String;
 
-        fn execute(
+        async fn execute(
             self,
             _interpreter: &mut DialectInterpreter<()>,
         ) -> anyhow::Result<Self::Output> {
@@ -303,10 +315,11 @@ mod tests {
         right: String,
     }
 
+    #[async_trait]
     impl DialectFunction<()> for Concat {
         type Output = String;
 
-        fn execute(
+        async fn execute(
             self,
             _interpreter: &mut DialectInterpreter<()>,
         ) -> anyhow::Result<Self::Output> {
@@ -321,10 +334,11 @@ mod tests {
         b: i32,
     }
 
+    #[async_trait]
     impl DialectFunction<()> for Add {
         type Output = i32;
 
-        fn execute(
+        async fn execute(
             self,
             _interpreter: &mut DialectInterpreter<()>,
         ) -> anyhow::Result<Self::Output> {
@@ -332,21 +346,21 @@ mod tests {
         }
     }
 
-    #[test]
-    fn test_simple_function() {
+    #[tokio::test]
+    async fn test_simple_function() {
         let mut interpreter = DialectInterpreter::new(());
         interpreter.add_function(Uppercase {
             text: String::new(),
         });
 
         let input = serde_json::json!({"uppercase": {"text": "hello"}});
-        let result = interpreter.evaluate(input).unwrap();
+        let result = interpreter.evaluate(input).await.unwrap();
 
         assert_eq!(result, serde_json::json!("HELLO"));
     }
 
-    #[test]
-    fn test_function_composition() {
+    #[tokio::test]
+    async fn test_function_composition() {
         let mut interpreter = DialectInterpreter::new(());
         interpreter.add_function(Uppercase {
             text: String::new(),
@@ -363,12 +377,12 @@ mod tests {
             }
         });
 
-        let result = interpreter.evaluate(input).unwrap();
+        let result = interpreter.evaluate(input).await.unwrap();
         assert_eq!(result, serde_json::json!("HELLO world"));
     }
 
-    #[test]
-    fn test_nested_composition() {
+    #[tokio::test]
+    async fn test_nested_composition() {
         let mut interpreter = DialectInterpreter::new(());
         interpreter.add_function(Add { a: 0, b: 0 });
         interpreter.add_function(Uppercase {
@@ -382,35 +396,35 @@ mod tests {
             }
         });
 
-        let result = interpreter.evaluate(input).unwrap();
+        let result = interpreter.evaluate(input).await.unwrap();
         assert_eq!(result, serde_json::json!("HELLO WORLD"));
     }
 
-    #[test]
-    fn test_literal_values() {
+    #[tokio::test]
+    async fn test_literal_values() {
         let mut interpreter = DialectInterpreter::new(());
 
         // Test that literal values pass through unchanged
         assert_eq!(
-            interpreter.evaluate(serde_json::json!("hello")).unwrap(),
+            interpreter.evaluate(serde_json::json!("hello")).await.unwrap(),
             serde_json::json!("hello")
         );
         assert_eq!(
-            interpreter.evaluate(serde_json::json!(42)).unwrap(),
+            interpreter.evaluate(serde_json::json!(42)).await.unwrap(),
             serde_json::json!(42)
         );
         assert_eq!(
-            interpreter.evaluate(serde_json::json!(true)).unwrap(),
+            interpreter.evaluate(serde_json::json!(true)).await.unwrap(),
             serde_json::json!(true)
         );
         assert_eq!(
-            interpreter.evaluate(serde_json::json!(null)).unwrap(),
+            interpreter.evaluate(serde_json::json!(null)).await.unwrap(),
             serde_json::json!(null)
         );
     }
 
-    #[test]
-    fn test_array_evaluation() {
+    #[tokio::test]
+    async fn test_array_evaluation() {
         let mut interpreter = DialectInterpreter::new(());
         interpreter.add_function(Add { a: 0, b: 0 });
 
@@ -420,16 +434,16 @@ mod tests {
             "literal"
         ]);
 
-        let result = interpreter.evaluate(input).unwrap();
+        let result = interpreter.evaluate(input).await.unwrap();
         assert_eq!(result, serde_json::json!([3, 7, "literal"]));
     }
 
-    #[test]
-    fn test_unknown_function_error() {
+    #[tokio::test]
+    async fn test_unknown_function_error() {
         let mut interpreter = DialectInterpreter::new(());
 
         let input = serde_json::json!({"unknown": {"arg": "value"}});
-        let result = interpreter.evaluate(input);
+        let result = interpreter.evaluate(input).await;
 
         assert!(result.is_err());
         assert!(result
@@ -438,31 +452,33 @@ mod tests {
             .contains("unknown function: unknown"));
     }
 
-    #[test]
-    fn test_invalid_function_format() {
+    #[tokio::test]
+    async fn test_invalid_function_format() {
         let mut interpreter = DialectInterpreter::new(());
 
         // Multiple keys in object
         let input = serde_json::json!({"func1": {}, "func2": {}});
-        let result = interpreter.evaluate(input);
+        let result = interpreter.evaluate(input).await;
         assert!(result.is_err());
 
         // Function with non-object argument
         let input = serde_json::json!({"func": "not an object"});
-        let result = interpreter.evaluate(input);
+        let result = interpreter.evaluate(input).await;
         assert!(result.is_err());
     }
 }
 
 pub trait DialectValue<U>: DialectFunction<U, Output = Self> + Serialize {}
 
+#[async_trait]
 impl<V, U> DialectFunction<U> for V
 where
-    V: DialectValue<U>,
+    V: DialectValue<U> + Send,
+    U: Send,
 {
     type Output = V;
 
-    fn execute(self, _interpreter: &mut DialectInterpreter<U>) -> anyhow::Result<Self::Output> {
+    async fn execute(self, _interpreter: &mut DialectInterpreter<U>) -> anyhow::Result<Self::Output> {
         Ok(self)
     }
 }
