@@ -119,7 +119,10 @@ mod tests {
     impl DialectFunction<()> for Uppercase {
         type Output = String;
 
-        fn execute(self, _interpreter: &mut DialectInterpreter<()>) -> anyhow::Result<Self::Output> {
+        fn execute(
+            self,
+            _interpreter: &mut DialectInterpreter<()>,
+        ) -> anyhow::Result<Self::Output> {
             Ok(self.text.to_uppercase())
         }
     }
@@ -134,7 +137,10 @@ mod tests {
     impl DialectFunction<()> for Concat {
         type Output = String;
 
-        fn execute(self, _interpreter: &mut DialectInterpreter<()>) -> anyhow::Result<Self::Output> {
+        fn execute(
+            self,
+            _interpreter: &mut DialectInterpreter<()>,
+        ) -> anyhow::Result<Self::Output> {
             Ok(format!("{}{}", self.left, self.right))
         }
     }
@@ -149,7 +155,10 @@ mod tests {
     impl DialectFunction<()> for Add {
         type Output = i32;
 
-        fn execute(self, _interpreter: &mut DialectInterpreter<()>) -> anyhow::Result<Self::Output> {
+        fn execute(
+            self,
+            _interpreter: &mut DialectInterpreter<()>,
+        ) -> anyhow::Result<Self::Output> {
             Ok(self.a + self.b)
         }
     }
