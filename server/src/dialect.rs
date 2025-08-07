@@ -1,9 +1,44 @@
 use std::collections::BTreeMap;
 
-use serde::{de::DeserializeOwned, Serialize};
+use serde::{de::DeserializeOwned, Deserialize, Serialize};
 use serde_json::Value;
 
 pub mod ambiguity;
+
+// IDE-specific types
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(untagged)]
+pub enum Symbol {
+    Name(String),
+    Resolved {
+        name: String,
+        file: String,
+        line: u32,
+        extra: Value,
+    },
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct FileLocation {
+    pub file: String,
+    pub line: u32,
+    pub column: u32,
+    pub context: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ResolvedSymbol {
+    pub name: String,
+    pub file: String,
+    pub line: u32,
+    pub extra: Value,
+}
+
+// IPC client trait that the userdata must implement
+pub trait IpcClient {
+    fn resolve_symbol_by_name(&mut self, name: &str) -> anyhow::Result<Vec<ResolvedSymbol>>;
+    fn find_all_references(&mut self, symbol: &ResolvedSymbol) -> anyhow::Result<Vec<FileLocation>>;
+}
 
 pub struct DialectInterpreter<U> {
     functions: BTreeMap<String, fn(&mut DialectInterpreter<U>, Value) -> anyhow::Result<Value>>,
@@ -105,10 +140,224 @@ pub trait DialectFunction<U>: DeserializeOwned {
     fn execute(self, interpreter: &mut DialectInterpreter<U>) -> anyhow::Result<Self::Output>;
 }
 
+// Symbol implementation
+impl Symbol {
+    pub fn resolve<U: IpcClient>(&self, interpreter: &mut DialectInterpreter<U>) -> anyhow::Result<ResolvedSymbol> {
+        match self {
+            Symbol::Name(name) => {
+                // Call IPC: resolve-symbol-by-name
+                let candidates = interpreter.userdata.resolve_symbol_by_name(name)?;
+                match candidates.len() {
+                    0 => Err(anyhow::anyhow!("Symbol '{}' not found", name)),
+                    1 => Ok(candidates.into_iter().next().unwrap()),
+                    _ => {
+                        // Create ambiguity error with refinement suggestions
+                        let alternatives: Vec<Value> = candidates
+                            .into_iter()
+                            .map(|c| serde_json::to_value(Symbol::Resolved {
+                                name: c.name.clone(),
+                                file: c.file.clone(),
+                                line: c.line,
+                                extra: c.extra.clone(),
+                            }))
+                            .collect::<Result<Vec<_>, _>>()?;
+                        
+                        Err(ambiguity::AmbiguityError::new(
+                            serde_json::to_value(self)?,
+                            alternatives
+                        ).into())
+                    }
+                }
+            }
+            Symbol::Resolved { name, file, line, extra } => {
+                Ok(ResolvedSymbol {
+                    name: name.clone(),
+                    file: file.clone(),
+                    line: *line,
+                    extra: extra.clone(),
+                })
+            }
+        }
+    }
+}
+
+// IDE Functions
+#[derive(Deserialize)]
+pub struct FindDefinition {
+    pub symbol: Symbol,
+}
+
+impl<U: IpcClient> DialectFunction<U> for FindDefinition {
+    type Output = Vec<ResolvedSymbol>;
+
+    fn execute(self, interpreter: &mut DialectInterpreter<U>) -> anyhow::Result<Self::Output> {
+        let resolved_symbol = self.symbol.resolve(interpreter)?;
+        // For findDefinition, we return the resolved symbol itself (it represents the definition)
+        Ok(vec![resolved_symbol])
+    }
+}
+
+#[derive(Deserialize)]
+pub struct FindReferences {
+    pub symbol: Symbol,
+}
+
+impl<U: IpcClient> DialectFunction<U> for FindReferences {
+    type Output = Vec<FileLocation>;
+
+    fn execute(self, interpreter: &mut DialectInterpreter<U>) -> anyhow::Result<Self::Output> {
+        let resolved_symbol = self.symbol.resolve(interpreter)?;
+        interpreter.userdata.find_all_references(&resolved_symbol)
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
     use serde::Deserialize;
+
+    // Mock IPC client for testing
+    struct MockIpcClient {
+        symbols: BTreeMap<String, Vec<ResolvedSymbol>>,
+        references: BTreeMap<String, Vec<FileLocation>>,
+    }
+
+    impl MockIpcClient {
+        fn new() -> Self {
+            let mut symbols = BTreeMap::new();
+            let mut references = BTreeMap::new();
+
+            // Add some test data
+            symbols.insert("User".to_string(), vec![
+                ResolvedSymbol {
+                    name: "User".to_string(),
+                    file: "src/models.rs".to_string(),
+                    line: 10,
+                    extra: serde_json::json!(null),
+                }
+            ]);
+
+            symbols.insert("validateToken".to_string(), vec![
+                ResolvedSymbol {
+                    name: "validateToken".to_string(),
+                    file: "src/auth.rs".to_string(),
+                    line: 42,
+                    extra: serde_json::json!(null),
+                },
+                ResolvedSymbol {
+                    name: "validateToken".to_string(),
+                    file: "src/utils.rs".to_string(),
+                    line: 15,
+                    extra: serde_json::json!(null),
+                }
+            ]);
+
+            references.insert("User".to_string(), vec![
+                FileLocation {
+                    file: "src/auth.rs".to_string(),
+                    line: 5,
+                    column: 12,
+                    context: "use models::User;".to_string(),
+                },
+                FileLocation {
+                    file: "src/handlers.rs".to_string(),
+                    line: 23,
+                    column: 8,
+                    context: "fn create_user() -> User {".to_string(),
+                }
+            ]);
+
+            Self { symbols, references }
+        }
+    }
+
+    impl IpcClient for MockIpcClient {
+        fn resolve_symbol_by_name(&mut self, name: &str) -> anyhow::Result<Vec<ResolvedSymbol>> {
+            Ok(self.symbols.get(name).cloned().unwrap_or_default())
+        }
+
+        fn find_all_references(&mut self, symbol: &ResolvedSymbol) -> anyhow::Result<Vec<FileLocation>> {
+            Ok(self.references.get(&symbol.name).cloned().unwrap_or_default())
+        }
+    }
+
+    // IDE Function Tests
+    #[test]
+    fn test_find_definition_with_string_symbol() {
+        let mut interpreter = DialectInterpreter::new(MockIpcClient::new());
+        interpreter.add_function(FindDefinition { symbol: Symbol::Name(String::new()) });
+
+        let input = serde_json::json!({
+            "finddefinition": {
+                "symbol": "User"
+            }
+        });
+
+        let result = interpreter.evaluate(input).unwrap();
+        let definitions: Vec<ResolvedSymbol> = serde_json::from_value(result).unwrap();
+        
+        assert_eq!(definitions.len(), 1);
+        assert_eq!(definitions[0].name, "User");
+        assert_eq!(definitions[0].file, "src/models.rs");
+        assert_eq!(definitions[0].line, 10);
+    }
+
+    #[test]
+    fn test_find_definition_ambiguous_symbol() {
+        let mut interpreter = DialectInterpreter::new(MockIpcClient::new());
+        interpreter.add_function(FindDefinition { symbol: Symbol::Name(String::new()) });
+
+        let input = serde_json::json!({
+            "finddefinition": {
+                "symbol": "validateToken"
+            }
+        });
+
+        let result = interpreter.evaluate(input);
+        assert!(result.is_err());
+        
+        let error_msg = result.unwrap_err().to_string();
+        assert!(error_msg.contains("Ambiguous operation"));
+    }
+
+    #[test]
+    fn test_find_references() {
+        let mut interpreter = DialectInterpreter::new(MockIpcClient::new());
+        interpreter.add_function(FindReferences { symbol: Symbol::Name(String::new()) });
+
+        let input = serde_json::json!({
+            "findreferences": {
+                "symbol": "User"
+            }
+        });
+
+        let result = interpreter.evaluate(input).unwrap();
+        let references: Vec<FileLocation> = serde_json::from_value(result).unwrap();
+        
+        assert_eq!(references.len(), 2);
+        assert_eq!(references[0].file, "src/auth.rs");
+        assert_eq!(references[0].line, 5);
+        assert_eq!(references[1].file, "src/handlers.rs");
+        assert_eq!(references[1].line, 23);
+    }
+
+    #[test]
+    fn test_symbol_not_found() {
+        let mut interpreter = DialectInterpreter::new(MockIpcClient::new());
+        interpreter.add_function(FindDefinition { symbol: Symbol::Name(String::new()) });
+
+        let input = serde_json::json!({
+            "finddefinition": {
+                "symbol": "NonExistentSymbol"
+            }
+        });
+
+        let result = interpreter.evaluate(input);
+        assert!(result.is_err());
+        
+        let error_msg = result.unwrap_err().to_string();
+        assert!(error_msg.contains("Symbol 'NonExistentSymbol' not found"));
+    }
 
     // Simple test function - string manipulation
     #[derive(Deserialize)]
