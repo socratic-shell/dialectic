@@ -20,17 +20,24 @@ pub enum Symbol {
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct FileLocation {
+    /// File path relative to workspace root
     pub file: String,
+    /// Line number (1-based)
     pub line: u32,
+    /// Column number (0-based)
     pub column: u32,
+    /// Surrounding code context for display
     pub context: String,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ResolvedSymbol {
+    /// The symbol name (e.g., "User", "validateToken")
     pub name: String,
-    pub file: String,
-    pub line: u32,
+    /// Location where this symbol is defined
+    #[serde(flatten)]
+    pub location: FileLocation,
+    /// Additional metadata from the LSP (type info, documentation, etc.)
     pub extra: Value,
 }
 
@@ -56,8 +63,8 @@ impl Symbol {
                             .into_iter()
                             .map(|c| serde_json::to_value(Symbol::Resolved {
                                 name: c.name.clone(),
-                                file: c.file.clone(),
-                                line: c.line,
+                                file: c.location.file.clone(),
+                                line: c.location.line,
                                 extra: c.extra.clone(),
                             }))
                             .collect::<Result<Vec<_>, _>>()?;
@@ -72,8 +79,12 @@ impl Symbol {
             Symbol::Resolved { name, file, line, extra } => {
                 Ok(ResolvedSymbol {
                     name: name.clone(),
-                    file: file.clone(),
-                    line: *line,
+                    location: FileLocation {
+                        file: file.clone(),
+                        line: *line,
+                        column: 0, // Column not available in resolved symbol
+                        context: String::new(), // Context not available in resolved symbol
+                    },
                     extra: extra.clone(),
                 })
             }

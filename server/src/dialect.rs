@@ -139,8 +139,12 @@ mod tests {
             symbols.insert("User".to_string(), vec![
                 ResolvedSymbol {
                     name: "User".to_string(),
-                    file: "src/models.rs".to_string(),
-                    line: 10,
+                    location: FileLocation {
+                        file: "src/models.rs".to_string(),
+                        line: 10,
+                        column: 0,
+                        context: "struct User {".to_string(),
+                    },
                     extra: serde_json::json!(null),
                 }
             ]);
@@ -148,14 +152,22 @@ mod tests {
             symbols.insert("validateToken".to_string(), vec![
                 ResolvedSymbol {
                     name: "validateToken".to_string(),
-                    file: "src/auth.rs".to_string(),
-                    line: 42,
+                    location: FileLocation {
+                        file: "src/auth.rs".to_string(),
+                        line: 42,
+                        column: 0,
+                        context: "fn validateToken(token: &str) -> bool {".to_string(),
+                    },
                     extra: serde_json::json!(null),
                 },
                 ResolvedSymbol {
                     name: "validateToken".to_string(),
-                    file: "src/utils.rs".to_string(),
-                    line: 15,
+                    location: FileLocation {
+                        file: "src/utils.rs".to_string(),
+                        line: 15,
+                        column: 0,
+                        context: "pub fn validateToken(token: String) -> Result<(), Error> {".to_string(),
+                    },
                     extra: serde_json::json!(null),
                 }
             ]);
@@ -206,8 +218,8 @@ mod tests {
         
         assert_eq!(definitions.len(), 1);
         assert_eq!(definitions[0].name, "User");
-        assert_eq!(definitions[0].file, "src/models.rs");
-        assert_eq!(definitions[0].line, 10);
+        assert_eq!(definitions[0].location.file, "src/models.rs");
+        assert_eq!(definitions[0].location.line, 10);
     }
 
     #[test]
