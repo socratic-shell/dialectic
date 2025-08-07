@@ -1,7 +1,9 @@
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
-use crate::dialect::{ambiguity, DialectFunction, DialectInterpreter};
+use crate::dialect::{DialectFunction, DialectInterpreter};
+
+pub mod ambiguity;
 
 // IDE-specific types
 #[derive(Debug, Clone, Serialize, Deserialize)]

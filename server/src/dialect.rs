@@ -4,8 +4,6 @@ use std::ops::{Deref, DerefMut};
 use serde::{de::DeserializeOwned, Serialize};
 use serde_json::Value;
 
-pub mod ambiguity;
-
 pub struct DialectInterpreter<U> {
     functions: BTreeMap<String, fn(&mut DialectInterpreter<U>, Value) -> anyhow::Result<Value>>,
     userdata: U,
