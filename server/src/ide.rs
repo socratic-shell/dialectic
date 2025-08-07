@@ -11,9 +11,12 @@ pub mod ambiguity;
 pub enum Symbol {
     Name(String),
     Resolved {
+        /// The symbol name (e.g., "User", "validateToken")
         name: String,
-        file: String,
-        line: u32,
+        /// Location where this symbol is defined
+        #[serde(flatten)]
+        location: FileLocation,
+        /// Additional metadata from the LSP (type info, documentation, etc.)
         extra: Value,
     },
 }
@@ -44,12 +47,16 @@ pub struct ResolvedSymbol {
 // IPC client trait that the userdata must implement
 pub trait IpcClient {
     fn resolve_symbol_by_name(&mut self, name: &str) -> anyhow::Result<Vec<ResolvedSymbol>>;
-    fn find_all_references(&mut self, symbol: &ResolvedSymbol) -> anyhow::Result<Vec<FileLocation>>;
+    fn find_all_references(&mut self, symbol: &ResolvedSymbol)
+        -> anyhow::Result<Vec<FileLocation>>;
 }
 
 // Symbol implementation
 impl Symbol {
-    pub fn resolve<U: IpcClient>(&self, interpreter: &mut DialectInterpreter<U>) -> anyhow::Result<ResolvedSymbol> {
+    pub fn resolve<U: IpcClient>(
+        &self,
+        interpreter: &mut DialectInterpreter<U>,
+    ) -> anyhow::Result<ResolvedSymbol> {
         match self {
             Symbol::Name(name) => {
                 // Call IPC: resolve-symbol-by-name (using Deref to access userdata directly)
@@ -61,30 +68,31 @@ impl Symbol {
                         // Create ambiguity error with refinement suggestions
                         let alternatives: Vec<Value> = candidates
                             .into_iter()
-                            .map(|c| serde_json::to_value(Symbol::Resolved {
-                                name: c.name.clone(),
-                                file: c.location.file.clone(),
-                                line: c.location.line,
-                                extra: c.extra.clone(),
-                            }))
+                            .map(|c| {
+                                serde_json::to_value(Symbol::Resolved {
+                                    name: c.name.clone(),
+                                    location: c.location.clone(),
+                                    extra: c.extra.clone(),
+                                })
+                            })
                             .collect::<Result<Vec<_>, _>>()?;
-                        
+
                         Err(ambiguity::AmbiguityError::new(
                             serde_json::to_value(self)?,
-                            alternatives
-                        ).into())
+                            alternatives,
+                        )
+                        .into())
                     }
                 }
             }
-            Symbol::Resolved { name, file, line, extra } => {
+            Symbol::Resolved {
+                name,
+                location,
+                extra,
+            } => {
                 Ok(ResolvedSymbol {
                     name: name.clone(),
-                    location: FileLocation {
-                        file: file.clone(),
-                        line: *line,
-                        column: 0, // Column not available in resolved symbol
-                        context: String::new(), // Context not available in resolved symbol
-                    },
+                    location: location.clone(),
                     extra: extra.clone(),
                 })
             }
