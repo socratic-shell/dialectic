@@ -93,7 +93,7 @@ impl DialecticServer {
         &self,
         Parameters(params): Parameters<PresentReviewParams>,
     ) -> Result<CallToolResult, McpError> {
-    // ANCHOR_END: present_review_tool
+        // ANCHOR_END: present_review_tool
         // Log the tool call via IPC (also logs locally)
         self.ipc
             .send_log(

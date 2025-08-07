@@ -9,12 +9,12 @@ async fn test_daemon_spawning_integration() {
 
     // This test verifies that the MCP server can spawn and connect to the daemon
     // We'll use the test mode to avoid requiring actual VSCode PID discovery
-    
+
     let _server = DialecticServer::new_test();
-    
+
     // Verify server was created successfully
     assert!(true, "Server created successfully in test mode");
-    
+
     // In test mode, IPC operations are mocked, so we can't test the actual daemon connection
     // But we can verify the server initializes without errors
 }
@@ -22,8 +22,8 @@ async fn test_daemon_spawning_integration() {
 #[tokio::test]
 async fn test_daemon_ensure_running_separate_process() {
     use dialectic_mcp_server::daemon::run_daemon_with_prefix;
-    use tokio::sync::Barrier;
     use std::sync::Arc;
+    use tokio::sync::Barrier;
     use uuid::Uuid;
 
     // Initialize tracing for test output
@@ -52,11 +52,17 @@ async fn test_daemon_ensure_running_separate_process() {
     ready_barrier.wait().await;
 
     // Verify socket was created
-    assert!(std::path::Path::new(&socket_path).exists(), "Daemon should create socket file");
+    assert!(
+        std::path::Path::new(&socket_path).exists(),
+        "Daemon should create socket file"
+    );
 
     // Verify we can connect to the daemon
     let connection_result = tokio::net::UnixStream::connect(&socket_path).await;
-    assert!(connection_result.is_ok(), "Should be able to connect to daemon");
+    assert!(
+        connection_result.is_ok(),
+        "Should be able to connect to daemon"
+    );
 
     // Clean up
     daemon_handle.abort();

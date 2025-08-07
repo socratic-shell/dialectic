@@ -106,7 +106,7 @@ async fn main() -> Result<()> {
 
             // Create our server instance
             let server = DialecticServer::new().await?;
-            
+
             // Clone the IPC communicator for shutdown handling
             let ipc_for_shutdown = server.ipc().clone();
 
@@ -121,7 +121,7 @@ async fn main() -> Result<()> {
             service.waiting().await?;
 
             info!("Dialectic MCP Server shutting down");
-            
+
             // Send Goodbye discovery message before shutdown
             if let Err(e) = ipc_for_shutdown.shutdown().await {
                 error!("Error during IPC shutdown: {}", e);
