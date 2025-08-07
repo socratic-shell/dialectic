@@ -4,6 +4,7 @@
 
 pub mod daemon;
 pub mod dialect;
+pub mod ide;
 pub mod ipc;
 pub mod pid_discovery;
 pub mod server;
