@@ -6,7 +6,7 @@ use serde_json::Value;
 pub mod ambiguity;
 
 pub struct DialectInterpreter<U> {
-    functions: BTreeMap<String, fn(&DialectInterpreter<U>, Value) -> anyhow::Result<Value>>,
+    functions: BTreeMap<String, fn(&mut DialectInterpreter<U>, Value) -> anyhow::Result<Value>>,
     userdata: U,
 }
 
@@ -29,7 +29,7 @@ impl<U> DialectInterpreter<U> {
         self.functions.insert(type_name_lower, Self::execute::<F>);
     }
 
-    pub fn evaluate(&self, value: Value) -> anyhow::Result<Value> {
+    pub fn evaluate(&mut self, value: Value) -> anyhow::Result<Value> {
         match value {
             Value::Null | Value::Bool(_) | Value::Number(_) | Value::String(_) => Ok(value),
             Value::Array(values) => Ok(Value::Array(
@@ -82,7 +82,7 @@ impl<U> DialectInterpreter<U> {
         }
     }
 
-    fn execute<F>(&self, value: Value) -> anyhow::Result<Value>
+    fn execute<F>(&mut self, value: Value) -> anyhow::Result<Value>
     where
         F: DialectFunction<U>,
     {
@@ -102,7 +102,7 @@ impl<U> DialectInterpreter<U> {
 pub trait DialectFunction<U>: DeserializeOwned {
     type Output: Serialize;
 
-    fn execute(self, interpreter: &DialectInterpreter<U>) -> anyhow::Result<Self::Output>;
+    fn execute(self, interpreter: &mut DialectInterpreter<U>) -> anyhow::Result<Self::Output>;
 }
 
 #[cfg(test)]
@@ -119,7 +119,7 @@ mod tests {
     impl DialectFunction<()> for Uppercase {
         type Output = String;
 
-        fn execute(self, _interpreter: &DialectInterpreter<()>) -> anyhow::Result<Self::Output> {
+        fn execute(self, _interpreter: &mut DialectInterpreter<()>) -> anyhow::Result<Self::Output> {
             Ok(self.text.to_uppercase())
         }
     }
@@ -134,7 +134,7 @@ mod tests {
     impl DialectFunction<()> for Concat {
         type Output = String;
 
-        fn execute(self, _interpreter: &DialectInterpreter<()>) -> anyhow::Result<Self::Output> {
+        fn execute(self, _interpreter: &mut DialectInterpreter<()>) -> anyhow::Result<Self::Output> {
             Ok(format!("{}{}", self.left, self.right))
         }
     }
@@ -149,7 +149,7 @@ mod tests {
     impl DialectFunction<()> for Add {
         type Output = i32;
 
-        fn execute(self, _interpreter: &DialectInterpreter<()>) -> anyhow::Result<Self::Output> {
+        fn execute(self, _interpreter: &mut DialectInterpreter<()>) -> anyhow::Result<Self::Output> {
             Ok(self.a + self.b)
         }
     }
@@ -210,7 +210,7 @@ mod tests {
 
     #[test]
     fn test_literal_values() {
-        let interpreter = DialectInterpreter::new(());
+        let mut interpreter = DialectInterpreter::new(());
 
         // Test that literal values pass through unchanged
         assert_eq!(
@@ -248,7 +248,7 @@ mod tests {
 
     #[test]
     fn test_unknown_function_error() {
-        let interpreter = DialectInterpreter::new(());
+        let mut interpreter = DialectInterpreter::new(());
 
         let input = serde_json::json!({"unknown": {"arg": "value"}});
         let result = interpreter.evaluate(input);
@@ -262,7 +262,7 @@ mod tests {
 
     #[test]
     fn test_invalid_function_format() {
-        let interpreter = DialectInterpreter::new(());
+        let mut interpreter = DialectInterpreter::new(());
 
         // Multiple keys in object
         let input = serde_json::json!({"func1": {}, "func2": {}});
@@ -284,7 +284,7 @@ where
 {
     type Output = V;
 
-    fn execute(self, _interpreter: &DialectInterpreter<U>) -> anyhow::Result<Self::Output> {
+    fn execute(self, _interpreter: &mut DialectInterpreter<U>) -> anyhow::Result<Self::Output> {
         Ok(self)
     }
 }
