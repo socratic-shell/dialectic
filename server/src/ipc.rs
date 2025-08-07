@@ -85,7 +85,6 @@ struct IPCCommunicatorInner {
 
     /// Terminal shell PID for this MCP server instance
     /// Reported to extension during handshake for smart terminal selection
-    #[expect(dead_code)] // Will be used in Phase 3 handshake protocol
     terminal_shell_pid: u32,
 }
 
