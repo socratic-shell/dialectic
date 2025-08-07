@@ -4,8 +4,8 @@
 //! Ports the logic from server/src/ipc.ts to Rust with cross-platform support.
 
 use crate::types::{
-    GetSelectionResult, GoodbyePayload, IPCMessage, IPCMessageType, LogLevel, LogParams,
-    PoloPayload, PresentReviewParams, PresentReviewResult, ResponsePayload,
+    FindAllReferencesPayload, GetSelectionResult, GoodbyePayload, IPCMessage, IPCMessageType, LogLevel, LogParams,
+    PoloPayload, PresentReviewParams, PresentReviewResult, ResolveSymbolByNamePayload, ResponsePayload,
 };
 use futures::FutureExt;
 use serde_json;
@@ -727,15 +727,73 @@ impl IPCCommunicator {
 // Implementation of IpcClient trait for IDE operations
 #[async_trait::async_trait]
 impl crate::ide::IpcClient for IPCCommunicator {
-    async fn resolve_symbol_by_name(&mut self, _name: &str) -> anyhow::Result<Vec<crate::ide::ResolvedSymbol>> {
-        // TODO: Implement actual IPC call to VSCode extension
-        // For now, return empty result
-        Ok(vec![])
+    async fn resolve_symbol_by_name(&mut self, name: &str) -> anyhow::Result<Vec<crate::ide::ResolvedSymbol>> {
+        if self.test_mode {
+            // Return empty result in test mode
+            return Ok(vec![]);
+        }
+
+        let payload = ResolveSymbolByNamePayload {
+            name: name.to_string(),
+        };
+
+        let message = IPCMessage {
+            message_type: IPCMessageType::ResolveSymbolByName,
+            payload: serde_json::to_value(payload)?,
+            id: Uuid::new_v4().to_string(),
+        };
+
+        let response = self.send_message_with_reply(message).await?;
+        
+        if !response.success {
+            return Err(anyhow::anyhow!(
+                "VSCode extension failed to resolve symbol '{}': {}",
+                name,
+                response.error.unwrap_or_else(|| "Unknown error".to_string())
+            ));
+        }
+
+        // Parse the response data as Vec<ResolvedSymbol>
+        let symbols: Vec<crate::ide::ResolvedSymbol> = match response.data {
+            Some(data) => serde_json::from_value(data)?,
+            None => vec![],
+        };
+
+        Ok(symbols)
     }
 
-    async fn find_all_references(&mut self, _symbol: &crate::ide::ResolvedSymbol) -> anyhow::Result<Vec<crate::ide::FileLocation>> {
-        // TODO: Implement actual IPC call to VSCode extension  
-        // For now, return empty result
-        Ok(vec![])
+    async fn find_all_references(&mut self, symbol: &crate::ide::ResolvedSymbol) -> anyhow::Result<Vec<crate::ide::FileLocation>> {
+        if self.test_mode {
+            // Return empty result in test mode
+            return Ok(vec![]);
+        }
+
+        let payload = FindAllReferencesPayload {
+            symbol: symbol.clone(),
+        };
+
+        let message = IPCMessage {
+            message_type: IPCMessageType::FindAllReferences,
+            payload: serde_json::to_value(payload)?,
+            id: Uuid::new_v4().to_string(),
+        };
+
+        let response = self.send_message_with_reply(message).await?;
+        
+        if !response.success {
+            return Err(anyhow::anyhow!(
+                "VSCode extension failed to find references for symbol '{}': {}",
+                symbol.name,
+                response.error.unwrap_or_else(|| "Unknown error".to_string())
+            ));
+        }
+
+        // Parse the response data as Vec<FileLocation>
+        let locations: Vec<crate::ide::FileLocation> = match response.data {
+            Some(data) => serde_json::from_value(data)?,
+            None => vec![],
+        };
+
+        Ok(locations)
     }
 }

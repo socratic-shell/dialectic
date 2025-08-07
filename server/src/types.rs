@@ -126,6 +126,20 @@ pub struct GoodbyePayload {
     pub terminal_shell_pid: u32,
 }
 
+/// Payload for ResolveSymbolByName messages
+#[derive(Debug, Clone, Deserialize, Serialize)]
+pub struct ResolveSymbolByNamePayload {
+    /// The symbol name to resolve (e.g., "User", "validateToken")
+    pub name: String,
+}
+
+/// Payload for FindAllReferences messages
+#[derive(Debug, Clone, Deserialize, Serialize)]
+pub struct FindAllReferencesPayload {
+    /// The resolved symbol to find references for
+    pub symbol: crate::ide::ResolvedSymbol,
+}
+
 /// Payload for Response messages (replaces IPCResponse struct)
 #[derive(Debug, Clone, Deserialize, Serialize)]
 pub struct ResponsePayload {

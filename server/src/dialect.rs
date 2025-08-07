@@ -290,6 +290,37 @@ mod tests {
         assert!(error_msg.contains("Symbol 'NonExistentSymbol' not found"));
     }
 
+    #[tokio::test]
+    async fn test_resolve_symbol_by_name_ipc() {
+        let mut interpreter = DialectInterpreter::new(MockIpcClient::new());
+        
+        // Test that the IPC call is made correctly (MockIpcClient returns empty results)
+        let result = interpreter.resolve_symbol_by_name("TestSymbol").await;
+        assert!(result.is_ok());
+        assert_eq!(result.unwrap().len(), 0); // MockIpcClient returns empty vec
+    }
+
+    #[tokio::test]
+    async fn test_find_all_references_ipc() {
+        let mut interpreter = DialectInterpreter::new(MockIpcClient::new());
+        
+        let test_symbol = crate::ide::ResolvedSymbol {
+            name: "TestSymbol".to_string(),
+            location: crate::ide::FileLocation {
+                file: "test.rs".to_string(),
+                line: 10,
+                column: 5,
+                context: "fn test_function() {".to_string(),
+            },
+            extra: serde_json::json!({}),
+        };
+        
+        // Test that the IPC call is made correctly (MockIpcClient returns empty results)
+        let result = interpreter.find_all_references(&test_symbol).await;
+        assert!(result.is_ok());
+        assert_eq!(result.unwrap().len(), 0); // MockIpcClient returns empty vec
+    }
+
     // Simple test function - string manipulation
     #[derive(Deserialize)]
     struct Uppercase {
