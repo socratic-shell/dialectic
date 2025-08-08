@@ -8,9 +8,56 @@ import { ReviewWebviewProvider } from './reviewWebview';
 // 💡: Types for IPC communication with MCP server
 interface IPCMessage {
     shellPid: number;
-    type: string; // Allow any string for forward compatibility
-    payload: any;
+    type: 'present_review' | 'log' | 'get_selection' | 'response' | 'marco' | 'polo' | 'goodbye' | 'resolve_symbol_by_name' | 'find_all_references' | string; // string allows unknown types
+    payload: PresentReviewPayload | LogPayload | GetSelectionPayload | PoloPayload | GoodbyePayload | ResolveSymbolPayload | FindReferencesPayload | ResponsePayload | unknown; // unknown allows any payload
     id: string;
+}
+
+interface PresentReviewPayload {
+    content: string;
+    mode: 'replace' | 'update-section' | 'append';
+    section?: string;
+    baseUri?: string;
+}
+
+interface LogPayload {
+    level: 'info' | 'error' | 'debug';
+    message: string;
+}
+
+interface GetSelectionPayload {
+    // Empty payload
+}
+
+interface PoloPayload {
+    // Shell PID now at top level
+}
+
+interface GoodbyePayload {
+    // Shell PID now at top level  
+}
+
+interface ResolveSymbolPayload {
+    name: string;
+}
+
+interface FindReferencesPayload {
+    symbol: {
+        name: string;
+        location: {
+            file: string;
+            line: number;
+            column: number;
+            context: string;
+        };
+        extra: any;
+    };
+}
+
+interface ResponsePayload {
+    success: boolean;
+    error?: string;
+    data?: any;
 }
 
 // 💡: Daemon client for connecting to message bus
@@ -104,14 +151,10 @@ class DaemonClient implements vscode.Disposable {
             return; // Silently ignore messages for other windows
         }
 
+        // Forward compatibility: only process known message types
         if (message.type === 'present_review') {
             try {
-                const reviewPayload = message.payload as {
-                    content: string;
-                    mode: 'replace' | 'update-section' | 'append';
-                    section?: string;
-                    baseUri?: string;
-                };
+                const reviewPayload = message.payload as PresentReviewPayload;
 
                 this.reviewProvider.updateReview(
                     reviewPayload.content,
@@ -145,10 +188,7 @@ class DaemonClient implements vscode.Disposable {
         } else if (message.type === 'log') {
             // Handle log messages - no response needed, just display in output channel
             try {
-                const logPayload = message.payload as {
-                    level: string;
-                    message: string;
-                };
+                const logPayload = message.payload as LogPayload;
 
                 const levelPrefix = logPayload.level.toUpperCase();
                 this.outputChannel.appendLine(`[${levelPrefix}] ${logPayload.message}`);
@@ -183,9 +223,7 @@ class DaemonClient implements vscode.Disposable {
         } else if (message.type === 'resolve_symbol_by_name') {
             // Handle symbol resolution requests from MCP server
             try {
-                const symbolPayload = message.payload as {
-                    name: string;
-                };
+                const symbolPayload = message.payload as ResolveSymbolPayload;
 
                 this.outputChannel.appendLine(`[LSP] Resolving symbol: ${symbolPayload.name}`);
                 
@@ -206,18 +244,7 @@ class DaemonClient implements vscode.Disposable {
         } else if (message.type === 'find_all_references') {
             // Handle find references requests from MCP server
             try {
-                const referencesPayload = message.payload as {
-                    symbol: {
-                        name: string;
-                        location: {
-                            file: string;
-                            line: number;
-                            column: number;
-                            context: string;
-                        };
-                        extra: any;
-                    };
-                };
+                const referencesPayload = message.payload as FindReferencesPayload;
 
                 this.outputChannel.appendLine(`[LSP] Finding references for symbol: ${referencesPayload.symbol.name}`);
                 
@@ -235,14 +262,14 @@ class DaemonClient implements vscode.Disposable {
                     error: error instanceof Error ? error.message : String(error)
                 });
             }
-        } else if (message.type == 'response') {
+        } else if (message.type === 'response') {
             // Ignore this, response messages are messages that WE send to clients.
         } else {
-            this.outputChannel.appendLine(`Received unknown message type: ${message.type}`);
-            this.sendResponse(message.id, {
-                success: false,
-                error: `Unknown message type: ${message.type}`
-            });
+            // Forward compatibility: silently ignore unknown message types for our window
+            // Only log if this was actually meant for us (not a broadcast)
+            if (message.shellPid !== 0) {
+                this.outputChannel.appendLine(`Received unknown message type: ${message.type} (ignoring for forward compatibility)`);
+            }
         }
     }
 
