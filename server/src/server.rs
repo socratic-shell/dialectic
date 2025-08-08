@@ -5,10 +5,11 @@
 
 use anyhow::Result;
 use rmcp::{
+    ErrorData as McpError, RoleServer, ServerHandler,
     handler::server::{router::tool::ToolRouter, tool::Parameters},
     model::*,
     service::RequestContext,
-    tool, tool_handler, tool_router, ErrorData as McpError, RoleServer, ServerHandler,
+    tool, tool_handler, tool_router,
 };
 use serde_json;
 use std::future::Future;
@@ -65,12 +66,8 @@ impl DialecticServer {
 
         // Initialize JsonScript interpreter with IDE functions
         let mut interpreter = DialectInterpreter::new(ipc.clone());
-        interpreter.add_function(crate::ide::FindDefinition { 
-            symbol: crate::ide::Symbol::Name(String::new()) 
-        });
-        interpreter.add_function(crate::ide::FindReferences { 
-            symbol: crate::ide::Symbol::Name(String::new()) 
-        });
+        interpreter.add_function::<crate::ide::FindDefinitions>();
+        interpreter.add_function::<crate::ide::FindReferences>();
 
         Ok(Self {
             ipc: ipc.clone(),
@@ -97,12 +94,8 @@ impl DialecticServer {
 
         // Initialize JsonScript interpreter with IDE functions for test mode
         let mut interpreter = DialectInterpreter::new(ipc.clone());
-        interpreter.add_function(crate::ide::FindDefinition { 
-            symbol: crate::ide::Symbol::Name(String::new()) 
-        });
-        interpreter.add_function(crate::ide::FindReferences { 
-            symbol: crate::ide::Symbol::Name(String::new()) 
-        });
+        interpreter.add_function::<crate::ide::FindDefinitions>();
+        interpreter.add_function::<crate::ide::FindReferences>();
 
         Self {
             ipc,
@@ -285,7 +278,10 @@ impl DialecticServer {
         self.ipc
             .send_log(
                 LogLevel::Debug,
-                format!("Received ide_operation tool call with program: {:?}", params.program),
+                format!(
+                    "Received ide_operation tool call with program: {:?}",
+                    params.program
+                ),
             )
             .await;
 
@@ -299,19 +295,21 @@ impl DialecticServer {
 
         let program = params.program;
         let mut interpreter = self.interpreter.clone();
-        
+
         let result = tokio::task::spawn_blocking(move || {
-            tokio::runtime::Handle::current().block_on(async move {
-                interpreter.evaluate(program).await
-            })
-        }).await.map_err(|e| {
+            tokio::runtime::Handle::current()
+                .block_on(async move { interpreter.evaluate(program).await })
+        })
+        .await
+        .map_err(|e| {
             McpError::internal_error(
                 "Task execution failed",
                 Some(serde_json::json!({
                     "error": e.to_string()
                 })),
             )
-        })?.map_err(|e| {
+        })?
+        .map_err(|e| {
             McpError::internal_error(
                 "JsonScript execution failed",
                 Some(serde_json::json!({

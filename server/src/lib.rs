@@ -2,12 +2,14 @@
 //!
 //! Rust implementation of the Dialectic MCP server for code review integration.
 
-pub mod daemon;
-pub mod dialect;
-pub mod ide;
-pub mod ipc;
-pub mod pid_discovery;
-pub mod server;
-pub mod types;
+mod daemon;
+mod dialect;
+mod ide;
+mod ipc;
+mod pid_discovery;
+mod server;
+mod types;
 
+pub use daemon::{run_daemon_with_prefix, spawn_daemon_process};
+pub use pid_discovery::find_vscode_pid_from_mcp;
 pub use server::DialecticServer;

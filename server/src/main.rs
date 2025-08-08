@@ -7,11 +7,11 @@
 
 use anyhow::Result;
 use clap::Parser;
-use rmcp::{transport::stdio, ServiceExt};
-use tracing::{error, info, Level};
+use rmcp::{ServiceExt, transport::stdio};
+use tracing::{Level, error, info};
 use tracing_subscriber::{self, EnvFilter};
 
-use dialectic_mcp_server::{pid_discovery, DialecticServer};
+use dialectic_mcp_server::DialecticServer;
 
 #[derive(Parser)]
 #[command(name = "dialectic-mcp-server")]
@@ -99,7 +99,7 @@ async fn main() -> Result<()> {
             info!(
                 "🚀 DAEMON MODE - Starting message bus daemon for VSCode PID {vscode_pid} with prefix {prefix}",
             );
-            dialectic_mcp_server::daemon::run_daemon_with_prefix(vscode_pid, prefix, None).await?;
+            dialectic_mcp_server::run_daemon_with_prefix(vscode_pid, prefix, None).await?;
         }
         None => {
             info!("Starting Dialectic MCP Server (Rust)");
@@ -143,7 +143,7 @@ async fn run_pid_probe() -> Result<()> {
     info!("MCP Server PID: {}", current_pid);
 
     // Try to walk up the process tree to find VSCode
-    match pid_discovery::find_vscode_pid_from_mcp(current_pid).await {
+    match dialectic_mcp_server::find_vscode_pid_from_mcp(current_pid).await {
         Ok(Some((vscode_pid, terminal_shell_pid))) => {
             info!("✅ SUCCESS: Found VSCode PID: {}", vscode_pid);
             info!("✅ SUCCESS: Terminal Shell PID: {}", terminal_shell_pid);

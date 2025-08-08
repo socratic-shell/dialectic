@@ -5,7 +5,7 @@
 #![cfg(test)]
 
 use std::process::Command;
-use tokio::time::{timeout, Duration};
+use tokio::time::{Duration, timeout};
 
 #[tokio::test]
 #[ignore] // Ignore by default since this requires the binary to be built

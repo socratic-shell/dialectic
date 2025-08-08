@@ -1,16 +1,40 @@
-use serde::{Deserialize, Serialize};
-use serde_json::Value;
+use std::{future::Future, pin::Pin};
 
-use crate::dialect::{DialectFunction, DialectInterpreter};
+use serde::{Deserialize, Serialize};
+
+use crate::dialect::{DialectFunction, DialectInterpreter, DialectValue};
 
 pub mod ambiguity;
+mod test;
 
 // IDE-specific types
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(untagged)]
-pub enum Symbol {
+pub enum Symbols {
     Name(String),
-    Resolved(ResolvedSymbol),
+    Array(Vec<Symbols>),
+    SymbolDef(SymbolDef),
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct SymbolDef {
+    /// The symbol name (e.g., "User", "validateToken")
+    pub name: String,
+    /// Location where this symbol is defined
+    #[serde(rename = "definedAt")]
+    pub defined_at: FileLocation,
+}
+
+impl<U: Send> DialectValue<U> for SymbolDef {}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct SymbolRef {
+    #[serde(flatten)]
+    pub definition: SymbolDef,
+
+    /// Location where this symbol is defined
+    #[serde(rename = "referencedAt")]
+    pub referenced_at: FileLocation,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -25,88 +49,84 @@ pub struct FileLocation {
     pub context: String,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct ResolvedSymbol {
-    /// The symbol name (e.g., "User", "validateToken")
-    pub name: String,
-    /// Location where this symbol is defined
-    #[serde(flatten)]
-    pub location: FileLocation,
-    /// Additional metadata from the LSP (type info, documentation, etc.)
-    pub extra: Value,
-}
-
-use async_trait::async_trait;
-
 // IPC client trait that the userdata must implement
-#[async_trait]
 pub trait IpcClient: Send {
-    async fn resolve_symbol_by_name(&mut self, name: &str) -> anyhow::Result<Vec<ResolvedSymbol>>;
-    async fn find_all_references(&mut self, symbol: &ResolvedSymbol)
-        -> anyhow::Result<Vec<FileLocation>>;
+    async fn resolve_symbol_by_name(&mut self, name: &str) -> anyhow::Result<Vec<SymbolDef>>;
+    async fn find_all_references(
+        &mut self,
+        symbol: &SymbolDef,
+    ) -> anyhow::Result<Vec<FileLocation>>;
 }
 
 // Symbol implementation
-impl Symbol {
-    pub async fn resolve<U: IpcClient>(
+impl Symbols {
+    pub fn resolve<U: IpcClient>(
         &self,
         interpreter: &mut DialectInterpreter<U>,
-    ) -> anyhow::Result<ResolvedSymbol> {
-        match self {
-            Symbol::Name(name) => {
-                // Call IPC: resolve-symbol-by-name (using Deref to access userdata directly)
-                let candidates = interpreter.resolve_symbol_by_name(name).await?;
-                match candidates.len() {
-                    0 => Err(anyhow::anyhow!("Symbol '{}' not found", name)),
-                    1 => Ok(candidates.into_iter().next().unwrap()),
-                    _ => {
-                        // Create ambiguity error with refinement suggestions
-                        let alternatives: Vec<Value> = candidates
-                            .into_iter()
-                            .map(|c| serde_json::to_value(Symbol::Resolved(c)))
-                            .collect::<Result<Vec<_>, _>>()?;
-
-                        Err(ambiguity::AmbiguityError::new(
-                            serde_json::to_value(self)?,
-                            alternatives,
-                        )
-                        .into())
-                    }
+    ) -> Pin<Box<impl Future<Output = anyhow::Result<Vec<SymbolDef>>>>> {
+        Box::pin(async move {
+            match self {
+                Symbols::Name(name) => {
+                    // Call IPC: resolve-symbol-by-name (using Deref to access userdata directly)
+                    interpreter.resolve_symbol_by_name(name).await
                 }
+
+                Symbols::Array(symbols) => {
+                    let mut output = vec![];
+                    for s in symbols {
+                        output.extend(s.resolve(interpreter).await?);
+                    }
+                    Ok(output)
+                }
+
+                Symbols::SymbolDef(symbol_def) => Ok(vec![symbol_def.clone()]),
             }
-            Symbol::Resolved(resolved_symbol) => Ok(resolved_symbol.clone()),
-        }
+        })
     }
 }
 
 // IDE Functions
 #[derive(Deserialize)]
-pub struct FindDefinition {
-    pub symbol: Symbol,
+pub struct FindDefinitions {
+    of: Symbols,
 }
 
-#[async_trait]
-impl<U: IpcClient> DialectFunction<U> for FindDefinition {
-    type Output = Vec<ResolvedSymbol>;
+impl<U: IpcClient> DialectFunction<U> for FindDefinitions {
+    type Output = Vec<SymbolDef>;
 
-    async fn execute(self, interpreter: &mut DialectInterpreter<U>) -> anyhow::Result<Self::Output> {
-        let resolved_symbol = self.symbol.resolve(interpreter).await?;
-        // For findDefinition, we return the resolved symbol itself (it represents the definition)
-        Ok(vec![resolved_symbol])
+    const DEFAULT_FIELD_NAME: Option<&'static str> = Some("of");
+
+    async fn execute(
+        self,
+        interpreter: &mut DialectInterpreter<U>,
+    ) -> anyhow::Result<Self::Output> {
+        self.of.resolve(interpreter).await
     }
 }
 
 #[derive(Deserialize)]
 pub struct FindReferences {
-    pub symbol: Symbol,
+    pub to: Symbols,
 }
 
-#[async_trait]
 impl<U: IpcClient> DialectFunction<U> for FindReferences {
-    type Output = Vec<FileLocation>;
+    type Output = Vec<SymbolRef>;
 
-    async fn execute(self, interpreter: &mut DialectInterpreter<U>) -> anyhow::Result<Self::Output> {
-        let resolved_symbol = self.symbol.resolve(interpreter).await?;
-        interpreter.find_all_references(&resolved_symbol).await
+    const DEFAULT_FIELD_NAME: Option<&'static str> = Some("to");
+
+    async fn execute(
+        self,
+        interpreter: &mut DialectInterpreter<U>,
+    ) -> anyhow::Result<Self::Output> {
+        let definitions = self.to.resolve(interpreter).await?;
+        let mut output = vec![];
+        for definition in definitions {
+            let locations = interpreter.find_all_references(&definition).await?;
+            output.extend(locations.into_iter().map(|loc| SymbolRef {
+                definition: definition.clone(),
+                referenced_at: loc,
+            }));
+        }
+        Ok(output)
     }
 }

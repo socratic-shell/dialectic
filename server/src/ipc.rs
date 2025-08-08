@@ -4,8 +4,9 @@
 //! Ports the logic from server/src/ipc.ts to Rust with cross-platform support.
 
 use crate::types::{
-    FindAllReferencesPayload, GetSelectionResult, GoodbyePayload, IPCMessage, IPCMessageType, LogLevel, LogParams,
-    PoloPayload, PresentReviewParams, PresentReviewResult, ResolveSymbolByNamePayload, ResponsePayload,
+    FindAllReferencesPayload, GetSelectionResult, GoodbyePayload, IPCMessage, IPCMessageType,
+    LogLevel, LogParams, PoloPayload, PresentReviewParams, PresentReviewResult,
+    ResolveSymbolByNamePayload, ResponsePayload,
 };
 use futures::FutureExt;
 use serde_json;
@@ -17,7 +18,7 @@ use std::time::Duration;
 use thiserror::Error;
 use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
 use tokio::net::UnixStream;
-use tokio::sync::{oneshot, Mutex};
+use tokio::sync::{Mutex, oneshot};
 use tracing::{debug, error, info, trace, warn};
 use uuid::Uuid;
 
@@ -725,9 +726,11 @@ impl IPCCommunicator {
 }
 
 // Implementation of IpcClient trait for IDE operations
-#[async_trait::async_trait]
 impl crate::ide::IpcClient for IPCCommunicator {
-    async fn resolve_symbol_by_name(&mut self, name: &str) -> anyhow::Result<Vec<crate::ide::ResolvedSymbol>> {
+    async fn resolve_symbol_by_name(
+        &mut self,
+        name: &str,
+    ) -> anyhow::Result<Vec<crate::ide::SymbolDef>> {
         if self.test_mode {
             // Return empty result in test mode
             return Ok(vec![]);
@@ -744,17 +747,19 @@ impl crate::ide::IpcClient for IPCCommunicator {
         };
 
         let response = self.send_message_with_reply(message).await?;
-        
+
         if !response.success {
             return Err(anyhow::anyhow!(
                 "VSCode extension failed to resolve symbol '{}': {}",
                 name,
-                response.error.unwrap_or_else(|| "Unknown error".to_string())
+                response
+                    .error
+                    .unwrap_or_else(|| "Unknown error".to_string())
             ));
         }
 
         // Parse the response data as Vec<ResolvedSymbol>
-        let symbols: Vec<crate::ide::ResolvedSymbol> = match response.data {
+        let symbols: Vec<crate::ide::SymbolDef> = match response.data {
             Some(data) => serde_json::from_value(data)?,
             None => vec![],
         };
@@ -762,7 +767,10 @@ impl crate::ide::IpcClient for IPCCommunicator {
         Ok(symbols)
     }
 
-    async fn find_all_references(&mut self, symbol: &crate::ide::ResolvedSymbol) -> anyhow::Result<Vec<crate::ide::FileLocation>> {
+    async fn find_all_references(
+        &mut self,
+        symbol: &crate::ide::SymbolDef,
+    ) -> anyhow::Result<Vec<crate::ide::FileLocation>> {
         if self.test_mode {
             // Return empty result in test mode
             return Ok(vec![]);
@@ -779,12 +787,14 @@ impl crate::ide::IpcClient for IPCCommunicator {
         };
 
         let response = self.send_message_with_reply(message).await?;
-        
+
         if !response.success {
             return Err(anyhow::anyhow!(
                 "VSCode extension failed to find references for symbol '{}': {}",
                 symbol.name,
-                response.error.unwrap_or_else(|| "Unknown error".to_string())
+                response
+                    .error
+                    .unwrap_or_else(|| "Unknown error".to_string())
             ));
         }
 
@@ -795,5 +805,115 @@ impl crate::ide::IpcClient for IPCCommunicator {
         };
 
         Ok(locations)
+    }
+}
+
+#[cfg(test)]
+mod test {
+    //! Integration tests for Dialectic MCP Server
+    //!
+    //! Tests the IPC communication layer and message structure
+
+    use crate::ipc::IPCCommunicator;
+    use crate::types::{IPCMessage, IPCMessageType, PresentReviewParams, ReviewMode};
+    use serde_json;
+
+    #[tokio::test]
+    async fn test_ipc_communicator_test_mode() {
+        // Initialize tracing for test output
+        let _ = tracing_subscriber::fmt::try_init();
+
+        // Create IPC communicator in test mode
+        let ipc = IPCCommunicator::new_test();
+
+        let params = PresentReviewParams {
+            content: "# Test Review\n\nThis is a test review with some content.".to_string(),
+            mode: ReviewMode::Replace,
+            section: None,
+            base_uri: "/test/project".to_string(),
+        };
+
+        // Test present_review in test mode
+        let result = ipc.present_review(params).await;
+        assert!(result.is_ok());
+
+        let review_result = result.unwrap();
+        assert!(review_result.success);
+        assert!(review_result.message.is_some());
+        assert!(review_result.message.unwrap().contains("test mode"));
+    }
+
+    #[tokio::test]
+    async fn test_get_selection_test_mode() {
+        let _ = tracing_subscriber::fmt::try_init();
+
+        let ipc = IPCCommunicator::new_test();
+
+        // Test get_selection in test mode
+        let result = ipc.get_selection().await;
+        assert!(result.is_ok());
+
+        let selection_result = result.unwrap();
+        assert!(selection_result.selected_text.is_none());
+        assert!(selection_result.message.is_some());
+        assert!(selection_result.message.unwrap().contains("test mode"));
+    }
+
+    #[tokio::test]
+    async fn test_present_review_with_update_section_mode() {
+        let _ = tracing_subscriber::fmt::try_init();
+
+        let ipc = IPCCommunicator::new_test();
+
+        let params = PresentReviewParams {
+            content: "## Updated Section\n\nThis section has been updated.".to_string(),
+            mode: ReviewMode::UpdateSection,
+            section: Some("Summary".to_string()),
+            base_uri: "/test/project".to_string(),
+        };
+
+        let result = ipc.present_review(params).await;
+        assert!(result.is_ok());
+
+        let review_result = result.unwrap();
+        assert!(review_result.success);
+    }
+
+    #[tokio::test]
+    async fn test_ipc_message_structure() {
+        let _ = tracing_subscriber::fmt::try_init();
+
+        // This test verifies that the IPC message structure is correct
+        use uuid::Uuid;
+
+        let params = PresentReviewParams {
+            content: "# Review Content".to_string(),
+            mode: ReviewMode::Append,
+            section: None,
+            base_uri: "/project/root".to_string(),
+        };
+
+        // Create an IPC message like the server would
+        let message = IPCMessage {
+            message_type: IPCMessageType::PresentReview,
+            payload: serde_json::to_value(&params).unwrap(),
+            id: Uuid::new_v4().to_string(),
+        };
+
+        // Verify IPC message structure
+        assert!(!message.id.is_empty());
+        assert!(Uuid::parse_str(&message.id).is_ok());
+        assert!(matches!(
+            message.message_type,
+            IPCMessageType::PresentReview
+        ));
+        assert!(message.payload.is_object());
+
+        // Verify payload can be deserialized back to PresentReviewParams
+        let deserialized: PresentReviewParams =
+            serde_json::from_value(message.payload.clone()).unwrap();
+        assert_eq!(deserialized.content, "# Review Content");
+        assert!(matches!(deserialized.mode, ReviewMode::Append));
+        assert_eq!(deserialized.base_uri, "/project/root");
     }
 }

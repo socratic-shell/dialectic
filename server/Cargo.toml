@@ -1,7 +1,7 @@
 [package]
 name = "dialectic-mcp-server"
 version = "0.1.0"
-edition = "2021"
+edition = "2024"
 description = "Rust implementation of Dialectic MCP server for code review integration"
 authors = ["Niko Matsakis"]
 license = "MIT"
@@ -30,7 +30,6 @@ tokio = { workspace = true, features = ["net", "io-util"] }
 
 # Async utilities
 futures = "0.3"
-async-trait = "0.1"
 
 # UUID generation for IPC message tracking
 uuid = { workspace = true }
@@ -55,3 +54,4 @@ tokio-test = { workspace = true }
 uuid = { version = "1.0", features = ["v4"] }
 # Add client feature for testing
 rmcp = { version = "0.3.2", features = ["server", "transport-io", "schemars", "client"] }
+expect-test = "1.5.1"

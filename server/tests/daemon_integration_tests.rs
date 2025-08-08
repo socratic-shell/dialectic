@@ -21,7 +21,7 @@ async fn test_daemon_spawning_integration() {
 
 #[tokio::test]
 async fn test_daemon_ensure_running_separate_process() {
-    use dialectic_mcp_server::daemon::run_daemon_with_prefix;
+    use dialectic_mcp_server::run_daemon_with_prefix;
     use std::sync::Arc;
     use tokio::sync::Barrier;
     use uuid::Uuid;

@@ -137,7 +137,7 @@ pub struct ResolveSymbolByNamePayload {
 #[derive(Debug, Clone, Deserialize, Serialize)]
 pub struct FindAllReferencesPayload {
     /// The resolved symbol to find references for
-    pub symbol: crate::ide::ResolvedSymbol,
+    pub symbol: crate::ide::SymbolDef,
 }
 
 /// Payload for Response messages (replaces IPCResponse struct)

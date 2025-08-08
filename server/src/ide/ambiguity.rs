@@ -8,6 +8,7 @@ pub struct AmbiguityError {
 }
 
 impl AmbiguityError {
+    #[expect(dead_code)]
     pub fn new(input: Value, alternatives: Vec<Value>) -> Self {
         Self {
             input,
