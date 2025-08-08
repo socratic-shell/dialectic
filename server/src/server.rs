@@ -261,13 +261,9 @@ impl DialecticServer {
                        This tool provides access to VSCode's Language Server Protocol (LSP) capabilities \
                        through a composable function system.\n\n\
                        Common operations:\n\
-                       - {\"findDefinition\": {\"symbol\": \"MyFunction\"}} - Find where a symbol is defined\n\
-                       - {\"findReferences\": {\"symbol\": \"MyFunction\"}} - Find all uses of a symbol\n\
-                       - {\"findDefinition\": {\"symbol\": {\"name\": \"User\", \"file\": \"models.rs\", \"line\": 42}}} - Find definition with location hint\n\n\
-                       The system handles ambiguity automatically - if multiple symbols match a name, \
-                       you'll get refinement suggestions with specific locations to choose from.\n\n\
-                       Functions can be composed: {\"findReferences\": {\"findDefinition\": {\"symbol\": \"login\"}}} \
-                       will first find the definition of \"login\", then find all references to that specific definition."
+                       - {\"findDefinitions\": \"MyFunction\"} - list of locations where a symbol named `MyFunction` is defined\n\
+                       - {\"findReferences\": \"MyFunction\"} - list of locations where a symbol named `MyFunction` is referenced\n\
+                       "
     )]
     async fn ide_operation(
         &self,
