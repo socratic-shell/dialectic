@@ -147,7 +147,7 @@ impl IPCCommunicator {
 
         // Create message payload
         let payload = serde_json::to_value(params)?;
-        
+
         let shell_pid = {
             let inner = self.inner.lock().await;
             inner.terminal_shell_pid
@@ -778,7 +778,7 @@ impl crate::ide::IpcClient for IPCCommunicator {
     async fn find_all_references(
         &mut self,
         symbol: &crate::ide::SymbolDef,
-    ) -> anyhow::Result<Vec<crate::ide::FileLocation>> {
+    ) -> anyhow::Result<Vec<crate::ide::FileRange>> {
         if self.test_mode {
             // Return empty result in test mode
             return Ok(vec![]);
@@ -813,7 +813,7 @@ impl crate::ide::IpcClient for IPCCommunicator {
         }
 
         // Parse the response data as Vec<FileLocation>
-        let locations: Vec<crate::ide::FileLocation> = match response.data {
+        let locations: Vec<crate::ide::FileRange> = match response.data {
             Some(data) => serde_json::from_value(data)?,
             None => vec![],
         };

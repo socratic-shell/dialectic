@@ -42,22 +42,40 @@ interface ResolveSymbolPayload {
 }
 
 interface FindReferencesPayload {
-    symbol: {
-        name: string;
-        location: {
-            file: string;
-            line: number;
-            column: number;
-            context: string;
-        };
-        extra: any;
-    };
+    symbol: SymbolDef;
 }
 
 interface ResponsePayload {
     success: boolean;
     error?: string;
     data?: any;
+}
+
+// 💡: Corresponds to `dialectic_mcp_server::ide::SymbolRef` in the Rust code
+interface SymbolDef {
+    name: String,
+    kind?: String,
+    definedAt: FileRange,
+}
+
+// 💡: Corresponds to `dialectic_mcp_server::ide::SymbolRef` in the Rust code
+interface SymbolRef {
+    definition: SymbolDef,
+    referencedAt: FileLocation,
+}
+
+// 💡: Corresponds to `dialectic_mcp_server::ide::FileRange` in the Rust code
+interface FileRange {
+    path: string,
+    start: FileLocation,
+    end: FileLocation,
+    content?: string,
+}
+
+// 💡: Corresponds to `dialectic_mcp_server::ide::FileLocation` in the Rust code
+interface FileLocation {
+    line: number,    // 💡: 1-based, vscode is 0-based
+    column: number,  // 💡: 1-based, vscode is 0-based
 }
 
 // 💡: Daemon client for connecting to message bus
@@ -67,7 +85,7 @@ class DaemonClient implements vscode.Disposable {
     private isDisposed = false;
     private buffer = '';
     private readonly RECONNECT_INTERVAL_MS = 5000; // 5 seconds
-    
+
     // Terminal registry: track active shell PIDs with MCP servers
     private activeTerminals: Set<number> = new Set();
 
@@ -199,7 +217,7 @@ class DaemonClient implements vscode.Disposable {
             // Handle Polo messages - MCP server announcing presence
             try {
                 this.outputChannel.appendLine(`[DISCOVERY] MCP server connected in terminal PID ${message.shellPid}`);
-                
+
                 // Add to terminal registry for Ask Socratic Shell integration
                 this.activeTerminals.add(message.shellPid);
                 this.outputChannel.appendLine(`[REGISTRY] Active terminals: [${Array.from(this.activeTerminals).join(', ')}]`);
@@ -210,7 +228,7 @@ class DaemonClient implements vscode.Disposable {
             // Handle Goodbye messages - MCP server announcing departure
             try {
                 this.outputChannel.appendLine(`[DISCOVERY] MCP server disconnected from terminal PID ${message.shellPid}`);
-                
+
                 // Remove from terminal registry for Ask Socratic Shell integration
                 this.activeTerminals.delete(message.shellPid);
                 this.outputChannel.appendLine(`[REGISTRY] Active terminals: [${Array.from(this.activeTerminals).join(', ')}]`);
@@ -226,10 +244,10 @@ class DaemonClient implements vscode.Disposable {
                 const symbolPayload = message.payload as ResolveSymbolPayload;
 
                 this.outputChannel.appendLine(`[LSP] Resolving symbol: ${symbolPayload.name}`);
-                
+
                 // Call VSCode's LSP to find symbol definitions
                 const symbols = await this.resolveSymbolByName(symbolPayload.name);
-                
+
                 this.sendResponse(message.id, {
                     success: true,
                     data: symbols
@@ -247,10 +265,10 @@ class DaemonClient implements vscode.Disposable {
                 const referencesPayload = message.payload as FindReferencesPayload;
 
                 this.outputChannel.appendLine(`[LSP] Finding references for symbol: ${referencesPayload.symbol.name}`);
-                
+
                 // Call VSCode's LSP to find all references
                 const references = await this.findAllReferences(referencesPayload.symbol);
-                
+
                 this.sendResponse(message.id, {
                     success: true,
                     data: references
@@ -346,16 +364,17 @@ class DaemonClient implements vscode.Disposable {
         };
     }
 
-    private sendResponse(messageId: string, response: { success: boolean; error?: string; data?: any }): void {
+    private sendResponse(messageId: string, response: ResponsePayload): void {
         if (!this.socket || this.socket.destroyed) {
             this.outputChannel.appendLine(`Cannot send response - socket not connected`);
             return;
         }
 
-        const responseMessage = {
+        const responseMessage: IPCMessage = {
             type: 'response',
             payload: response,
-            id: messageId
+            id: messageId,
+            shellPid: 0,
         };
 
         try {
@@ -414,7 +433,7 @@ class DaemonClient implements vscode.Disposable {
     /**
      * Resolve symbol by name using VSCode's LSP
      */
-    private async resolveSymbolByName(symbolName: string): Promise<any[]> {
+    private async resolveSymbolByName(symbolName: string): Promise<SymbolDef[]> {
         try {
             // Get all workspace symbols matching the name
             const symbols = await vscode.commands.executeCommand<vscode.SymbolInformation[]>(
@@ -427,19 +446,7 @@ class DaemonClient implements vscode.Disposable {
             }
 
             // Convert VSCode symbols to our format
-            const resolvedSymbols = symbols.map(symbol => ({
-                name: symbol.name,
-                location: {
-                    file: vscode.workspace.asRelativePath(symbol.location.uri),
-                    line: symbol.location.range.start.line + 1, // Convert to 1-based
-                    column: symbol.location.range.start.character, // Keep 0-based
-                    context: this.getContextAroundLocation(symbol.location.uri, symbol.location.range.start.line)
-                },
-                extra: {
-                    kind: vscode.SymbolKind[symbol.kind],
-                    containerName: symbol.containerName
-                }
-            }));
+            const resolvedSymbols: SymbolDef[] = symbols.map(symbol => this.vscodeSymbolToSymbolDef(symbol));
 
             return resolvedSymbols;
         } catch (error) {
@@ -448,10 +455,64 @@ class DaemonClient implements vscode.Disposable {
         }
     }
 
+    private vscodeSymbolToSymbolDef(symbol: vscode.SymbolInformation): SymbolDef {
+        let definedAt = symbol.location
+        let result: SymbolDef = {
+            name: symbol.name,
+            definedAt: this.vscodeLocationToRange(symbol.location),
+        };
+
+        switch (symbol.kind) {
+            case vscode.SymbolKind.File: result.kind = "File"; break;
+            case vscode.SymbolKind.Module: result.kind = "Module"; break;
+            case vscode.SymbolKind.Namespace: result.kind = "Namespace"; break;
+            case vscode.SymbolKind.Package: result.kind = "Package"; break;
+            case vscode.SymbolKind.Class: result.kind = "Class"; break;
+            case vscode.SymbolKind.Method: result.kind = "Method"; break;
+            case vscode.SymbolKind.Property: result.kind = "Property"; break;
+            case vscode.SymbolKind.Field: result.kind = "Field"; break;
+            case vscode.SymbolKind.Constructor: result.kind = "Constructor"; break;
+            case vscode.SymbolKind.Enum: result.kind = "Enum"; break;
+            case vscode.SymbolKind.Interface: result.kind = "Interface"; break;
+            case vscode.SymbolKind.Function: result.kind = "Function"; break;
+            case vscode.SymbolKind.Variable: result.kind = "Variable"; break;
+            case vscode.SymbolKind.Constant: result.kind = "Constant"; break;
+            case vscode.SymbolKind.String: result.kind = "String"; break;
+            case vscode.SymbolKind.Number: result.kind = "Number"; break;
+            case vscode.SymbolKind.Boolean: result.kind = "Boolean"; break;
+            case vscode.SymbolKind.Array: result.kind = "Array"; break;
+            case vscode.SymbolKind.Object: result.kind = "Object"; break;
+            case vscode.SymbolKind.Key: result.kind = "Key"; break;
+            case vscode.SymbolKind.Null: result.kind = "Null"; break;
+            case vscode.SymbolKind.EnumMember: result.kind = "EnumMember"; break;
+            case vscode.SymbolKind.Struct: result.kind = "Struct"; break;
+            case vscode.SymbolKind.Event: result.kind = "Event"; break;
+            case vscode.SymbolKind.Operator: result.kind = "Operator"; break;
+            case vscode.SymbolKind.TypeParameter: result.kind = "TypeParameter"; break;
+        }
+
+        return result;
+    }
+
+    private vscodeLocationToRange(location: vscode.Location): FileRange {
+        return {
+            path: location.uri.fsPath,
+            start: {
+                line: location.range.start.line + 1,
+                column: location.range.start.character + 1,
+            },
+            end: {
+                line: location.range.end.line + 1,
+                column: location.range.end.character + 1,
+            },
+        };
+    }
+
+
     /**
      * Find all references to a symbol using VSCode's LSP
      */
-    private async findAllReferences(symbol: any): Promise<any[]> {
+    private async findAllReferences(symbol: SymbolDef): Promise<FileRange[]> {
         try {
             // Convert relative path back to URI
             const workspaceFolder = vscode.workspace.workspaceFolders?.[0];
@@ -459,53 +520,17 @@ class DaemonClient implements vscode.Disposable {
                 throw new Error('No workspace folder found');
             }
 
-            const fileUri = vscode.Uri.joinPath(workspaceFolder.uri, symbol.location.file);
-            const position = new vscode.Position(
-                symbol.location.line - 1, // Convert from 1-based to 0-based
-                symbol.location.column    // Already 0-based
-            );
-
             // Find all references using LSP
-            const references = await vscode.commands.executeCommand<vscode.Location[]>(
+            const locations = await vscode.commands.executeCommand<vscode.Location[]>(
                 'vscode.executeReferenceProvider',
-                fileUri,
-                position
+                vscode.Uri.joinPath(workspaceFolder.uri, symbol.definedAt.path),
+                new vscode.Position(symbol.definedAt.start.line - 1, symbol.definedAt.start.column - 1)
             );
 
-            if (!references || references.length === 0) {
-                return [];
-            }
-
-            // Convert VSCode locations to our format
-            const referenceLocations = references.map(ref => ({
-                file: vscode.workspace.asRelativePath(ref.uri),
-                line: ref.range.start.line + 1, // Convert to 1-based
-                column: ref.range.start.character, // Keep 0-based
-                context: this.getContextAroundLocation(ref.uri, ref.range.start.line)
-            }));
-
-            return referenceLocations;
+            return locations.map(location => this.vscodeLocationToRange(location));
         } catch (error) {
             this.outputChannel.appendLine(`Error in findAllReferences: ${error}`);
             throw error;
-        }
-    }
-
-    /**
-     * Get context around a specific location for display purposes
-     */
-    private getContextAroundLocation(uri: vscode.Uri, line: number): string {
-        try {
-            // Try to get the document if it's already open
-            const document = vscode.workspace.textDocuments.find(doc => doc.uri.toString() === uri.toString());
-            if (document && line < document.lineCount) {
-                return document.lineAt(line).text.trim();
-            }
-            
-            // If document isn't open, return a placeholder
-            return `Line ${line + 1}`;
-        } catch (error) {
-            return `Line ${line + 1}`;
         }
     }
 
@@ -689,10 +714,10 @@ async function findQChatTerminal(outputChannel: vscode.OutputChannel, daemonClie
         terminals.map(async (terminal) => {
             // Extract the shell PID from the terminal (async)
             const shellPID = await terminal.processId;
-            
+
             // Log terminal for debugging
             outputChannel.appendLine(`  Checking terminal: "${terminal.name}" (PID: ${shellPID})`);
-            
+
             // Check if this terminal's shell PID is in our active registry
             if (shellPID && activeTerminals.has(shellPID)) {
                 outputChannel.appendLine(`    ✅ Terminal "${terminal.name}" has active MCP server (PID: ${shellPID})`);
@@ -721,17 +746,17 @@ async function findQChatTerminal(outputChannel: vscode.OutputChannel, daemonClie
     // 💡: Multiple AI-enabled terminals - show picker UI with memory
     if (aiEnabledTerminals.length > 1) {
         outputChannel.appendLine(`Multiple AI-enabled terminals found: ${aiEnabledTerminals.length}`);
-        
+
         // Get previously selected terminal PID from workspace state
         const lastSelectedPID = context.workspaceState.get<number>('dialectic.lastSelectedTerminalPID');
         outputChannel.appendLine(`Last selected terminal PID: ${lastSelectedPID}`);
-        
+
         // Create picker items with terminal info
         interface TerminalQuickPickItem extends vscode.QuickPickItem {
             terminal: vscode.Terminal;
             pid: number | undefined;
         }
-        
+
         const terminalItems: TerminalQuickPickItem[] = await Promise.all(
             aiEnabledTerminals.map(async (terminal): Promise<TerminalQuickPickItem> => {
                 const pid = await terminal.processId;
@@ -750,10 +775,10 @@ async function findQChatTerminal(outputChannel: vscode.OutputChannel, daemonClie
 
         // Find the last selected terminal for the quick option
         const lastSelectedItem = terminalItems.find(item => item.pid === lastSelectedPID);
-        
+
         // Create picker items with optional "use last" entry at top
         const pickerItems: TerminalQuickPickItem[] = [];
-        
+
         // Add "use last terminal" option if we have a previous selection
         if (lastSelectedItem) {
             pickerItems.push({
@@ -763,7 +788,7 @@ async function findQChatTerminal(outputChannel: vscode.OutputChannel, daemonClie
                 terminal: lastSelectedItem.terminal,
                 pid: lastSelectedItem.pid
             });
-            
+
             // Add separator
             pickerItems.push({
                 label: '$(dash) All available terminals',
@@ -774,13 +799,13 @@ async function findQChatTerminal(outputChannel: vscode.OutputChannel, daemonClie
                 kind: vscode.QuickPickItemKind.Separator
             });
         }
-        
+
         // Add all terminals (keeping natural order)
         pickerItems.push(...terminalItems);
 
         // Show the picker to user
         const selectedItem = await vscode.window.showQuickPick(pickerItems, {
-            placeHolder: lastSelectedItem 
+            placeHolder: lastSelectedItem
                 ? 'Select terminal for AI chat (first option = quick access to last used)'
                 : 'Select terminal for AI chat',
             title: 'Multiple AI-enabled terminals found'
@@ -792,13 +817,13 @@ async function findQChatTerminal(outputChannel: vscode.OutputChannel, daemonClie
                 outputChannel.appendLine('User selected separator or invalid item, ignoring');
                 return null;
             }
-            
+
             outputChannel.appendLine(`User selected terminal: ${selectedItem.terminal.name} (PID: ${selectedItem.pid})`);
-            
+
             // Remember this selection for next time
             await context.workspaceState.update('dialectic.lastSelectedTerminalPID', selectedItem.pid);
             outputChannel.appendLine(`Saved terminal PID ${selectedItem.pid} as last selected`);
-            
+
             return selectedItem.terminal;
         } else {
             outputChannel.appendLine('User cancelled terminal selection');
@@ -808,7 +833,7 @@ async function findQChatTerminal(outputChannel: vscode.OutputChannel, daemonClie
 
     // 💡: No AI-enabled terminals found - fall back to old logic for compatibility
     outputChannel.appendLine('No AI-enabled terminals found, falling back to name-based detection');
-    
+
     if (terminals.length === 1) {
         const terminal = terminals[0];
         outputChannel.appendLine(`Using single terminal (fallback): ${terminal.name}`);

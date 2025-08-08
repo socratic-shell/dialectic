@@ -7,55 +7,29 @@ use crate::dialect::{DialectFunction, DialectInterpreter, DialectValue};
 pub mod ambiguity;
 mod test;
 
-// IDE-specific types
+// IPC client trait that the userdata must implement
+pub trait IpcClient: Send {
+    async fn resolve_symbol_by_name(&mut self, name: &str) -> anyhow::Result<Vec<SymbolDef>>;
+    async fn find_all_references(&mut self, symbol: &SymbolDef) -> anyhow::Result<Vec<FileRange>>;
+}
+
+/// The "symbols" file is used as the expected argument
+/// for a number of other functions. It is intentionally
+/// flexible to enable LLM shorthands -- it can receive
+/// a string, an array with other symbols, or an explicit
+/// symbol definition. In all cases the [`Symbols::resolve`][]
+/// will canonicalize to a list of [`SymbolDef`][] structures.
+///
+/// Note that `Symbols` is not actually a [`DialectFunction`][]
+/// (nor a [`DialectValue`][]). It is only intended for use as the
+/// value of a *function argument* -- it doesn't have a canonical
+/// function format.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(untagged)]
 pub enum Symbols {
     Name(String),
     Array(Vec<Symbols>),
     SymbolDef(SymbolDef),
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct SymbolDef {
-    /// The symbol name (e.g., "User", "validateToken")
-    pub name: String,
-    /// Location where this symbol is defined
-    #[serde(rename = "definedAt")]
-    pub defined_at: FileLocation,
-}
-
-impl<U: Send> DialectValue<U> for SymbolDef {}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct SymbolRef {
-    #[serde(flatten)]
-    pub definition: SymbolDef,
-
-    /// Location where this symbol is defined
-    #[serde(rename = "referencedAt")]
-    pub referenced_at: FileLocation,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct FileLocation {
-    /// File path relative to workspace root
-    pub file: String,
-    /// Line number (1-based)
-    pub line: u32,
-    /// Column number (0-based)
-    pub column: u32,
-    /// Surrounding code context for display
-    pub context: String,
-}
-
-// IPC client trait that the userdata must implement
-pub trait IpcClient: Send {
-    async fn resolve_symbol_by_name(&mut self, name: &str) -> anyhow::Result<Vec<SymbolDef>>;
-    async fn find_all_references(
-        &mut self,
-        symbol: &SymbolDef,
-    ) -> anyhow::Result<Vec<FileLocation>>;
 }
 
 // Symbol implementation
@@ -84,6 +58,71 @@ impl Symbols {
         })
     }
 }
+
+/// A [`DialectValue`][] representing the definition of a symbol.
+///
+/// Corresponds loosely to
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct SymbolDef {
+    /// The symbol name (e.g., "User", "validateToken")
+    pub name: String,
+
+    /// The "kind" of symbol (this is a string that the LLM hopefully knows how to interpret)
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub kind: Option<String>,
+
+    /// Location where this symbol is defined
+    #[serde(rename = "definedAt")]
+    pub defined_at: FileRange,
+}
+
+impl<U: Send> DialectValue<U> for SymbolDef {}
+
+/// A *reference* to a symbol -- includes the information about the symbol itself.
+/// A [`SymbolRef`][] can therefore be seen as a subtype of [`SymbolDef`][].
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct SymbolRef {
+    /// Symbol being referenced
+    #[serde(flatten)]
+    pub definition: SymbolDef,
+
+    /// Location where this symbol is referenced from
+    #[serde(rename = "referencedAt")]
+    pub referenced_at: FileRange,
+}
+
+impl<U: Send> DialectValue<U> for SymbolRef {}
+
+/// Represents a range of bytes in a file (or URI, etc).
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct FileRange {
+    /// File path, relative to workspace root
+    pub path: String,
+
+    /// Start of range (always <= end)
+    pub start: FileLocation,
+
+    /// End of range (always >= start)
+    pub end: FileLocation,
+
+    /// Enclosing text (optional)
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub content: Option<String>,
+}
+
+impl<U: Send> DialectValue<U> for FileRange {}
+
+/// A line/colum index.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct FileLocation {
+    /// Line number (1-based)
+    pub line: u32,
+
+    /// Column number (1-based)
+    pub column: u32,
+}
+
+impl<U: Send> DialectValue<U> for FileLocation {}
 
 // IDE Functions
 #[derive(Deserialize)]

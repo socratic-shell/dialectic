@@ -3,14 +3,14 @@ use std::collections::BTreeMap;
 
 use crate::{
     dialect::{DialectFunction, DialectInterpreter},
-    ide::{FileLocation, FindDefinitions, FindReferences, IpcClient, SymbolDef},
+    ide::{FileLocation, FileRange, FindDefinitions, FindReferences, IpcClient, SymbolDef},
 };
 use serde::Deserialize;
 
 // Mock IPC client for testing
 struct MockIpcClient {
     symbols: BTreeMap<String, Vec<SymbolDef>>,
-    references: BTreeMap<String, Vec<FileLocation>>,
+    references: BTreeMap<String, Vec<FileRange>>,
 }
 
 impl MockIpcClient {
@@ -23,11 +23,12 @@ impl MockIpcClient {
             "User".to_string(),
             vec![SymbolDef {
                 name: "User".to_string(),
-                defined_at: FileLocation {
-                    file: "src/models.rs".to_string(),
-                    line: 10,
-                    column: 0,
-                    context: "struct User {".to_string(),
+                kind: Some("struct".to_string()),
+                defined_at: FileRange {
+                    path: "src/models.rs".to_string(),
+                    start: FileLocation { line: 10, column: 0 },
+                    end: FileLocation { line: 10, column: 4 },
+                    content: Some("struct User {".to_string()),
                 },
             }],
         );
@@ -37,21 +38,23 @@ impl MockIpcClient {
             vec![
                 SymbolDef {
                     name: "validateToken".to_string(),
-                    defined_at: FileLocation {
-                        file: "src/auth.rs".to_string(),
-                        line: 42,
-                        column: 0,
-                        context: "fn validateToken(token: &str) -> bool {".to_string(),
+                    kind: Some("function".to_string()),
+                    defined_at: FileRange {
+                        path: "src/auth.rs".to_string(),
+                        start: FileLocation { line: 42, column: 0 },
+                        end: FileLocation { line: 42, column: 13 },
+                        content: Some("fn validateToken(token: &str) -> bool {".to_string()),
                     },
                 },
                 SymbolDef {
                     name: "validateToken".to_string(),
-                    defined_at: FileLocation {
-                        file: "src/utils.rs".to_string(),
-                        line: 15,
-                        column: 0,
-                        context: "pub fn validateToken(token: String) -> Result<(), Error> {"
-                            .to_string(),
+                    kind: Some("function".to_string()),
+                    defined_at: FileRange {
+                        path: "src/utils.rs".to_string(),
+                        start: FileLocation { line: 15, column: 0 },
+                        end: FileLocation { line: 15, column: 13 },
+                        content: Some("pub fn validateToken(token: String) -> Result<(), Error> {"
+                            .to_string()),
                     },
                 },
             ],
@@ -60,17 +63,17 @@ impl MockIpcClient {
         references.insert(
             "User".to_string(),
             vec![
-                FileLocation {
-                    file: "src/auth.rs".to_string(),
-                    line: 5,
-                    column: 12,
-                    context: "use models::User;".to_string(),
+                FileRange {
+                    path: "src/auth.rs".to_string(),
+                    start: FileLocation { line: 5, column: 12 },
+                    end: FileLocation { line: 5, column: 16 },
+                    content: Some("use models::User;".to_string()),
                 },
-                FileLocation {
-                    file: "src/handlers.rs".to_string(),
-                    line: 23,
-                    column: 8,
-                    context: "fn create_user() -> User {".to_string(),
+                FileRange {
+                    path: "src/handlers.rs".to_string(),
+                    start: FileLocation { line: 23, column: 8 },
+                    end: FileLocation { line: 23, column: 12 },
+                    content: Some("fn create_user() -> User {".to_string()),
                 },
             ],
         );
@@ -90,7 +93,7 @@ impl IpcClient for MockIpcClient {
     async fn find_all_references(
         &mut self,
         symbol: &SymbolDef,
-    ) -> anyhow::Result<Vec<FileLocation>> {
+    ) -> anyhow::Result<Vec<FileRange>> {
         Ok(self
             .references
             .get(&symbol.name)
@@ -114,8 +117,8 @@ async fn test_find_definition_with_string_symbol() {
 
     assert_eq!(definitions.len(), 1);
     assert_eq!(definitions[0].name, "User");
-    assert_eq!(definitions[0].defined_at.file, "src/models.rs");
-    assert_eq!(definitions[0].defined_at.line, 10);
+    assert_eq!(definitions[0].defined_at.path, "src/models.rs");
+    assert_eq!(definitions[0].defined_at.start.line, 10);
 }
 
 #[tokio::test]
@@ -267,11 +270,12 @@ async fn test_find_all_references_ipc() {
 
     let test_symbol = crate::ide::SymbolDef {
         name: "TestSymbol".to_string(),
-        defined_at: crate::ide::FileLocation {
-            file: "test.rs".to_string(),
-            line: 10,
-            column: 5,
-            context: "fn test_function() {".to_string(),
+        kind: Some("function".to_string()),
+        defined_at: crate::ide::FileRange {
+            path: "test.rs".to_string(),
+            start: crate::ide::FileLocation { line: 10, column: 5 },
+            end: crate::ide::FileLocation { line: 10, column: 18 },
+            content: Some("fn test_function() {".to_string()),
         },
     };
 
