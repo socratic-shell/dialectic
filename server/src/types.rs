@@ -115,15 +115,13 @@ pub struct GetSelectionResult {
 /// Payload for Polo discovery messages (MCP server announces presence)
 #[derive(Debug, Clone, Deserialize, Serialize)]
 pub struct PoloPayload {
-    /// Shell PID of the terminal where this MCP server is running
-    pub terminal_shell_pid: u32,
+    // Shell PID is now at top level in IPCMessage
 }
 
 /// Payload for Goodbye discovery messages (MCP server announces departure)
 #[derive(Debug, Clone, Deserialize, Serialize)]
 pub struct GoodbyePayload {
-    /// Shell PID of the terminal where this MCP server was running
-    pub terminal_shell_pid: u32,
+    // Shell PID is now at top level in IPCMessage
 }
 
 /// Payload for ResolveSymbolByName messages
@@ -156,6 +154,10 @@ pub struct ResponsePayload {
 /// IPC message sent from MCP server to VSCode extension
 #[derive(Debug, Clone, Deserialize, Serialize)]
 pub struct IPCMessage {
+    /// Shell PID for routing to correct VSCode window
+    #[serde(rename = "shellPid")]
+    pub shell_pid: u32,
+
     /// Message type identifier
     #[serde(rename = "type")]
     pub message_type: IPCMessageType,

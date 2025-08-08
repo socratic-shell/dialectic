@@ -145,15 +145,16 @@ impl IPCCommunicator {
         // Ensure connection is established before proceeding
         IPCCommunicatorInner::ensure_connection(Arc::clone(&self.inner)).await?;
 
-        // Create message payload with shell PID added for multi-window filtering
-        let mut payload = serde_json::to_value(params)?;
-        {
+        // Create message payload
+        let payload = serde_json::to_value(params)?;
+        
+        let shell_pid = {
             let inner = self.inner.lock().await;
-            payload["terminal_shell_pid"] =
-                serde_json::Value::Number(serde_json::Number::from(inner.terminal_shell_pid));
-        }
+            inner.terminal_shell_pid
+        };
 
         let message = IPCMessage {
+            shell_pid,
             message_type: IPCMessageType::PresentReview,
             payload,
             id: Uuid::new_v4().to_string(),
@@ -203,16 +204,15 @@ impl IPCCommunicator {
         IPCCommunicatorInner::ensure_connection(Arc::clone(&self.inner)).await?;
 
         // Create message payload with shell PID for multi-window filtering
-        let payload = {
+        let shell_pid = {
             let inner = self.inner.lock().await;
-            serde_json::json!({
-                "terminal_shell_pid": inner.terminal_shell_pid
-            })
+            inner.terminal_shell_pid
         };
 
         let message = IPCMessage {
+            shell_pid,
             message_type: IPCMessageType::GetSelection,
-            payload,
+            payload: serde_json::json!({}),
             id: Uuid::new_v4().to_string(),
         };
 
@@ -256,7 +256,7 @@ impl IPCCommunicator {
         let log_params = LogParams { level, message };
 
         // Create message payload with shell PID added for multi-window filtering
-        let mut payload = match serde_json::to_value(log_params) {
+        let payload = match serde_json::to_value(log_params) {
             Ok(payload) => payload,
             Err(e) => {
                 error!("Failed to serialize log message: {}", e);
@@ -264,14 +264,13 @@ impl IPCCommunicator {
             }
         };
 
-        // Add shell PID for filtering
-        {
+        let shell_pid = {
             let inner = self.inner.lock().await;
-            payload["terminal_shell_pid"] =
-                serde_json::Value::Number(serde_json::Number::from(inner.terminal_shell_pid));
-        }
+            inner.terminal_shell_pid
+        };
 
         let ipc_message = IPCMessage {
+            shell_pid,
             message_type: IPCMessageType::Log,
             payload,
             id: Uuid::new_v4().to_string(),
@@ -295,6 +294,7 @@ impl IPCCommunicator {
         }
 
         let message = IPCMessage {
+            shell_pid: 0, // Marco messages are broadcasts, no specific shell PID
             message_type: IPCMessageType::Marco,
             payload: serde_json::json!({}),
             id: Uuid::new_v4().to_string(),
@@ -314,8 +314,9 @@ impl IPCCommunicator {
             return Ok(());
         }
 
-        let payload = PoloPayload { terminal_shell_pid };
+        let payload = PoloPayload {};
         let message = IPCMessage {
+            shell_pid: terminal_shell_pid,
             message_type: IPCMessageType::Polo,
             payload: serde_json::to_value(payload)?,
             id: Uuid::new_v4().to_string(),
@@ -338,8 +339,9 @@ impl IPCCommunicator {
             return Ok(());
         }
 
-        let payload = GoodbyePayload { terminal_shell_pid };
+        let payload = GoodbyePayload {};
         let message = IPCMessage {
+            shell_pid: terminal_shell_pid,
             message_type: IPCMessageType::Goodbye,
             payload: serde_json::to_value(payload)?,
             id: Uuid::new_v4().to_string(),
@@ -740,7 +742,13 @@ impl crate::ide::IpcClient for IPCCommunicator {
             name: name.to_string(),
         };
 
+        let shell_pid = {
+            let inner = self.inner.lock().await;
+            inner.terminal_shell_pid
+        };
+
         let message = IPCMessage {
+            shell_pid,
             message_type: IPCMessageType::ResolveSymbolByName,
             payload: serde_json::to_value(payload)?,
             id: Uuid::new_v4().to_string(),
@@ -780,7 +788,13 @@ impl crate::ide::IpcClient for IPCCommunicator {
             symbol: symbol.clone(),
         };
 
+        let shell_pid = {
+            let inner = self.inner.lock().await;
+            inner.terminal_shell_pid
+        };
+
         let message = IPCMessage {
+            shell_pid,
             message_type: IPCMessageType::FindAllReferences,
             payload: serde_json::to_value(payload)?,
             id: Uuid::new_v4().to_string(),
@@ -895,6 +909,7 @@ mod test {
 
         // Create an IPC message like the server would
         let message = IPCMessage {
+            shell_pid: 12345,
             message_type: IPCMessageType::PresentReview,
             payload: serde_json::to_value(&params).unwrap(),
             id: Uuid::new_v4().to_string(),
