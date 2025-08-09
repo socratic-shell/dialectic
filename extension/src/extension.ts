@@ -521,9 +521,13 @@ class DaemonClient implements vscode.Disposable {
             }
 
             // Find all references using LSP
+            this.outputChannel.appendLine(`workspaceFolder.uri: ${workspaceFolder.uri}`);
+            this.outputChannel.appendLine(`symbol.definedAt.path: ${symbol.definedAt.path}`);
             const locations = await vscode.commands.executeCommand<vscode.Location[]>(
                 'vscode.executeReferenceProvider',
-                vscode.Uri.joinPath(workspaceFolder.uri, symbol.definedAt.path),
+                vscode.Uri.file(path.isAbsolute(symbol.definedAt.path)
+                    ? symbol.definedAt.path
+                    : path.resolve(workspaceFolder.uri.fsPath, symbol.definedAt.path)),
                 new vscode.Position(symbol.definedAt.start.line - 1, symbol.definedAt.start.column - 1)
             );
 
