@@ -9,6 +9,7 @@ use serde::{Deserialize, Serialize};
 /// Parameters for the present-review MCP tool
 ///
 /// Matches PresentReviewParams from TypeScript implementation
+// ANCHOR: present_review_params
 #[derive(Debug, Clone, Deserialize, Serialize, JsonSchema)]
 pub struct PresentReviewParams {
     /// Markdown content of the review to display
@@ -24,6 +25,7 @@ pub struct PresentReviewParams {
     #[serde(rename = "baseUri")]
     pub base_uri: String,
 }
+// ANCHOR_END: present_review_params
 
 /// Review display modes
 #[derive(Debug, Clone, Deserialize, Serialize, JsonSchema)]

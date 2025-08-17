@@ -12,4 +12,4 @@ When the MCP server starts, it walks up the process tree to identify the PID for
 
 ## Tools offered to clients
 
-See the [Tool Interface](./tool-interface.md) section.
+See the [Tool Interface](./mcp-tool-interface.md) section.

@@ -21,11 +21,13 @@ use crate::types::{LogLevel, PresentReviewParams};
 use serde::{Deserialize, Serialize};
 
 /// Parameters for the ide_operation tool
+// ANCHOR: ide_operation_params
 #[derive(Debug, Deserialize, Serialize, schemars::JsonSchema)]
 struct IdeOperationParams {
     /// JsonScript program to execute
     program: serde_json::Value,
 }
+// ANCHOR_END: ide_operation_params
 
 /// Dialectic MCP Server
 ///
@@ -194,12 +196,14 @@ impl DialecticServer {
     ///
     /// Works with source files, review panels, and any other text editor.
     /// Returns null if no text is selected or no active editor is found.
+    // ANCHOR: get_selection_tool
     #[tool(
         description = "Get the currently selected text from any active editor in VSCode. \
                        Works with source files, review panels, and any other text editor. \
                        Returns null if no text is selected or no active editor is found."
     )]
     async fn get_selection(&self) -> Result<CallToolResult, McpError> {
+        // ANCHOR_END: get_selection_tool
         // Log the tool call via IPC (also logs locally)
         self.ipc
             .send_log(
