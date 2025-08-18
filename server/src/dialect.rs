@@ -158,13 +158,37 @@ impl<U: Send> DerefMut for DialectInterpreter<U> {
     }
 }
 
-/// A Dialect *function* is typically implemented on a struct like
+/// Implemented by Dialect functions. This is meant to be implemented
+/// on a struct that also implements `Deserialize` and which
+/// defines the arguments to the function:
 ///
 /// ```rust,ignore
+/// #[derive(Deserialize)]
 /// pub struct TheFunction {
 ///    name: String
 /// }
 /// ```
+///
+/// The struct name becomes the function name
+/// (note: Dialect is case-insensitive when it comes to function names).
+/// The argument names are defined by the struct.
+///
+/// To invoke your function, the Dialect interpreter will
+///
+/// 1. determine a JSON object for your arguments
+/// 2. deserialize that into the `Self` type to create an instance of `Self`
+/// 3. invoke [`DialectFunction::execute`][].
+///
+/// # Default field names
+///
+/// Normally, functions must be invoked with explicit arguments,
+/// like `{"lower": {"text": "Foo"}}`, and invoking them with
+/// plain values like `{"lower": "Foo"}` is an error.
+/// If you provide a `DEFAULT_FIELD_NAME` (e.g., `Some("text")`),
+/// then a non-object argument is converted into
+/// an object with a single field with the given name
+/// (e.g., `{"text": "Foo"}`).
+// ANCHOR: dialect_function_trait
 pub trait DialectFunction<U: Send>: DeserializeOwned + Send {
     type Output: Serialize + Send;
 
@@ -173,8 +197,12 @@ pub trait DialectFunction<U: Send>: DeserializeOwned + Send {
     async fn execute(self, interpreter: &mut DialectInterpreter<U>)
     -> anyhow::Result<Self::Output>;
 }
+// ANCHOR_END: dialect_function_trait
 
+/// Shorthand for structs that evaluate to an instante of themselves.
+// ANCHOR: dialect_value_trait
 pub trait DialectValue<U: Send>: Send + DeserializeOwned + Serialize {}
+// ANCHOR_END: dialect_value_trait
 
 impl<V, U> DialectFunction<U> for V
 where

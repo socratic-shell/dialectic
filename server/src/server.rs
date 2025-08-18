@@ -24,7 +24,7 @@ use serde::{Deserialize, Serialize};
 // ANCHOR: ide_operation_params
 #[derive(Debug, Deserialize, Serialize, schemars::JsonSchema)]
 struct IdeOperationParams {
-    /// JsonScript program to execute
+    /// Dialect program to execute
     program: serde_json::Value,
 }
 // ANCHOR_END: ide_operation_params
@@ -66,7 +66,7 @@ impl DialecticServer {
         ipc.send_polo(shell_pid).await?;
         info!("Sent Polo discovery message with shell PID: {}", shell_pid);
 
-        // Initialize JsonScript interpreter with IDE functions
+        // Initialize Dialect interpreter with IDE functions
         let mut interpreter = DialectInterpreter::new(ipc.clone());
         interpreter.add_function::<crate::ide::FindDefinitions>();
         interpreter.add_function::<crate::ide::FindReferences>();
@@ -94,7 +94,7 @@ impl DialecticServer {
         let ipc = IPCCommunicator::new_test();
         info!("DialecticServer initialized in test mode");
 
-        // Initialize JsonScript interpreter with IDE functions for test mode
+        // Initialize Dialect interpreter with IDE functions for test mode
         let mut interpreter = DialectInterpreter::new(ipc.clone());
         interpreter.add_function::<crate::ide::FindDefinitions>();
         interpreter.add_function::<crate::ide::FindReferences>();
@@ -255,7 +255,7 @@ impl DialecticServer {
         Ok(CallToolResult::success(vec![json_content]))
     }
 
-    /// Execute IDE operations using JsonScript mini-language
+    /// Execute IDE operations using Dialect mini-language
     ///
     /// Provides access to VSCode's Language Server Protocol (LSP) capabilities
     /// through a composable function system for symbol resolution and reference finding.
@@ -285,11 +285,11 @@ impl DialecticServer {
             )
             .await;
 
-        // Execute the JsonScript program using spawn_blocking to handle non-Send future
+        // Execute the Dialect program using spawn_blocking to handle non-Send future
         self.ipc
             .send_log(
                 LogLevel::Info,
-                "Executing JsonScript program...".to_string(),
+                "Executing Dialect program...".to_string(),
             )
             .await;
 
@@ -311,7 +311,7 @@ impl DialecticServer {
         })?
         .map_err(|e| {
             McpError::internal_error(
-                "JsonScript execution failed",
+                "Dialect execution failed",
                 Some(serde_json::json!({
                     "error": e.to_string()
                 })),
@@ -321,7 +321,7 @@ impl DialecticServer {
         self.ipc
             .send_log(
                 LogLevel::Info,
-                format!("JsonScript execution completed successfully"),
+                format!("Dialect execution completed successfully"),
             )
             .await;
 
@@ -330,7 +330,7 @@ impl DialecticServer {
             McpError::internal_error(
                 "Serialization failed",
                 Some(serde_json::json!({
-                    "error": format!("Failed to serialize JsonScript result: {}", e)
+                    "error": format!("Failed to serialize Dialect result: {}", e)
                 })),
             )
         })?;
@@ -353,7 +353,7 @@ impl ServerHandler for DialecticServer {
                 "This server provides tools for AI assistants to display code reviews and perform IDE operations in VSCode. \
                 Use 'present_review' to display structured markdown reviews with file references, \
                 'get_selection' to retrieve currently selected text from the active editor, \
-                and 'ide_operation' to execute IDE operations like finding symbol definitions and references using JsonScript."
+                and 'ide_operation' to execute IDE operations like finding symbol definitions and references using Dialect."
                     .to_string(),
             ),
         }
