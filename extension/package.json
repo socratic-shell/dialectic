@@ -37,7 +37,24 @@
         "title": "Log PIDs",
         "category": "Dialectic"
       }
-    ]
+    ],
+    "viewsContainers": {
+      "activitybar": [
+        {
+          "id": "dialectic",
+          "title": "Dialectic",
+          "icon": "$(git-pull-request)"
+        }
+      ]
+    },
+    "views": {
+      "dialectic": [
+        {
+          "id": "dialectic.syntheticPR",
+          "name": "Pull Request"
+        }
+      ]
+    }
   },
   "scripts": {
     "vscode:prepublish": "npm run webpack",

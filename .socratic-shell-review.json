@@ -1,0 +1,855 @@
+{
+  "review_id": "a20db720-9e5a-45be-b6a0-d4356b30f734",
+  "title": "Fix file path resolution for tree view navigation",
+  "description": "Resolve relative file paths to absolute paths using workspace folder to fix file opening errors",
+  "commit_range": "HEAD",
+  "status": "Pending",
+  "files_changed": [
+    {
+      "path": ".socratic-shell-review.json",
+      "status": "Modified",
+      "additions": 0,
+      "deletions": 0,
+      "hunks": []
+    },
+    {
+      "path": "extension/package.json",
+      "status": "Modified",
+      "additions": 18,
+      "deletions": 1,
+      "hunks": [
+        {
+          "header": "@@ -37,7 +37,24 @@",
+          "old_start": 37,
+          "old_lines": 7,
+          "new_start": 37,
+          "new_lines": 24,
+          "lines": [
+            {
+              "line_type": "Context",
+              "content": "        \"title\": \"Log PIDs\",",
+              "old_line_number": 37,
+              "new_line_number": 37
+            },
+            {
+              "line_type": "Context",
+              "content": "        \"category\": \"Dialectic\"",
+              "old_line_number": 38,
+              "new_line_number": 38
+            },
+            {
+              "line_type": "Context",
+              "content": "      }",
+              "old_line_number": 39,
+              "new_line_number": 39
+            },
+            {
+              "line_type": "Removed",
+              "content": "    ]",
+              "old_line_number": 40,
+              "new_line_number": null
+            },
+            {
+              "line_type": "Added",
+              "content": "    ],",
+              "old_line_number": null,
+              "new_line_number": 40
+            },
+            {
+              "line_type": "Added",
+              "content": "    \"viewsContainers\": {",
+              "old_line_number": null,
+              "new_line_number": 41
+            },
+            {
+              "line_type": "Added",
+              "content": "      \"activitybar\": [",
+              "old_line_number": null,
+              "new_line_number": 42
+            },
+            {
+              "line_type": "Added",
+              "content": "        {",
+              "old_line_number": null,
+              "new_line_number": 43
+            },
+            {
+              "line_type": "Added",
+              "content": "          \"id\": \"dialectic\",",
+              "old_line_number": null,
+              "new_line_number": 44
+            },
+            {
+              "line_type": "Added",
+              "content": "          \"title\": \"Dialectic\",",
+              "old_line_number": null,
+              "new_line_number": 45
+            },
+            {
+              "line_type": "Added",
+              "content": "          \"icon\": \"$(git-pull-request)\"",
+              "old_line_number": null,
+              "new_line_number": 46
+            },
+            {
+              "line_type": "Added",
+              "content": "        }",
+              "old_line_number": null,
+              "new_line_number": 47
+            },
+            {
+              "line_type": "Added",
+              "content": "      ]",
+              "old_line_number": null,
+              "new_line_number": 48
+            },
+            {
+              "line_type": "Added",
+              "content": "    },",
+              "old_line_number": null,
+              "new_line_number": 49
+            },
+            {
+              "line_type": "Added",
+              "content": "    \"views\": {",
+              "old_line_number": null,
+              "new_line_number": 50
+            },
+            {
+              "line_type": "Added",
+              "content": "      \"dialectic\": [",
+              "old_line_number": null,
+              "new_line_number": 51
+            },
+            {
+              "line_type": "Added",
+              "content": "        {",
+              "old_line_number": null,
+              "new_line_number": 52
+            },
+            {
+              "line_type": "Added",
+              "content": "          \"id\": \"dialectic.syntheticPR\",",
+              "old_line_number": null,
+              "new_line_number": 53
+            },
+            {
+              "line_type": "Added",
+              "content": "          \"name\": \"Pull Request\"",
+              "old_line_number": null,
+              "new_line_number": 54
+            },
+            {
+              "line_type": "Added",
+              "content": "        }",
+              "old_line_number": null,
+              "new_line_number": 55
+            },
+            {
+              "line_type": "Added",
+              "content": "      ]",
+              "old_line_number": null,
+              "new_line_number": 56
+            },
+            {
+              "line_type": "Added",
+              "content": "    }",
+              "old_line_number": null,
+              "new_line_number": 57
+            },
+            {
+              "line_type": "Context",
+              "content": "  },",
+              "old_line_number": 41,
+              "new_line_number": 58
+            },
+            {
+              "line_type": "Context",
+              "content": "  \"scripts\": {",
+              "old_line_number": 42,
+              "new_line_number": 59
+            },
+            {
+              "line_type": "Context",
+              "content": "    \"vscode:prepublish\": \"npm run webpack\",",
+              "old_line_number": 43,
+              "new_line_number": 60
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "path": "extension/src/syntheticPRProvider.ts",
+      "status": "Modified",
+      "additions": 28,
+      "deletions": 10,
+      "hunks": [
+        {
+          "header": "@@ -1,4 +1,5 @@",
+          "old_start": 1,
+          "old_lines": 4,
+          "new_start": 1,
+          "new_lines": 5,
+          "lines": [
+            {
+              "line_type": "Context",
+              "content": "import * as vscode from 'vscode';",
+              "old_line_number": 1,
+              "new_line_number": 1
+            },
+            {
+              "line_type": "Added",
+              "content": "import { SyntheticPRTreeProvider } from './syntheticPRTreeProvider';",
+              "old_line_number": null,
+              "new_line_number": 2
+            },
+            {
+              "line_type": "Context",
+              "content": "",
+              "old_line_number": 2,
+              "new_line_number": 3
+            },
+            {
+              "line_type": "Context",
+              "content": "interface SyntheticPRData {",
+              "old_line_number": 3,
+              "new_line_number": 4
+            },
+            {
+              "line_type": "Context",
+              "content": "    review_id: string;",
+              "old_line_number": 4,
+              "new_line_number": 5
+            }
+          ]
+        },
+        {
+          "header": "@@ -43,34 +44,50 @@ interface CommentThread {",
+          "old_start": 43,
+          "old_lines": 34,
+          "new_start": 44,
+          "new_lines": 50,
+          "lines": [
+            {
+              "line_type": "Context",
+              "content": "/**",
+              "old_line_number": 43,
+              "new_line_number": 44
+            },
+            {
+              "line_type": "Context",
+              "content": " * Manages synthetic pull request UI components",
+              "old_line_number": 44,
+              "new_line_number": 45
+            },
+            {
+              "line_type": "Context",
+              "content": " *",
+              "old_line_number": 45,
+              "new_line_number": 46
+            },
+            {
+              "line_type": "Removed",
+              "content": " * Creates CommentController for displaying AI insight comments",
+              "old_line_number": 46,
+              "new_line_number": null
+            },
+            {
+              "line_type": "Removed",
+              "content": " * and provides basic PR navigation functionality.",
+              "old_line_number": 47,
+              "new_line_number": null
+            },
+            {
+              "line_type": "Added",
+              "content": " * Creates unified PR interface using TreeDataProvider for navigation",
+              "old_line_number": null,
+              "new_line_number": 47
+            },
+            {
+              "line_type": "Added",
+              "content": " * and CommentController for in-line code comments.",
+              "old_line_number": null,
+              "new_line_number": 48
+            },
+            {
+              "line_type": "Context",
+              "content": " */",
+              "old_line_number": 48,
+              "new_line_number": 49
+            },
+            {
+              "line_type": "Context",
+              "content": "export class SyntheticPRProvider implements vscode.Disposable {",
+              "old_line_number": 49,
+              "new_line_number": 50
+            },
+            {
+              "line_type": "Context",
+              "content": "    private commentController: vscode.CommentController;",
+              "old_line_number": 50,
+              "new_line_number": 51
+            },
+            {
+              "line_type": "Added",
+              "content": "    private treeProvider: SyntheticPRTreeProvider;",
+              "old_line_number": null,
+              "new_line_number": 52
+            },
+            {
+              "line_type": "Context",
+              "content": "    private currentPR: SyntheticPRData | null = null;",
+              "old_line_number": 51,
+              "new_line_number": 53
+            },
+            {
+              "line_type": "Context",
+              "content": "",
+              "old_line_number": 52,
+              "new_line_number": 54
+            },
+            {
+              "line_type": "Context",
+              "content": "    constructor(private context: vscode.ExtensionContext) {",
+              "old_line_number": 53,
+              "new_line_number": 55
+            },
+            {
+              "line_type": "Removed",
+              "content": "        // 💡 Create comment controller for PR comments - this enables VSCode's native comment UI",
+              "old_line_number": 54,
+              "new_line_number": null
+            },
+            {
+              "line_type": "Added",
+              "content": "        // Create comment controller for in-line comments",
+              "old_line_number": null,
+              "new_line_number": 56
+            },
+            {
+              "line_type": "Context",
+              "content": "        this.commentController = vscode.comments.createCommentController(",
+              "old_line_number": 55,
+              "new_line_number": 57
+            },
+            {
+              "line_type": "Context",
+              "content": "            'dialectic-synthetic-pr',",
+              "old_line_number": 56,
+              "new_line_number": 58
+            },
+            {
+              "line_type": "Context",
+              "content": "            'Synthetic PR Comments'",
+              "old_line_number": 57,
+              "new_line_number": 59
+            },
+            {
+              "line_type": "Context",
+              "content": "        );",
+              "old_line_number": 58,
+              "new_line_number": 60
+            },
+            {
+              "line_type": "Context",
+              "content": "",
+              "old_line_number": 59,
+              "new_line_number": 61
+            },
+            {
+              "line_type": "Removed",
+              "content": "        // ❓ Should we allow users to add their own comments to AI-generated PRs?",
+              "old_line_number": 60,
+              "new_line_number": null
+            },
+            {
+              "line_type": "Context",
+              "content": "        this.commentController.commentingRangeProvider = {",
+              "old_line_number": 61,
+              "new_line_number": 62
+            },
+            {
+              "line_type": "Context",
+              "content": "            provideCommentingRanges: () => []  // Read-only for now",
+              "old_line_number": 62,
+              "new_line_number": 63
+            },
+            {
+              "line_type": "Context",
+              "content": "        };",
+              "old_line_number": 63,
+              "new_line_number": 64
+            },
+            {
+              "line_type": "Context",
+              "content": "",
+              "old_line_number": 64,
+              "new_line_number": 65
+            },
+            {
+              "line_type": "Removed",
+              "content": "        context.subscriptions.push(this.commentController);",
+              "old_line_number": 65,
+              "new_line_number": null
+            },
+            {
+              "line_type": "Added",
+              "content": "        // Create tree provider for PR navigation",
+              "old_line_number": null,
+              "new_line_number": 66
+            },
+            {
+              "line_type": "Added",
+              "content": "        console.log('[SYNTHETIC PR] Creating tree provider');",
+              "old_line_number": null,
+              "new_line_number": 67
+            },
+            {
+              "line_type": "Added",
+              "content": "        this.treeProvider = new SyntheticPRTreeProvider();",
+              "old_line_number": null,
+              "new_line_number": 68
+            },
+            {
+              "line_type": "Added",
+              "content": "",
+              "old_line_number": null,
+              "new_line_number": 69
+            },
+            {
+              "line_type": "Added",
+              "content": "        // Register tree view",
+              "old_line_number": null,
+              "new_line_number": 70
+            },
+            {
+              "line_type": "Added",
+              "content": "        console.log('[SYNTHETIC PR] Registering tree view with ID: dialectic.syntheticPR');",
+              "old_line_number": null,
+              "new_line_number": 71
+            },
+            {
+              "line_type": "Added",
+              "content": "        const treeView = vscode.window.createTreeView('dialectic.syntheticPR', {",
+              "old_line_number": null,
+              "new_line_number": 72
+            },
+            {
+              "line_type": "Added",
+              "content": "            treeDataProvider: this.treeProvider",
+              "old_line_number": null,
+              "new_line_number": 73
+            },
+            {
+              "line_type": "Added",
+              "content": "        });",
+              "old_line_number": null,
+              "new_line_number": 74
+            },
+            {
+              "line_type": "Added",
+              "content": "        console.log('[SYNTHETIC PR] Tree view created successfully:', !!treeView);",
+              "old_line_number": null,
+              "new_line_number": 75
+            },
+            {
+              "line_type": "Added",
+              "content": "",
+              "old_line_number": null,
+              "new_line_number": 76
+            },
+            {
+              "line_type": "Added",
+              "content": "        context.subscriptions.push(this.commentController, treeView);",
+              "old_line_number": null,
+              "new_line_number": 77
+            },
+            {
+              "line_type": "Context",
+              "content": "    }",
+              "old_line_number": 66,
+              "new_line_number": 78
+            },
+            {
+              "line_type": "Context",
+              "content": "",
+              "old_line_number": 67,
+              "new_line_number": 79
+            },
+            {
+              "line_type": "Context",
+              "content": "    /**",
+              "old_line_number": 68,
+              "new_line_number": 80
+            },
+            {
+              "line_type": "Context",
+              "content": "     * Create a new synthetic PR from MCP server data",
+              "old_line_number": 69,
+              "new_line_number": 81
+            },
+            {
+              "line_type": "Context",
+              "content": "     */",
+              "old_line_number": 70,
+              "new_line_number": 82
+            },
+            {
+              "line_type": "Context",
+              "content": "    async createSyntheticPR(prData: SyntheticPRData): Promise<void> {",
+              "old_line_number": 71,
+              "new_line_number": 83
+            },
+            {
+              "line_type": "Added",
+              "content": "        console.log('[SYNTHETIC PR] createSyntheticPR called with:', prData.title);",
+              "old_line_number": null,
+              "new_line_number": 84
+            },
+            {
+              "line_type": "Context",
+              "content": "        this.currentPR = prData;",
+              "old_line_number": 72,
+              "new_line_number": 85
+            },
+            {
+              "line_type": "Context",
+              "content": "",
+              "old_line_number": 73,
+              "new_line_number": 86
+            },
+            {
+              "line_type": "Added",
+              "content": "        // Update tree view",
+              "old_line_number": null,
+              "new_line_number": 87
+            },
+            {
+              "line_type": "Added",
+              "content": "        console.log('[SYNTHETIC PR] Calling treeProvider.updatePR');",
+              "old_line_number": null,
+              "new_line_number": 88
+            },
+            {
+              "line_type": "Added",
+              "content": "        this.treeProvider.updatePR(prData);",
+              "old_line_number": null,
+              "new_line_number": 89
+            },
+            {
+              "line_type": "Added",
+              "content": "",
+              "old_line_number": null,
+              "new_line_number": 90
+            },
+            {
+              "line_type": "Context",
+              "content": "        // Clear existing comment threads",
+              "old_line_number": 74,
+              "new_line_number": 91
+            },
+            {
+              "line_type": "Context",
+              "content": "        this.commentController.dispose();",
+              "old_line_number": 75,
+              "new_line_number": 92
+            },
+            {
+              "line_type": "Context",
+              "content": "        this.commentController = vscode.comments.createCommentController(",
+              "old_line_number": 76,
+              "new_line_number": 93
+            }
+          ]
+        },
+        {
+          "header": "@@ -100,8 +117,10 @@ export class SyntheticPRProvider implements vscode.Disposable {",
+          "old_start": 100,
+          "old_lines": 8,
+          "new_start": 117,
+          "new_lines": 10,
+          "lines": [
+            {
+              "line_type": "Context",
+              "content": "",
+              "old_line_number": 100,
+              "new_line_number": 117
+            },
+            {
+              "line_type": "Context",
+              "content": "        this.currentPR = prData;",
+              "old_line_number": 101,
+              "new_line_number": 118
+            },
+            {
+              "line_type": "Context",
+              "content": "",
+              "old_line_number": 102,
+              "new_line_number": 119
+            },
+            {
+              "line_type": "Removed",
+              "content": "        // For now, just recreate all comment threads",
+              "old_line_number": 103,
+              "new_line_number": null
+            },
+            {
+              "line_type": "Removed",
+              "content": "        // TODO: Implement smart diff-based updates",
+              "old_line_number": 104,
+              "new_line_number": null
+            },
+            {
+              "line_type": "Added",
+              "content": "        // Update tree view",
+              "old_line_number": null,
+              "new_line_number": 120
+            },
+            {
+              "line_type": "Added",
+              "content": "        this.treeProvider.updatePR(prData);",
+              "old_line_number": null,
+              "new_line_number": 121
+            },
+            {
+              "line_type": "Added",
+              "content": "",
+              "old_line_number": null,
+              "new_line_number": 122
+            },
+            {
+              "line_type": "Added",
+              "content": "        // Recreate comment threads",
+              "old_line_number": null,
+              "new_line_number": 123
+            },
+            {
+              "line_type": "Context",
+              "content": "        this.commentController.dispose();",
+              "old_line_number": 105,
+              "new_line_number": 124
+            },
+            {
+              "line_type": "Context",
+              "content": "        this.commentController = vscode.comments.createCommentController(",
+              "old_line_number": 106,
+              "new_line_number": 125
+            },
+            {
+              "line_type": "Context",
+              "content": "            'dialectic-synthetic-pr',",
+              "old_line_number": 107,
+              "new_line_number": 126
+            }
+          ]
+        },
+        {
+          "header": "@@ -121,14 +140,13 @@ export class SyntheticPRProvider implements vscode.Disposable {",
+          "old_start": 121,
+          "old_lines": 14,
+          "new_start": 140,
+          "new_lines": 13,
+          "lines": [
+            {
+              "line_type": "Context",
+              "content": "            const uri = vscode.Uri.file(thread.file_path);",
+              "old_line_number": 121,
+              "new_line_number": 140
+            },
+            {
+              "line_type": "Context",
+              "content": "            const document = await vscode.workspace.openTextDocument(uri);",
+              "old_line_number": 122,
+              "new_line_number": 141
+            },
+            {
+              "line_type": "Context",
+              "content": "",
+              "old_line_number": 123,
+              "new_line_number": 142
+            },
+            {
+              "line_type": "Removed",
+              "content": "            // TODO: Add error handling for files that don't exist",
+              "old_line_number": 124,
+              "new_line_number": null
+            },
+            {
+              "line_type": "Context",
+              "content": "            // Convert 1-based line number to 0-based range",
+              "old_line_number": 125,
+              "new_line_number": 143
+            },
+            {
+              "line_type": "Context",
+              "content": "            const line = Math.max(0, thread.line_number - 1);",
+              "old_line_number": 126,
+              "new_line_number": 144
+            },
+            {
+              "line_type": "Context",
+              "content": "            const range = new vscode.Range(line, 0, line, document.lineAt(line).text.length);",
+              "old_line_number": 127,
+              "new_line_number": 145
+            },
+            {
+              "line_type": "Context",
+              "content": "",
+              "old_line_number": 128,
+              "new_line_number": 146
+            },
+            {
+              "line_type": "Context",
+              "content": "            const commentThread = this.commentController.createCommentThread(uri, range, []);",
+              "old_line_number": 129,
+              "new_line_number": 147
+            },
+            {
+              "line_type": "Context",
+              "content": "",
+              "old_line_number": 130,
+              "new_line_number": 148
+            },
+            {
+              "line_type": "Removed",
+              "content": "            // 💡 Create comment with AI insight - using MarkdownString for rich formatting",
+              "old_line_number": 131,
+              "new_line_number": null
+            },
+            {
+              "line_type": "Added",
+              "content": "            // Create comment with AI insight",
+              "old_line_number": null,
+              "new_line_number": 149
+            },
+            {
+              "line_type": "Context",
+              "content": "            const comment: vscode.Comment = {",
+              "old_line_number": 132,
+              "new_line_number": 150
+            },
+            {
+              "line_type": "Context",
+              "content": "                body: new vscode.MarkdownString(this.formatComment(thread)),",
+              "old_line_number": 133,
+              "new_line_number": 151
+            },
+            {
+              "line_type": "Context",
+              "content": "                mode: vscode.CommentMode.Preview,",
+              "old_line_number": 134,
+              "new_line_number": 152
+            }
+          ]
+        },
+        {
+          "header": "@@ -141,7 +159,6 @@ export class SyntheticPRProvider implements vscode.Disposable {",
+          "old_start": 141,
+          "old_lines": 7,
+          "new_start": 159,
+          "new_lines": 6,
+          "lines": [
+            {
+              "line_type": "Context",
+              "content": "            commentThread.label = `${this.getCommentIcon(thread.comment_type)} ${thread.comment_type.toUpperCase()}`;",
+              "old_line_number": 141,
+              "new_line_number": 159
+            },
+            {
+              "line_type": "Context",
+              "content": "",
+              "old_line_number": 142,
+              "new_line_number": 160
+            },
+            {
+              "line_type": "Context",
+              "content": "        } catch (error) {",
+              "old_line_number": 143,
+              "new_line_number": 161
+            },
+            {
+              "line_type": "Removed",
+              "content": "            // FIXME: Better error handling needed - should show user-friendly message",
+              "old_line_number": 144,
+              "new_line_number": null
+            },
+            {
+              "line_type": "Context",
+              "content": "            console.error(`Failed to create comment thread for ${thread.file_path}:${thread.line_number}`, error);",
+              "old_line_number": 145,
+              "new_line_number": 162
+            },
+            {
+              "line_type": "Context",
+              "content": "        }",
+              "old_line_number": 146,
+              "new_line_number": 163
+            },
+            {
+              "line_type": "Context",
+              "content": "    }",
+              "old_line_number": 147,
+              "new_line_number": 164
+            }
+          ]
+        },
+        {
+          "header": "@@ -171,5 +188,6 @@ export class SyntheticPRProvider implements vscode.Disposable {",
+          "old_start": 171,
+          "old_lines": 5,
+          "new_start": 188,
+          "new_lines": 6,
+          "lines": [
+            {
+              "line_type": "Context",
+              "content": "",
+              "old_line_number": 171,
+              "new_line_number": 188
+            },
+            {
+              "line_type": "Context",
+              "content": "    dispose(): void {",
+              "old_line_number": 172,
+              "new_line_number": 189
+            },
+            {
+              "line_type": "Context",
+              "content": "        this.commentController.dispose();",
+              "old_line_number": 173,
+              "new_line_number": 190
+            },
+            {
+              "line_type": "Added",
+              "content": "        this.treeProvider.clearPR();",
+              "old_line_number": null,
+              "new_line_number": 191
+            },
+            {
+              "line_type": "Context",
+              "content": "    }",
+              "old_line_number": 174,
+              "new_line_number": 192
+            },
+            {
+              "line_type": "Context",
+              "content": "}",
+              "old_line_number": 175,
+              "new_line_number": 193
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "path": "extension/src/syntheticPRTreeProvider.ts",
+      "status": "Modified",
+      "additions": 0,
+      "deletions": 0,
+      "hunks": []
+    }
+  ],
+  "comment_threads": [],
+  "created_at": "2025-08-20T21:08:07.499541Z",
+  "updated_at": "2025-08-20T21:08:07.499542Z"
+}

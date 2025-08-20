@@ -1,4 +1,5 @@
 import * as vscode from 'vscode';
+import { SyntheticPRTreeProvider } from './syntheticPRTreeProvider';
 
 interface SyntheticPRData {
     review_id: string;
@@ -43,33 +44,49 @@ interface CommentThread {
 /**
  * Manages synthetic pull request UI components
  * 
- * Creates CommentController for displaying AI insight comments
- * and provides basic PR navigation functionality.
+ * Creates unified PR interface using TreeDataProvider for navigation
+ * and CommentController for in-line code comments.
  */
 export class SyntheticPRProvider implements vscode.Disposable {
     private commentController: vscode.CommentController;
+    private treeProvider: SyntheticPRTreeProvider;
     private currentPR: SyntheticPRData | null = null;
 
     constructor(private context: vscode.ExtensionContext) {
-        // 💡 Create comment controller for PR comments - this enables VSCode's native comment UI
+        // Create comment controller for in-line comments
         this.commentController = vscode.comments.createCommentController(
             'dialectic-synthetic-pr',
             'Synthetic PR Comments'
         );
         
-        // ❓ Should we allow users to add their own comments to AI-generated PRs?
         this.commentController.commentingRangeProvider = {
             provideCommentingRanges: () => []  // Read-only for now
         };
 
-        context.subscriptions.push(this.commentController);
+        // Create tree provider for PR navigation
+        console.log('[SYNTHETIC PR] Creating tree provider');
+        this.treeProvider = new SyntheticPRTreeProvider();
+        
+        // Register tree view
+        console.log('[SYNTHETIC PR] Registering tree view with ID: dialectic.syntheticPR');
+        const treeView = vscode.window.createTreeView('dialectic.syntheticPR', {
+            treeDataProvider: this.treeProvider
+        });
+        console.log('[SYNTHETIC PR] Tree view created successfully:', !!treeView);
+
+        context.subscriptions.push(this.commentController, treeView);
     }
 
     /**
      * Create a new synthetic PR from MCP server data
      */
     async createSyntheticPR(prData: SyntheticPRData): Promise<void> {
+        console.log('[SYNTHETIC PR] createSyntheticPR called with:', prData.title);
         this.currentPR = prData;
+        
+        // Update tree view
+        console.log('[SYNTHETIC PR] Calling treeProvider.updatePR');
+        this.treeProvider.updatePR(prData);
         
         // Clear existing comment threads
         this.commentController.dispose();
@@ -100,8 +117,10 @@ export class SyntheticPRProvider implements vscode.Disposable {
 
         this.currentPR = prData;
         
-        // For now, just recreate all comment threads
-        // TODO: Implement smart diff-based updates
+        // Update tree view
+        this.treeProvider.updatePR(prData);
+        
+        // Recreate comment threads
         this.commentController.dispose();
         this.commentController = vscode.comments.createCommentController(
             'dialectic-synthetic-pr',
@@ -121,14 +140,13 @@ export class SyntheticPRProvider implements vscode.Disposable {
             const uri = vscode.Uri.file(thread.file_path);
             const document = await vscode.workspace.openTextDocument(uri);
             
-            // TODO: Add error handling for files that don't exist
             // Convert 1-based line number to 0-based range
             const line = Math.max(0, thread.line_number - 1);
             const range = new vscode.Range(line, 0, line, document.lineAt(line).text.length);
             
             const commentThread = this.commentController.createCommentThread(uri, range, []);
             
-            // 💡 Create comment with AI insight - using MarkdownString for rich formatting
+            // Create comment with AI insight
             const comment: vscode.Comment = {
                 body: new vscode.MarkdownString(this.formatComment(thread)),
                 mode: vscode.CommentMode.Preview,
@@ -141,7 +159,6 @@ export class SyntheticPRProvider implements vscode.Disposable {
             commentThread.label = `${this.getCommentIcon(thread.comment_type)} ${thread.comment_type.toUpperCase()}`;
             
         } catch (error) {
-            // FIXME: Better error handling needed - should show user-friendly message
             console.error(`Failed to create comment thread for ${thread.file_path}:${thread.line_number}`, error);
         }
     }
@@ -171,5 +188,6 @@ export class SyntheticPRProvider implements vscode.Disposable {
 
     dispose(): void {
         this.commentController.dispose();
+        this.treeProvider.clearPR();
     }
 }
