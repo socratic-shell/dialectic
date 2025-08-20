@@ -4,12 +4,13 @@ import * as path from 'path';
 import * as fs from 'fs';
 import * as crypto from 'crypto';
 import { ReviewWebviewProvider } from './reviewWebview';
+import { SyntheticPRProvider } from './syntheticPRProvider';
 
 // 💡: Types for IPC communication with MCP server
 interface IPCMessage {
     shellPid: number;
-    type: 'present_review' | 'log' | 'get_selection' | 'response' | 'marco' | 'polo' | 'goodbye' | 'resolve_symbol_by_name' | 'find_all_references' | string; // string allows unknown types
-    payload: PresentReviewPayload | LogPayload | GetSelectionPayload | PoloPayload | GoodbyePayload | ResolveSymbolPayload | FindReferencesPayload | ResponsePayload | unknown; // unknown allows any payload
+    type: 'present_review' | 'log' | 'get_selection' | 'response' | 'marco' | 'polo' | 'goodbye' | 'resolve_symbol_by_name' | 'find_all_references' | 'create_synthetic_pr' | 'update_synthetic_pr' | string; // string allows unknown types
+    payload: PresentReviewPayload | LogPayload | GetSelectionPayload | PoloPayload | GoodbyePayload | ResolveSymbolPayload | FindReferencesPayload | ResponsePayload | SyntheticPRPayload | unknown; // unknown allows any payload
     id: string;
 }
 
@@ -49,6 +50,46 @@ interface ResponsePayload {
     success: boolean;
     error?: string;
     data?: any;
+}
+
+interface SyntheticPRPayload {
+    review_id: string;
+    title: string;
+    description: any;
+    commit_range: string;
+    files_changed: FileChange[];
+    comment_threads: CommentThread[];
+    status: string;
+}
+
+interface FileChange {
+    path: string;
+    additions: number;
+    deletions: number;
+    hunks: DiffHunk[];
+}
+
+interface DiffHunk {
+    old_start: number;
+    old_lines: number;
+    new_start: number;
+    new_lines: number;
+    lines: DiffLine[];
+}
+
+interface DiffLine {
+    line_type: 'context' | 'addition' | 'deletion';
+    old_line_number?: number;
+    new_line_number?: number;
+    content: string;
+}
+
+interface CommentThread {
+    id: string;
+    file_path: string;
+    line_number: number;
+    comment_type: 'insight' | 'question' | 'todo' | 'fixme';
+    content: string;
 }
 
 // 💡: Corresponds to `dialectic_mcp_server::ide::SymbolRef` in the Rust code
@@ -92,7 +133,8 @@ class DaemonClient implements vscode.Disposable {
     constructor(
         private context: vscode.ExtensionContext,
         private reviewProvider: ReviewWebviewProvider,
-        private outputChannel: vscode.OutputChannel
+        private outputChannel: vscode.OutputChannel,
+        private syntheticPRProvider: SyntheticPRProvider
     ) { }
 
     start(): void {
@@ -275,6 +317,40 @@ class DaemonClient implements vscode.Disposable {
                 });
             } catch (error) {
                 this.outputChannel.appendLine(`Error handling find_all_references: ${error}`);
+                this.sendResponse(message.id, {
+                    success: false,
+                    error: error instanceof Error ? error.message : String(error)
+                });
+            }
+        } else if (message.type === 'create_synthetic_pr') {
+            // Handle synthetic PR creation
+            try {
+                const prPayload = message.payload as SyntheticPRPayload;
+                this.outputChannel.appendLine(`[SYNTHETIC PR] Creating PR: ${prPayload.title}`);
+
+                // Create PR UI using SyntheticPRProvider
+                await this.syntheticPRProvider.createSyntheticPR(prPayload);
+                
+                this.sendResponse(message.id, { success: true });
+            } catch (error) {
+                this.outputChannel.appendLine(`Error handling create_synthetic_pr: ${error}`);
+                this.sendResponse(message.id, {
+                    success: false,
+                    error: error instanceof Error ? error.message : String(error)
+                });
+            }
+        } else if (message.type === 'update_synthetic_pr') {
+            // Handle synthetic PR updates
+            try {
+                const prPayload = message.payload as SyntheticPRPayload;
+                this.outputChannel.appendLine(`[SYNTHETIC PR] Updating PR: ${prPayload.review_id}`);
+
+                // Update PR UI using SyntheticPRProvider
+                await this.syntheticPRProvider.updateSyntheticPR(prPayload);
+                
+                this.sendResponse(message.id, { success: true });
+            } catch (error) {
+                this.outputChannel.appendLine(`Error handling update_synthetic_pr: ${error}`);
                 this.sendResponse(message.id, {
                     success: false,
                     error: error instanceof Error ? error.message : String(error)
@@ -574,10 +650,13 @@ export function activate(context: vscode.ExtensionContext) {
     // Create the webview review provider
     const reviewProvider = new ReviewWebviewProvider(context, outputChannel);
 
+    // Create synthetic PR provider for AI-generated pull requests
+    const syntheticPRProvider = new SyntheticPRProvider(context);
+
     console.log('Webview provider created successfully');
 
     // 💡: Set up daemon client connection for message bus communication
-    const daemonClient = new DaemonClient(context, reviewProvider, outputChannel);
+    const daemonClient = new DaemonClient(context, reviewProvider, outputChannel, syntheticPRProvider);
     daemonClient.start();
 
     // 💡: Set up universal selection detection for interactive code review
@@ -600,7 +679,7 @@ export function activate(context: vscode.ExtensionContext) {
         vscode.window.showInformationMessage('PID information logged to Dialectic output channel');
     });
 
-    context.subscriptions.push(showReviewCommand, copyReviewCommand, logPIDsCommand, reviewProvider, daemonClient);
+    context.subscriptions.push(showReviewCommand, copyReviewCommand, logPIDsCommand, reviewProvider, syntheticPRProvider, daemonClient);
 
     // Return API for Ask Socratic Shell integration
     return {

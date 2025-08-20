@@ -1,9 +1,10 @@
-use serde::{Deserialize, Serialize};
-use schemars::JsonSchema;
+use crate::synthetic_pr::{CommentParser, GitService, ReviewState, ReviewStatus};
 use chrono::Utc;
-use crate::synthetic_pr::{GitService, CommentParser, ReviewState, ReviewStatus};
+use schemars::JsonSchema;
+use serde::{Deserialize, Serialize};
 
 /// MCP tool parameters for creating a new synthetic pull request.
+// ANCHOR: request_review_params
 #[derive(Debug, Serialize, Deserialize, JsonSchema)]
 pub struct RequestReviewParams {
     /// Git commit range to review (e.g., "HEAD", "HEAD~2", "abc123..def456")
@@ -30,26 +31,26 @@ pub struct ReviewResponse {
 
 /// MCP tool parameters for updating an existing synthetic pull request.
 /// Uses Dialect-style nested structure for extensibility.
+// ANCHOR: update_review_params
 #[derive(Debug, Serialize, Deserialize, JsonSchema)]
 pub struct UpdateReviewParams {
-    #[serde(flatten)]
+    /// What review are we updating
+    pub review_id: String,
+
+    /// What kind of update should be performed.
     pub action: UpdateReviewAction,
 }
 
 #[derive(Debug, Serialize, Deserialize, JsonSchema)]
-#[serde(rename_all = "snake_case")]
 pub enum UpdateReviewAction {
     /// Wait for user feedback from VSCode extension
-    WaitForFeedback { review_id: String },
+    WaitForFeedback,
     /// Add a new comment thread to the review
-    AddComment { 
-        review_id: String, 
-        comment: serde_json::Value 
-    },
+    AddComment { comment: serde_json::Value },
     /// Mark the review as approved
-    Approve { review_id: String },
+    Approve,
     /// Request changes to the review
-    RequestChanges { review_id: String },
+    RequestChanges,
 }
 
 /// Response data from synthetic pull request update operations.
@@ -88,10 +89,12 @@ pub struct ReviewStatusResponse {
 /// # Returns
 /// * `Ok(ReviewResponse)` - Complete review data with files and comments
 /// * `Err(Box<dyn std::error::Error>)` - Git operation or file system error
-pub async fn request_review(params: RequestReviewParams) -> Result<ReviewResponse, Box<dyn std::error::Error>> {
+pub async fn request_review(
+    params: RequestReviewParams,
+) -> Result<ReviewResponse, Box<dyn std::error::Error>> {
     // Use provided repo path or default to current directory
     let repo_path = params.repo_path.as_deref().unwrap_or(".");
-    
+
     // Initialize services with explicit repo path
     let git_service = GitService::new(repo_path)?;
     let comment_parser = CommentParser::new();
@@ -145,57 +148,59 @@ pub async fn request_review(params: RequestReviewParams) -> Result<ReviewRespons
 /// # Returns
 /// * `Ok(UpdateReviewResponse)` - Status and result of update operation
 /// * `Err(Box<dyn std::error::Error>)` - Invalid action or file system error
-pub async fn update_review(params: UpdateReviewParams) -> Result<UpdateReviewResponse, Box<dyn std::error::Error>> {
+pub async fn update_review(
+    params: UpdateReviewParams,
+) -> Result<UpdateReviewResponse, Box<dyn std::error::Error>> {
     match params.action {
-        UpdateReviewAction::WaitForFeedback { review_id } => {
+        UpdateReviewAction::WaitForFeedback => {
             // In a real implementation, this would block until VSCode extension provides feedback
             // For now, return a placeholder response
             Ok(UpdateReviewResponse {
                 status: "waiting".to_string(),
-                review_id: review_id,
+                review_id: params.review_id,
                 user_action: Some("pending".to_string()),
                 message: Some("Waiting for user feedback...".to_string()),
             })
         }
-        UpdateReviewAction::AddComment { review_id, comment: _ } => {
+        UpdateReviewAction::AddComment { comment: _ } => {
             // Load existing review, add comment, save back
             let mut review = ReviewState::load_from_file(None::<&str>)?;
-            
+
             // Add new comment thread (simplified implementation)
             // In practice, this would handle thread replies, etc.
-            
+
             review.updated_at = Utc::now();
             review.save_to_file(None::<&str>)?;
-            
+
             Ok(UpdateReviewResponse {
                 status: "comment_added".to_string(),
-                review_id: review_id,
+                review_id: params.review_id,
                 user_action: None,
                 message: Some("Comment added successfully".to_string()),
             })
         }
-        UpdateReviewAction::Approve { review_id } => {
+        UpdateReviewAction::Approve => {
             let mut review = ReviewState::load_from_file(None::<&str>)?;
             review.status = ReviewStatus::Approved;
             review.updated_at = Utc::now();
             review.save_to_file(None::<&str>)?;
-            
+
             Ok(UpdateReviewResponse {
                 status: "approved".to_string(),
-                review_id: review_id,
+                review_id: params.review_id,
                 user_action: Some("approved".to_string()),
                 message: None,
             })
         }
-        UpdateReviewAction::RequestChanges { review_id } => {
+        UpdateReviewAction::RequestChanges => {
             let mut review = ReviewState::load_from_file(None::<&str>)?;
             review.status = ReviewStatus::ChangesRequested;
             review.updated_at = Utc::now();
             review.save_to_file(None::<&str>)?;
-            
+
             Ok(UpdateReviewResponse {
                 status: "changes_requested".to_string(),
-                review_id: review_id,
+                review_id: params.review_id,
                 user_action: Some("changes_requested".to_string()),
                 message: None,
             })
@@ -214,14 +219,16 @@ pub async fn update_review(params: UpdateReviewParams) -> Result<UpdateReviewRes
 /// # Returns
 /// * `Ok(ReviewStatusResponse)` - Current review status or "no_active_review"
 /// * `Err(Box<dyn std::error::Error>)` - File system error
-pub async fn get_review_status(repo_path: Option<&str>) -> Result<ReviewStatusResponse, Box<dyn std::error::Error>> {
+pub async fn get_review_status(
+    repo_path: Option<&str>,
+) -> Result<ReviewStatusResponse, Box<dyn std::error::Error>> {
     let repo_path = repo_path.unwrap_or(".");
     let review_file_path = if repo_path == "." {
         ".socratic-shell-review.json".to_string()
     } else {
         format!("{}/.socratic-shell-review.json", repo_path)
     };
-    
+
     match std::fs::read_to_string(&review_file_path) {
         Ok(content) => {
             let review: ReviewState = serde_json::from_str(&content)?;
@@ -243,6 +250,6 @@ pub async fn get_review_status(repo_path: Option<&str>) -> Result<ReviewStatusRe
             comment_threads: None,
             created_at: None,
             updated_at: None,
-        })
+        }),
     }
 }

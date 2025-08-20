@@ -29,3 +29,33 @@
 ```rust
 {{#include ../../server/src/server.rs:ide_operation_params}}
 ```
+
+## request_review
+
+```rust
+{{#include ../../server/src/server.rs:request_review_tool}}
+```
+
+**Parameters:**
+```rust
+{{#include ../../server/src/synthetic_pr/mcp_tools.rs:request_review_params}}
+```
+
+## update_review
+
+```rust
+{{#include ../../server/src/server.rs:update_review_tool}}
+```
+
+**Parameters:**
+```rust
+{{#include ../../server/src/synthetic_pr/mcp_tools.rs:update_review_params}}
+```
+
+## get_review_status
+
+```rust
+{{#include ../../server/src/server.rs:get_review_status_tool}}
+```
+
+*No parameters required.*

@@ -6,7 +6,7 @@
 use crate::types::{
     FindAllReferencesPayload, GetSelectionResult, GoodbyePayload, IPCMessage, IPCMessageType,
     LogLevel, LogParams, PoloPayload, PresentReviewParams, PresentReviewResult,
-    ResolveSymbolByNamePayload, ResponsePayload,
+    ResolveSymbolByNamePayload, ResponsePayload, SyntheticPRPayload,
 };
 use futures::FutureExt;
 use serde_json;
@@ -351,6 +351,39 @@ impl IPCCommunicator {
             "Sending Goodbye discovery message with shell PID: {}",
             terminal_shell_pid
         );
+        self.send_message_without_reply(message).await
+    }
+
+    /// Send synthetic PR data to VSCode extension
+    pub async fn send_create_synthetic_pr(&self, review_response: &crate::synthetic_pr::ReviewResponse) -> Result<()> {
+        if self.test_mode {
+            info!("Synthetic PR creation message sent (test mode)");
+            return Ok(());
+        }
+
+        let shell_pid = {
+            let inner_guard = self.inner.lock().await;
+            inner_guard.terminal_shell_pid
+        };
+
+        let payload = crate::types::SyntheticPRPayload {
+            review_id: review_response.review_id.clone(),
+            title: review_response.title.clone(),
+            description: review_response.description.clone(),
+            commit_range: review_response.commit_range.clone(),
+            files_changed: review_response.files_changed.clone(),
+            comment_threads: review_response.comment_threads.clone(),
+            status: review_response.status.clone(),
+        };
+
+        let message = IPCMessage {
+            shell_pid,
+            message_type: IPCMessageType::CreateSyntheticPr,
+            payload: serde_json::to_value(payload)?,
+            id: Uuid::new_v4().to_string(),
+        };
+
+        debug!("Sending create_synthetic_pr message for review: {}", review_response.review_id);
         self.send_message_without_reply(message).await
     }
 
