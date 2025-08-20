@@ -18,6 +18,7 @@ use tracing::info;
 use crate::dialect::DialectInterpreter;
 use crate::ipc::IPCCommunicator;
 use crate::types::{LogLevel, PresentReviewParams};
+use crate::synthetic_pr::{RequestReviewParams, UpdateReviewParams};
 use serde::{Deserialize, Serialize};
 
 /// Parameters for the ide_operation tool
@@ -337,6 +338,140 @@ impl DialecticServer {
 
         Ok(CallToolResult::success(vec![json_content]))
     }
+
+    /// Create a synthetic pull request from Git commit range with AI insight comments
+    ///
+    /// Analyzes Git changes and extracts AI insight comments (💡❓TODO/FIXME) to create
+    /// a PR-like review interface with structured file changes and comment threads.
+    #[tool(
+        description = "Create a synthetic pull request from a Git commit range with AI insight comments. \
+                       Supports commit ranges like 'HEAD', 'HEAD~2', 'abc123..def456'. \
+                       Extracts AI insight comments (💡❓TODO/FIXME) and generates structured review data."
+    )]
+    async fn request_review(
+        &self,
+        Parameters(params): Parameters<RequestReviewParams>,
+    ) -> Result<CallToolResult, McpError> {
+        self.ipc
+            .send_log(
+                LogLevel::Debug,
+                format!("Received request_review tool call: {:?}", params),
+            )
+            .await;
+
+        // Execute the synthetic PR creation
+        let result = crate::synthetic_pr::request_review(params).await.map_err(|e| {
+            McpError::internal_error(
+                "Synthetic PR creation failed",
+                Some(serde_json::json!({
+                    "error": e.to_string()
+                })),
+            )
+        })?;
+
+        self.ipc
+            .send_log(
+                LogLevel::Info,
+                format!("Synthetic PR created successfully: {}", result.review_id),
+            )
+            .await;
+
+        let json_content = Content::json(result).map_err(|e| {
+            McpError::internal_error(
+                "Serialization failed",
+                Some(serde_json::json!({
+                    "error": format!("Failed to serialize review result: {}", e)
+                })),
+            )
+        })?;
+
+        Ok(CallToolResult::success(vec![json_content]))
+    }
+
+    /// Update an existing synthetic pull request or wait for user feedback
+    ///
+    /// Supports actions: wait_for_feedback, add_comment, approve, request_changes.
+    /// Used for iterative review workflows between AI and developer.
+    #[tool(
+        description = "Update an existing synthetic pull request or wait for user feedback. \
+                       Actions: 'wait_for_feedback', 'add_comment', 'approve', 'request_changes'. \
+                       Enables iterative review workflows between AI assistants and developers."
+    )]
+    async fn update_review(
+        &self,
+        Parameters(params): Parameters<UpdateReviewParams>,
+    ) -> Result<CallToolResult, McpError> {
+        self.ipc
+            .send_log(
+                LogLevel::Debug,
+                format!("Received update_review tool call: {:?}", params),
+            )
+            .await;
+
+        let result = crate::synthetic_pr::update_review(params).await.map_err(|e| {
+            McpError::internal_error(
+                "Review update failed",
+                Some(serde_json::json!({
+                    "error": e.to_string()
+                })),
+            )
+        })?;
+
+        self.ipc
+            .send_log(
+                LogLevel::Info,
+                format!("Review updated: {}", result.status),
+            )
+            .await;
+
+        let json_content = Content::json(result).map_err(|e| {
+            McpError::internal_error(
+                "Serialization failed",
+                Some(serde_json::json!({
+                    "error": format!("Failed to serialize update result: {}", e)
+                })),
+            )
+        })?;
+
+        Ok(CallToolResult::success(vec![json_content]))
+    }
+
+    /// Get the status of the current synthetic pull request
+    ///
+    /// Returns information about the active review including file counts,
+    /// comment threads, and current status.
+    #[tool(
+        description = "Get the status of the current synthetic pull request. \
+                       Returns review information including file counts, comment threads, and status."
+    )]
+    async fn get_review_status(&self) -> Result<CallToolResult, McpError> {
+        self.ipc
+            .send_log(
+                LogLevel::Debug,
+                "Received get_review_status tool call".to_string(),
+            )
+            .await;
+
+        let result = crate::synthetic_pr::get_review_status(None).await.map_err(|e| {
+            McpError::internal_error(
+                "Status retrieval failed",
+                Some(serde_json::json!({
+                    "error": e.to_string()
+                })),
+            )
+        })?;
+
+        let json_content = Content::json(result).map_err(|e| {
+            McpError::internal_error(
+                "Serialization failed",
+                Some(serde_json::json!({
+                    "error": format!("Failed to serialize status result: {}", e)
+                })),
+            )
+        })?;
+
+        Ok(CallToolResult::success(vec![json_content]))
+    }
 }
 
 #[tool_handler]
@@ -353,7 +488,10 @@ impl ServerHandler for DialecticServer {
                 "This server provides tools for AI assistants to display code reviews and perform IDE operations in VSCode. \
                 Use 'present_review' to display structured markdown reviews with file references, \
                 'get_selection' to retrieve currently selected text from the active editor, \
-                and 'ide_operation' to execute IDE operations like finding symbol definitions and references using Dialect."
+                'ide_operation' to execute IDE operations like finding symbol definitions and references using Dialect, \
+                'request_review' to create synthetic pull requests from Git commit ranges with AI insight comments, \
+                'update_review' to manage review workflows and wait for user feedback, \
+                and 'get_review_status' to check the current synthetic PR status."
                     .to_string(),
             ),
         }

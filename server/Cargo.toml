@@ -49,9 +49,17 @@ clap = { version = "4.0", features = ["derive"] }
 # Unix system calls for process monitoring
 nix = { version = "0.27", features = ["signal", "process"] }
 
+# Git operations for synthetic PR functionality
+git2 = "0.18"
+regex = "1.0"
+chrono = { version = "0.4", features = ["serde"] }
+
 [dev-dependencies]
 tokio-test = { workspace = true }
 uuid = { version = "1.0", features = ["v4"] }
 # Add client feature for testing
 rmcp = { version = "0.3.2", features = ["server", "transport-io", "schemars", "client"] }
 expect-test = "1.5.1"
+tempfile = "3.8"
+scopeguard = "1.2"
+test-utils = { path = "test-utils" }
