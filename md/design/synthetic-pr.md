@@ -55,6 +55,52 @@ sequenceDiagram
 
 This creates a **natural conversation loop** where the AI assistant blocks until the user provides input, processes that feedback, responds, then blocks again waiting for the next user interaction.
 
+## System State Flow
+
+```mermaid
+flowchart TD
+    Start([AI implements changes]) --> CreatePR[AI calls request_review]
+    CreatePR --> |BLOCKS| DisplayPR[VSCode displays PR interface]
+    DisplayPR --> UserAction{User Action}
+    
+    UserAction -->|Adds comment/reply| Discussion[Discussion Phase]
+    UserAction -->|Clicks Complete Review| Action[Action Phase]
+    
+    Discussion --> |IPC unblocks request_review| CommentResponse[AI responds to comment]
+    CommentResponse --> |AI calls update_review AddComment| UpdatePR[Update PR with response]
+    UpdatePR --> WaitFeedback[AI calls update_review WaitForFeedback]
+    WaitFeedback --> |BLOCKS| UserAction
+    
+    Action --> |IPC unblocks| ActionChoice{User Choice}
+    ActionChoice -->|Request changes| MakeChanges[AI implements changes]
+    ActionChoice -->|Checkpoint work| Checkpoint[AI commits/documents]
+    ActionChoice -->|Return to agent| HandBack[Return control to AI]
+    
+    MakeChanges --> |Files modified| Complete[Review complete]
+    Checkpoint --> |Work saved| Complete
+    HandBack --> |No specific action| Complete
+    
+    Complete --> End([End of review cycle])
+    
+    style CreatePR fill:#ffeb3b
+    style WaitFeedback fill:#ffeb3b
+    style Discussion fill:#e3f2fd
+    style Action fill:#f3e5f5
+    style Complete fill:#e8f5e8
+```
+
+**Key States**:
+- **🟡 Blocking States**: `request_review` and `update_review(WaitForFeedback)` wait for user input (yellow)
+- **🔵 Discussion Phase**: Back-and-forth comments, no file changes (blue)  
+- **🟣 Action Phase**: User gives explicit instructions for next steps (purple)
+- **🟢 Complete**: Review cycle finished (green)
+
+**State Transitions**:
+- `request_review` blocks initially until first user interaction
+- User comments trigger **Discussion Phase** → AI responds with `update_review(AddComment)` → `update_review(WaitForFeedback)` blocks again
+- User "Complete Review" triggers **Action Phase** → AI takes requested action → review ends
+- Each phase has different LLM instructions (discuss vs. implement)
+
 ## Core Workflow
 
 1. **AI Implementation**: LLM writes/modifies files in local directory
