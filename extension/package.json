@@ -43,6 +43,11 @@
         "category": "Dialectic"
       },
       {
+        "command": "dialectic.addComment",
+        "title": "Add Comment",
+        "category": "Dialectic"
+      },
+      {
         "command": "dialectic.addCommentReply",
         "title": "Add Comment Reply",
         "category": "Dialectic"
@@ -77,6 +82,13 @@
           "command": "dialectic.toggleComments",
           "when": "view == dialectic.syntheticPR",
           "group": "navigation"
+        }
+      ],
+      "comments/commentThread/context": [
+        {
+          "command": "dialectic.addComment",
+          "group": "inline@1",
+          "when": "commentController == dialectic-synthetic-pr"
         }
       ]
     }

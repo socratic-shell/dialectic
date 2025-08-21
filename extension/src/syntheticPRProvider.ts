@@ -82,22 +82,45 @@ export class SyntheticPRProvider implements vscode.Disposable {
             'Synthetic PR Comments'
         );
         
+        // Configure comment controller options
+        this.commentController.options = {
+            prompt: 'Add a comment...',
+            placeHolder: 'Type your comment here'
+        };
+        
         this.commentController.commentingRangeProvider = {
             provideCommentingRanges: (document: vscode.TextDocument) => {
-                // Allow commenting on any line in files that are part of the current PR
-                if (!this.currentPR) return [];
+                console.log(`[COMMENTING] provideCommentingRanges called for: ${document.uri.toString()}`);
                 
+                // Allow commenting on any line in files that are part of the current PR
+                if (!this.currentPR) {
+                    console.log(`[COMMENTING] No current PR - returning empty ranges`);
+                    return [];
+                }
+                
+                // Handle comment input URIs (comment://) - always allow commenting
+                if (document.uri.scheme === 'comment') {
+                    console.log(`[COMMENTING] Comment input URI - allowing full document range`);
+                    const lineCount = document.lineCount;
+                    const range = new vscode.Range(0, 0, Math.max(0, lineCount - 1), 0);
+                    return [range];
+                }
+                
+                // Handle regular file URIs
                 const filePath = vscode.workspace.asRelativePath(document.uri);
                 const isInPR = this.currentPR.files_changed.some(f => f.path === filePath);
                 
+                console.log(`[COMMENTING] File ${filePath} in PR: ${isInPR}`);
+                
                 if (isInPR) {
-                    // Return ranges for every line to enable commenting anywhere
-                    const ranges: vscode.Range[] = [];
-                    for (let i = 0; i < document.lineCount; i++) {
-                        ranges.push(new vscode.Range(i, 0, i, document.lineAt(i).text.length));
-                    }
-                    return ranges;
+                    // Return a single range covering the entire document for multi-line support
+                    const lineCount = document.lineCount;
+                    const range = new vscode.Range(0, 0, Math.max(0, lineCount - 1), 0);
+                    console.log(`[COMMENTING] Returning range for ${lineCount} lines: ${range.start.line}-${range.end.line}`);
+                    return [range];
                 }
+                
+                console.log(`[COMMENTING] File not in PR - returning empty ranges`);
                 return [];
             }
         };
@@ -132,12 +155,17 @@ export class SyntheticPRProvider implements vscode.Disposable {
             (thread: vscode.CommentThread, text: string) => this.addCommentReply(thread, text)
         );
 
+        // Register add comment command (for new comments)
+        const addCommentCommand = vscode.commands.registerCommand('dialectic.addComment',
+            (reply: vscode.CommentReply) => this.handleCommentSubmission(reply)
+        );
+
         // Register toggle comments command
         const toggleCommentsCommand = vscode.commands.registerCommand('dialectic.toggleComments',
             () => this.treeProvider.toggleCommentsExpansion()
         );
 
-        context.subscriptions.push(this.commentController, treeView, diffCommand, commentReplyCommand, toggleCommentsCommand);
+        context.subscriptions.push(this.commentController, treeView, diffCommand, commentReplyCommand, addCommentCommand, toggleCommentsCommand);
     }
 
     /**
@@ -152,48 +180,6 @@ export class SyntheticPRProvider implements vscode.Disposable {
         console.log(`[SYNTHETIC PR] ${Date.now() - startTime}ms: Calling treeProvider.updatePR`);
         this.treeProvider.updatePR(prData);
         console.log(`[SYNTHETIC PR] ${Date.now() - startTime}ms: treeProvider.updatePR completed`);
-        
-        // Clear existing comment threads asynchronously
-        console.log(`[SYNTHETIC PR] ${Date.now() - startTime}ms: Starting commentController.dispose()`);
-        await new Promise(resolve => {
-            this.commentController.dispose();
-            setImmediate(resolve);
-        });
-        console.log(`[SYNTHETIC PR] ${Date.now() - startTime}ms: commentController.dispose() completed`);
-        
-        console.log(`[SYNTHETIC PR] ${Date.now() - startTime}ms: Creating new commentController`);
-        this.commentController = vscode.comments.createCommentController(
-            'dialectic-synthetic-pr',
-            `PR: ${prData.title}`
-        );
-        console.log(`[SYNTHETIC PR] ${Date.now() - startTime}ms: New commentController created`);
-
-        console.log(`[SYNTHETIC PR] ${Date.now() - startTime}ms: Setting up commentingRangeProvider`);
-        this.commentController.commentingRangeProvider = {
-            provideCommentingRanges: (document: vscode.TextDocument) => {
-                // Allow commenting on any line in files that are part of the current PR
-                if (!this.currentPR) return [];
-
-                const filePath = vscode.workspace.asRelativePath(document.uri);
-                const isInPR = this.currentPR.files_changed.some(f => f.path === filePath);
-
-                if (isInPR) {
-                    // Return ranges for every line to enable commenting anywhere
-                    const ranges: vscode.Range[] = [];
-                    for (let i = 0; i < document.lineCount; i++) {
-                        ranges.push(new vscode.Range(i, 0, i, document.lineAt(i).text.length));
-                    }
-                    return ranges;
-                }
-                return [];
-            }
-        };
-        console.log(`[SYNTHETIC PR] ${Date.now() - startTime}ms: commentingRangeProvider setup completed`);
-
-        // Handle comment thread creation and replies
-        console.log(`[SYNTHETIC PR] ${Date.now() - startTime}ms: Setting up comment handlers`);
-        this.setupCommentHandlers();
-        console.log(`[SYNTHETIC PR] ${Date.now() - startTime}ms: Comment handlers setup completed`);
         
         // Create comment threads for each AI insight
         console.log(`[SYNTHETIC PR] ${Date.now() - startTime}ms: Creating ${prData.comment_threads.length} comment threads`);
@@ -451,6 +437,24 @@ export class SyntheticPRProvider implements vscode.Disposable {
         };
 
         thread.comments = [...thread.comments, newComment];
+    }
+
+    /**
+     * Handle comment submission from VSCode (both new comments and replies)
+     */
+    private handleCommentSubmission(reply: vscode.CommentReply): void {
+        const newComment: vscode.Comment = {
+            body: new vscode.MarkdownString(reply.text),
+            mode: vscode.CommentMode.Preview,
+            author: {
+                name: vscode.env.uriScheme === 'vscode' ? 'User' : 'Developer'
+            }
+        };
+
+        reply.thread.comments = [...reply.thread.comments, newComment];
+        
+        // Ensure the thread can accept more replies
+        reply.thread.canReply = true;
     }
 
     dispose(): void {
