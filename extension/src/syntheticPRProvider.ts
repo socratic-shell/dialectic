@@ -13,6 +13,7 @@ interface SyntheticPRData {
 
 interface FileChange {
     path: string;
+    status: string;
     additions: number;
     deletions: number;
     hunks: DiffHunk[];
@@ -27,7 +28,7 @@ interface DiffHunk {
 }
 
 interface DiffLine {
-    line_type: 'context' | 'addition' | 'deletion';
+    line_type: 'Context' | 'Added' | 'Removed';
     old_line_number?: number;
     new_line_number?: number;
     content: string;
@@ -163,16 +164,22 @@ export class SyntheticPRProvider implements vscode.Disposable {
      * Show GitHub-style diff for a file
      */
     private async showFileDiff(filePath: string): Promise<void> {
+        console.log(`[DIFF] Starting showFileDiff for: ${filePath}`);
+        
         if (!this.currentPR) {
+            console.log('[DIFF] ERROR: No active synthetic PR');
             vscode.window.showErrorMessage('No active synthetic PR');
             return;
         }
 
         const fileChange = this.currentPR.files_changed.find(f => f.path === filePath);
         if (!fileChange) {
+            console.log(`[DIFF] ERROR: File not found in PR: ${filePath}`);
             vscode.window.showErrorMessage(`File not found in PR: ${filePath}`);
             return;
         }
+        
+        console.log(`[DIFF] Found file change: ${fileChange.status}, ${fileChange.additions}+/${fileChange.deletions}-, ${fileChange.hunks.length} hunks`);
 
         try {
             // Resolve relative path to absolute path
@@ -183,30 +190,38 @@ export class SyntheticPRProvider implements vscode.Disposable {
             }
             
             const absolutePath = vscode.Uri.joinPath(workspaceFolder.uri, filePath);
+            console.log(`[DIFF] Resolved absolute path: ${absolutePath.toString()}`);
             
             // Get "after" content from current file
             const currentDocument = await vscode.workspace.openTextDocument(absolutePath);
             const modifiedContent = currentDocument.getText();
+            console.log(`[DIFF] Current file content length: ${modifiedContent.length} chars`);
 
             // Generate "before" content by reverse-applying hunks
             const originalContent = await this.generateOriginalContent(fileChange, modifiedContent);
+            console.log(`[DIFF] Generated original content length: ${originalContent.length} chars`);
 
             // Create URIs for diff content provider
             const originalUri = vscode.Uri.parse(`dialectic-diff:${filePath}?original`);
             const modifiedUri = absolutePath; // Use actual file for "after" state
+            console.log(`[DIFF] Original URI: ${originalUri.toString()}`);
+            console.log(`[DIFF] Modified URI: ${modifiedUri.toString()}`);
 
             // Store original content in provider
             this.diffContentProvider.setContent(originalUri, originalContent);
+            console.log('[DIFF] Stored original content in provider');
 
             // Show diff using VSCode's native diff viewer with automatic highlighting
+            console.log('[DIFF] Calling vscode.diff command...');
             await vscode.commands.executeCommand('vscode.diff', 
                 originalUri, 
                 modifiedUri, 
                 `${filePath} (PR Diff)`
             );
+            console.log('[DIFF] vscode.diff command completed successfully');
 
         } catch (error) {
-            console.error('Failed to show file diff:', error);
+            console.error('[DIFF] Failed to show file diff:', error);
             vscode.window.showErrorMessage(`Failed to show diff for ${filePath}`);
         }
     }
@@ -215,42 +230,53 @@ export class SyntheticPRProvider implements vscode.Disposable {
      * Generate original file content by reverse-applying hunks
      */
     private async generateOriginalContent(fileChange: FileChange, currentContent: string): Promise<string> {
+        console.log(`[HUNK] Starting generateOriginalContent for ${fileChange.path}`);
+        console.log(`[HUNK] Processing ${fileChange.hunks.length} hunks`);
+        
         try {
             const currentLines = currentContent.split('\n');
             const originalLines = [...currentLines];
+            console.log(`[HUNK] Current file has ${currentLines.length} lines`);
             
             // Sort hunks by line number (descending) to apply in reverse order
             const sortedHunks = [...fileChange.hunks].sort((a, b) => b.new_start - a.new_start);
+            console.log(`[HUNK] Sorted hunks by new_start (desc): ${sortedHunks.map(h => h.new_start).join(', ')}`);
             
             for (const hunk of sortedHunks) {
+                console.log(`[HUNK] Processing hunk at line ${hunk.new_start} with ${hunk.lines.length} lines`);
+                
                 // Process lines in reverse order within each hunk
                 const hunkLines = [...hunk.lines].reverse();
                 let lineOffset = hunk.new_lines - 1;
                 
                 for (const line of hunkLines) {
                     const targetLine = hunk.new_start - 1 + lineOffset;
+                    console.log(`[HUNK] Processing ${line.line_type} line at target ${targetLine}: "${line.content.substring(0, 50)}..."`);
                     
-                    if (line.line_type === 'addition') {
+                    if (line.line_type === 'Added') {
                         // Remove added lines from original
                         if (targetLine >= 0 && targetLine < originalLines.length) {
+                            console.log(`[HUNK] Removing added line at ${targetLine}`);
                             originalLines.splice(targetLine, 1);
                         }
                         lineOffset--;
-                    } else if (line.line_type === 'deletion') {
+                    } else if (line.line_type === 'Removed') {
                         // Restore deleted lines to original
                         const content = line.content.startsWith('-') ? line.content.substring(1) : line.content;
+                        console.log(`[HUNK] Restoring removed line at ${targetLine + 1}: "${content.substring(0, 50)}..."`);
                         originalLines.splice(targetLine + 1, 0, content);
-                    } else if (line.line_type === 'context') {
+                    } else if (line.line_type === 'Context') {
                         // Context lines stay the same
                         lineOffset--;
                     }
                 }
             }
             
+            console.log(`[HUNK] Generated original content with ${originalLines.length} lines`);
             return originalLines.join('\n');
             
         } catch (error) {
-            console.error('Failed to generate original content:', error);
+            console.error('[HUNK] Failed to generate original content:', error);
             // Fallback to empty content for minimal diff display
             return '';
         }

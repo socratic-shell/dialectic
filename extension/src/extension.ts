@@ -67,6 +67,7 @@ interface SyntheticPRPayload {
 
 interface FileChange {
     path: string;
+    status: string;
     additions: number;
     deletions: number;
     hunks: DiffHunk[];
