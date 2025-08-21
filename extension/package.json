@@ -41,6 +41,17 @@
         "command": "dialectic.showFileDiff",
         "title": "Show File Diff",
         "category": "Dialectic"
+      },
+      {
+        "command": "dialectic.addCommentReply",
+        "title": "Add Comment Reply",
+        "category": "Dialectic"
+      },
+      {
+        "command": "dialectic.toggleComments",
+        "title": "Toggle Comments",
+        "category": "Dialectic",
+        "icon": "$(comment)"
       }
     ],
     "viewsContainers": {
@@ -57,6 +68,15 @@
         {
           "id": "dialectic.syntheticPR",
           "name": "Pull Request"
+        }
+      ]
+    },
+    "menus": {
+      "view/title": [
+        {
+          "command": "dialectic.toggleComments",
+          "when": "view == dialectic.syntheticPR",
+          "group": "navigation"
         }
       ]
     }

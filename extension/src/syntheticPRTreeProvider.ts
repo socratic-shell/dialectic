@@ -60,8 +60,14 @@ export class SyntheticPRTreeProvider implements vscode.TreeDataProvider<PRTreeIt
     readonly onDidChangeTreeData: vscode.Event<PRTreeItem | undefined | null | void> = this._onDidChangeTreeData.event;
 
     private currentPR: SyntheticPRData | null = null;
+    private commentsExpanded: boolean = true;
 
     constructor() {}
+
+    toggleCommentsExpansion(): void {
+        this.commentsExpanded = !this.commentsExpanded;
+        this.refresh();
+    }
 
     refresh(): void {
         this._onDidChangeTreeData.fire();
@@ -117,7 +123,7 @@ export class SyntheticPRTreeProvider implements vscode.TreeDataProvider<PRTreeIt
                 ),
                 new PRTreeItem(
                     `Comments (${this.currentPR.comment_threads.length})`,
-                    vscode.TreeItemCollapsibleState.Expanded,
+                    this.commentsExpanded ? vscode.TreeItemCollapsibleState.Expanded : vscode.TreeItemCollapsibleState.Collapsed,
                     'comments'
                 ),
                 new PRTreeItem(
@@ -129,16 +135,21 @@ export class SyntheticPRTreeProvider implements vscode.TreeDataProvider<PRTreeIt
         }
 
         if (element.itemType === 'files') {
-            // Show individual files
+            // Show individual files with comment indicators
+            if (!this.currentPR) return Promise.resolve([]);
+            
             return Promise.resolve(
-                this.currentPR.files_changed.map(file => 
-                    new PRTreeItem(
-                        `${file.path} (+${file.additions} -${file.deletions})`,
+                this.currentPR.files_changed.map(file => {
+                    const commentsInFile = this.currentPR!.comment_threads.filter(c => c.file_path === file.path);
+                    const commentIndicator = commentsInFile.length > 0 ? ` 💬${commentsInFile.length}` : '';
+                    
+                    return new PRTreeItem(
+                        `${file.path} (+${file.additions} -${file.deletions})${commentIndicator}`,
                         vscode.TreeItemCollapsibleState.None,
                         'file',
                         file
-                    )
-                )
+                    );
+                })
             );
         }
 

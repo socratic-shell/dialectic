@@ -328,14 +328,20 @@ class DaemonClient implements vscode.Disposable {
             }
         } else if (message.type === 'create_synthetic_pr') {
             // Handle synthetic PR creation
+            const startTime = Date.now();
+            this.outputChannel.appendLine(`[SYNTHETIC PR] ${Date.now() - startTime}ms: Received create_synthetic_pr message`);
             try {
                 const prPayload = message.payload as SyntheticPRPayload;
-                this.outputChannel.appendLine(`[SYNTHETIC PR] Creating PR: ${prPayload.title}`);
+                this.outputChannel.appendLine(`[SYNTHETIC PR] ${Date.now() - startTime}ms: Creating PR: ${prPayload.title}`);
 
                 // Create PR UI using SyntheticPRProvider
+                this.outputChannel.appendLine(`[SYNTHETIC PR] ${Date.now() - startTime}ms: Calling syntheticPRProvider.createSyntheticPR`);
                 await this.syntheticPRProvider.createSyntheticPR(prPayload);
+                this.outputChannel.appendLine(`[SYNTHETIC PR] ${Date.now() - startTime}ms: syntheticPRProvider.createSyntheticPR completed`);
 
+                this.outputChannel.appendLine(`[SYNTHETIC PR] ${Date.now() - startTime}ms: Sending success response`);
                 this.sendResponse(message.id, { success: true });
+                this.outputChannel.appendLine(`[SYNTHETIC PR] ${Date.now() - startTime}ms: Success response sent`);
             } catch (error) {
                 this.outputChannel.appendLine(`Error handling create_synthetic_pr: ${error}`);
                 this.sendResponse(message.id, {

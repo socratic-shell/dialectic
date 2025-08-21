@@ -389,11 +389,11 @@ impl DialecticServer {
             )
             .await;
 
-        let json_content = Content::json(result).map_err(|e| {
+        let json_content = Content::json("success").map_err(|e| {
             McpError::internal_error(
                 "Serialization failed",
                 Some(serde_json::json!({
-                    "error": format!("Failed to serialize review result: {}", e)
+                    "error": format!("Failed to serialize success response: {}", e)
                 })),
             )
         })?;

@@ -16,3 +16,5 @@ extension/*.vsix
 
 # AI model caches
 .fastembed_cache/
+
+.socratic-shell-review.json
