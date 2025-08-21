@@ -42,6 +42,21 @@ interface CommentThread {
 }
 
 /**
+ * Content provider for synthetic diff content
+ */
+class DialecticDiffContentProvider implements vscode.TextDocumentContentProvider {
+    private contentMap = new Map<string, string>();
+
+    setContent(uri: vscode.Uri, content: string): void {
+        this.contentMap.set(uri.toString(), content);
+    }
+
+    provideTextDocumentContent(uri: vscode.Uri): string {
+        return this.contentMap.get(uri.toString()) || '';
+    }
+}
+
+/**
  * Manages synthetic pull request UI components
  * 
  * Creates unified PR interface using TreeDataProvider for navigation
@@ -50,9 +65,16 @@ interface CommentThread {
 export class SyntheticPRProvider implements vscode.Disposable {
     private commentController: vscode.CommentController;
     private treeProvider: SyntheticPRTreeProvider;
+    private diffContentProvider: DialecticDiffContentProvider;
     private currentPR: SyntheticPRData | null = null;
 
     constructor(private context: vscode.ExtensionContext) {
+        // Create diff content provider for virtual diff content
+        this.diffContentProvider = new DialecticDiffContentProvider();
+        context.subscriptions.push(
+            vscode.workspace.registerTextDocumentContentProvider('dialectic-diff', this.diffContentProvider)
+        );
+
         // Create comment controller for in-line comments
         this.commentController = vscode.comments.createCommentController(
             'dialectic-synthetic-pr',
@@ -74,7 +96,12 @@ export class SyntheticPRProvider implements vscode.Disposable {
         });
         console.log('[SYNTHETIC PR] Tree view created successfully:', !!treeView);
 
-        context.subscriptions.push(this.commentController, treeView);
+        // Register diff command
+        const diffCommand = vscode.commands.registerCommand('dialectic.showFileDiff', 
+            (filePath: string) => this.showFileDiff(filePath)
+        );
+
+        context.subscriptions.push(this.commentController, treeView, diffCommand);
     }
 
     /**
@@ -133,16 +160,119 @@ export class SyntheticPRProvider implements vscode.Disposable {
     }
 
     /**
-     * Create a comment thread for an AI insight
+     * Show GitHub-style diff for a file
+     */
+    private async showFileDiff(filePath: string): Promise<void> {
+        if (!this.currentPR) {
+            vscode.window.showErrorMessage('No active synthetic PR');
+            return;
+        }
+
+        const fileChange = this.currentPR.files_changed.find(f => f.path === filePath);
+        if (!fileChange) {
+            vscode.window.showErrorMessage(`File not found in PR: ${filePath}`);
+            return;
+        }
+
+        try {
+            // Resolve relative path to absolute path
+            const workspaceFolder = vscode.workspace.workspaceFolders?.[0];
+            if (!workspaceFolder) {
+                vscode.window.showErrorMessage('No workspace folder found');
+                return;
+            }
+            
+            const absolutePath = vscode.Uri.joinPath(workspaceFolder.uri, filePath);
+            
+            // Get "after" content from current file
+            const currentDocument = await vscode.workspace.openTextDocument(absolutePath);
+            const modifiedContent = currentDocument.getText();
+
+            // Generate "before" content by reverse-applying hunks
+            const originalContent = await this.generateOriginalContent(fileChange, modifiedContent);
+
+            // Create URIs for diff content provider
+            const originalUri = vscode.Uri.parse(`dialectic-diff:${filePath}?original`);
+            const modifiedUri = absolutePath; // Use actual file for "after" state
+
+            // Store original content in provider
+            this.diffContentProvider.setContent(originalUri, originalContent);
+
+            // Show diff using VSCode's native diff viewer with automatic highlighting
+            await vscode.commands.executeCommand('vscode.diff', 
+                originalUri, 
+                modifiedUri, 
+                `${filePath} (PR Diff)`
+            );
+
+        } catch (error) {
+            console.error('Failed to show file diff:', error);
+            vscode.window.showErrorMessage(`Failed to show diff for ${filePath}`);
+        }
+    }
+
+    /**
+     * Generate original file content by reverse-applying hunks
+     */
+    private async generateOriginalContent(fileChange: FileChange, currentContent: string): Promise<string> {
+        try {
+            const currentLines = currentContent.split('\n');
+            const originalLines = [...currentLines];
+            
+            // Sort hunks by line number (descending) to apply in reverse order
+            const sortedHunks = [...fileChange.hunks].sort((a, b) => b.new_start - a.new_start);
+            
+            for (const hunk of sortedHunks) {
+                // Process lines in reverse order within each hunk
+                const hunkLines = [...hunk.lines].reverse();
+                let lineOffset = hunk.new_lines - 1;
+                
+                for (const line of hunkLines) {
+                    const targetLine = hunk.new_start - 1 + lineOffset;
+                    
+                    if (line.line_type === 'addition') {
+                        // Remove added lines from original
+                        if (targetLine >= 0 && targetLine < originalLines.length) {
+                            originalLines.splice(targetLine, 1);
+                        }
+                        lineOffset--;
+                    } else if (line.line_type === 'deletion') {
+                        // Restore deleted lines to original
+                        const content = line.content.startsWith('-') ? line.content.substring(1) : line.content;
+                        originalLines.splice(targetLine + 1, 0, content);
+                    } else if (line.line_type === 'context') {
+                        // Context lines stay the same
+                        lineOffset--;
+                    }
+                }
+            }
+            
+            return originalLines.join('\n');
+            
+        } catch (error) {
+            console.error('Failed to generate original content:', error);
+            // Fallback to empty content for minimal diff display
+            return '';
+        }
+    }
+
+    /**
+     * Create a comment thread for an AI insight on diff view
      */
     private async createCommentThread(thread: CommentThread): Promise<void> {
         try {
-            const uri = vscode.Uri.file(thread.file_path);
-            const document = await vscode.workspace.openTextDocument(uri);
+            // Use regular file URI for comments (they'll appear on both diff and normal views)
+            const workspaceFolder = vscode.workspace.workspaceFolders?.[0];
+            if (!workspaceFolder) {
+                return;
+            }
+            const uri = vscode.Uri.joinPath(workspaceFolder.uri, thread.file_path);
             
-            // Convert 1-based line number to 0-based range
-            const line = Math.max(0, thread.line_number - 1);
-            const range = new vscode.Range(line, 0, line, document.lineAt(line).text.length);
+            // Create a simple range for the comment
+            const range = new vscode.Range(
+                Math.max(0, thread.line_number - 1), 0,
+                Math.max(0, thread.line_number - 1), 0
+            );
             
             const commentThread = this.commentController.createCommentThread(uri, range, []);
             

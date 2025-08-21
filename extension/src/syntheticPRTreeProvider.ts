@@ -36,16 +36,11 @@ class PRTreeItem extends vscode.TreeItem {
         this.contextValue = itemType;
         
         if (itemType === 'file') {
-            // Resolve relative paths to absolute paths
-            const workspaceFolder = vscode.workspace.workspaceFolders?.[0];
-            const absolutePath = workspaceFolder 
-                ? vscode.Uri.joinPath(workspaceFolder.uri, data.path).fsPath
-                : data.path;
-            
+            // Use diff command instead of opening file normally
             this.command = {
-                command: 'vscode.open',
-                title: 'Open File',
-                arguments: [vscode.Uri.file(absolutePath)]
+                command: 'dialectic.showFileDiff',
+                title: 'Show Diff',
+                arguments: [data.path]
             };
         } else if (itemType === 'comment') {
             this.command = {

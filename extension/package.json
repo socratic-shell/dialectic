@@ -36,6 +36,11 @@
         "command": "dialectic.logPIDs",
         "title": "Log PIDs",
         "category": "Dialectic"
+      },
+      {
+        "command": "dialectic.showFileDiff",
+        "title": "Show File Diff",
+        "category": "Dialectic"
       }
     ],
     "viewsContainers": {

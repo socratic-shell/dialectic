@@ -6,6 +6,9 @@ import * as crypto from 'crypto';
 import { ReviewWebviewProvider } from './reviewWebview';
 import { SyntheticPRProvider } from './syntheticPRProvider';
 
+// TEST TEST TEST 
+
+
 // 💡: Types for IPC communication with MCP server
 interface IPCMessage {
     shellPid: number;
@@ -330,7 +333,7 @@ class DaemonClient implements vscode.Disposable {
 
                 // Create PR UI using SyntheticPRProvider
                 await this.syntheticPRProvider.createSyntheticPR(prPayload);
-                
+
                 this.sendResponse(message.id, { success: true });
             } catch (error) {
                 this.outputChannel.appendLine(`Error handling create_synthetic_pr: ${error}`);
@@ -347,7 +350,7 @@ class DaemonClient implements vscode.Disposable {
 
                 // Update PR UI using SyntheticPRProvider
                 await this.syntheticPRProvider.updateSyntheticPR(prPayload);
-                
+
                 this.sendResponse(message.id, { success: true });
             } catch (error) {
                 this.outputChannel.appendLine(`Error handling update_synthetic_pr: ${error}`);
