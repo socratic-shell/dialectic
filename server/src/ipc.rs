@@ -387,6 +387,37 @@ impl IPCCommunicator {
         self.send_message_without_reply(message).await
     }
 
+    /// Wait for user feedback on a specific review
+    /// This method blocks until the user provides feedback via the VSCode extension
+    pub async fn wait_for_user_feedback(&self, review_id: &str) -> Result<crate::synthetic_pr::UserFeedback> {
+        if self.test_mode {
+            info!("Wait for user feedback called (test mode) for review: {}", review_id);
+            // Return mock feedback for testing
+            return Ok(crate::synthetic_pr::UserFeedback {
+                review_id: Some(review_id.to_string()),
+                feedback_type: "comment".to_string(),
+                file_path: Some("test.rs".to_string()),
+                line_number: Some(42),
+                comment_text: Some("This is a test comment".to_string()),
+                completion_action: None,
+                additional_notes: None,
+                context_lines: Some(vec!["fn test() {".to_string(), "    // Line 42".to_string(), "}".to_string()]),
+            });
+        }
+
+        // TODO: Implement actual blocking mechanism
+        // This should:
+        // 1. Register a pending feedback request for this review_id
+        // 2. Block until IPC message arrives with user feedback
+        // 3. Return the structured UserFeedback data
+        
+        // For now, return an error indicating this is not yet implemented
+        Err(IPCError::ConnectionFailed {
+            path: "user_feedback".to_string(),
+            source: std::io::Error::new(std::io::ErrorKind::NotFound, "wait_for_user_feedback not yet implemented")
+        })
+    }
+
     /// Gracefully shutdown the IPC communicator, sending Goodbye discovery message
     pub async fn shutdown(&self) -> Result<()> {
         if self.test_mode {

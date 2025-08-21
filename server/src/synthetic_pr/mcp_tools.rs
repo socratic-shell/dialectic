@@ -17,6 +17,19 @@ pub struct RequestReviewParams {
     pub repo_path: Option<String>,
 }
 
+/// User feedback data from blocking MCP tools
+#[derive(Debug, Serialize, Deserialize, JsonSchema)]
+pub struct UserFeedback {
+    pub review_id: Option<String>,
+    pub feedback_type: String, // "comment" or "complete_review"
+    pub file_path: Option<String>,
+    pub line_number: Option<u32>,
+    pub comment_text: Option<String>,
+    pub completion_action: Option<String>, // "request_changes", "checkpoint", "return"
+    pub additional_notes: Option<String>,
+    pub context_lines: Option<Vec<String>>,
+}
+
 /// Response data from synthetic pull request creation.
 #[derive(Debug, Serialize, Deserialize, JsonSchema)]
 pub struct ReviewResponse {
@@ -32,7 +45,7 @@ pub struct ReviewResponse {
 /// MCP tool parameters for updating an existing synthetic pull request.
 /// Uses Dialect-style nested structure for extensibility.
 // ANCHOR: update_review_params
-#[derive(Debug, Serialize, Deserialize, JsonSchema)]
+#[derive(Debug, Serialize, Deserialize, JsonSchema, Clone)]
 pub struct UpdateReviewParams {
     /// What review are we updating
     pub review_id: String,
@@ -41,7 +54,7 @@ pub struct UpdateReviewParams {
     pub action: UpdateReviewAction,
 }
 
-#[derive(Debug, Serialize, Deserialize, JsonSchema)]
+#[derive(Debug, Serialize, Deserialize, JsonSchema, Clone)]
 pub enum UpdateReviewAction {
     /// Wait for user feedback from VSCode extension
     WaitForFeedback,
@@ -60,6 +73,7 @@ pub struct UpdateReviewResponse {
     pub review_id: String,
     pub user_action: Option<String>,
     pub message: Option<String>,
+    pub user_feedback: Option<UserFeedback>,
 }
 
 /// Response data for synthetic pull request status queries.
@@ -160,6 +174,7 @@ pub async fn update_review(
                 review_id: params.review_id,
                 user_action: Some("pending".to_string()),
                 message: Some("Waiting for user feedback...".to_string()),
+                user_feedback: None,
             })
         }
         UpdateReviewAction::AddComment { comment: _ } => {
@@ -177,6 +192,7 @@ pub async fn update_review(
                 review_id: params.review_id,
                 user_action: None,
                 message: Some("Comment added successfully".to_string()),
+                user_feedback: None,
             })
         }
         UpdateReviewAction::Approve => {
@@ -190,6 +206,7 @@ pub async fn update_review(
                 review_id: params.review_id,
                 user_action: Some("approved".to_string()),
                 message: None,
+                user_feedback: None,
             })
         }
         UpdateReviewAction::RequestChanges => {
@@ -203,6 +220,7 @@ pub async fn update_review(
                 review_id: params.review_id,
                 user_action: Some("changes_requested".to_string()),
                 message: None,
+                user_feedback: None,
             })
         }
     }

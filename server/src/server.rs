@@ -17,7 +17,7 @@ use tracing::info;
 
 use crate::dialect::DialectInterpreter;
 use crate::ipc::IPCCommunicator;
-use crate::synthetic_pr::{RequestReviewParams, UpdateReviewParams};
+use crate::synthetic_pr::{RequestReviewParams, UpdateReviewParams, UserFeedback};
 use crate::types::{LogLevel, PresentReviewParams};
 use serde::{Deserialize, Serialize};
 
@@ -82,6 +82,68 @@ impl DialecticServer {
     /// Get a reference to the IPC communicator
     pub fn ipc(&self) -> &IPCCommunicator {
         &self.ipc
+    }
+
+    /// Format user feedback into clear instructions for the LLM
+    fn format_user_feedback_message(&self, feedback: &UserFeedback) -> String {
+        match feedback.feedback_type.as_str() {
+            "comment" => {
+                let file_path = feedback.file_path.as_deref().unwrap_or("unknown file");
+                let line_number = feedback.line_number.unwrap_or(0);
+                let comment_text = feedback.comment_text.as_deref().unwrap_or("(no comment)");
+                
+                let context = if let Some(lines) = &feedback.context_lines {
+                    format!("\n\nCode context:\n```\n{}\n```", lines.join("\n"))
+                } else {
+                    String::new()
+                };
+
+                format!(
+                    "The user reviewed your code changes and left a comment on file `{}` at line {}:\n\n\
+                    User comment: '{}'{}\n\n\
+                    Please analyze the user's feedback and prepare a thoughtful response addressing their concern. \
+                    Do NOT modify any files on disk.\n\n\
+                    When ready, invoke the update_review tool with:\n\
+                    - review_id: '{}'\n\
+                    - action: AddComment\n\
+                    - comment: {{ response: 'Your response text here' }}\n\n\
+                    After responding, invoke update_review again with action: WaitForFeedback to continue the conversation.",
+                    file_path, line_number, comment_text, context, feedback.review_id.as_deref().unwrap_or("unknown")
+                )
+            }
+            "complete_review" => {
+                let action = feedback.completion_action.as_deref().unwrap_or("return");
+                let notes = feedback.additional_notes.as_deref().unwrap_or("");
+                
+                let notes_section = if !notes.is_empty() {
+                    format!("\nAdditional notes: '{}'\n", notes)
+                } else {
+                    String::new()
+                };
+
+                match action {
+                    "request_changes" => format!(
+                        "User completed their review and selected: 'Request agent to make changes'{}\n\
+                        Based on the review discussion, please implement the requested changes. \
+                        You may now edit files as needed.\n\n\
+                        When finished, invoke: update_review(review_id: '{}', action: Approve)",
+                        notes_section, feedback.review_id.as_deref().unwrap_or("unknown")
+                    ),
+                    "checkpoint" => format!(
+                        "User completed their review and selected: 'Request agent to checkpoint this work'{}\n\
+                        Please commit the current changes and document the work completed.\n\n\
+                        When finished, invoke: update_review(review_id: '{}', action: Approve)",
+                        notes_section, feedback.review_id.as_deref().unwrap_or("unknown")
+                    ),
+                    _ => format!(
+                        "User completed their review and selected: 'Return to agent without explicit request'{}\n\
+                        The review is complete. You may proceed as you see fit.",
+                        notes_section
+                    )
+                }
+            }
+            _ => format!("User provided feedback: {:?}", feedback)
+        }
     }
 
     /// Ensure the message bus daemon is running for the given VSCode PID
@@ -344,7 +406,8 @@ impl DialecticServer {
     #[tool(
         description = "Create a synthetic pull request from a Git commit range with AI insight comments. \
                        Supports commit ranges like 'HEAD', 'HEAD~2', 'abc123..def456'. \
-                       Extracts AI insight comments (TODO/FIXME/insight markers) and generates structured review data."
+                       Extracts AI insight comments (TODO/FIXME/insight markers) and generates structured review data. \
+                       BLOCKS until user provides initial feedback."
     )]
     async fn request_review(
         &self,
@@ -389,16 +452,23 @@ impl DialecticServer {
             )
             .await;
 
-        let json_content = Content::json("success").map_err(|e| {
-            McpError::internal_error(
-                "Serialization failed",
-                Some(serde_json::json!({
-                    "error": format!("Failed to serialize success response: {}", e)
-                })),
-            )
-        })?;
+        // BLOCK until user provides initial feedback
+        let user_feedback = self.ipc
+            .wait_for_user_feedback(&result.review_id)
+            .await
+            .map_err(|e| {
+                McpError::internal_error(
+                    "Failed to wait for user feedback",
+                    Some(serde_json::json!({
+                        "error": e.to_string()
+                    })),
+                )
+            })?;
 
-        Ok(CallToolResult::success(vec![json_content]))
+        // Return structured message telling LLM what user did and what to do next
+        let message = self.format_user_feedback_message(&user_feedback);
+
+        Ok(CallToolResult::success(vec![Content::text(message)]))
     }
 
     /// Update an existing synthetic pull request or wait for user feedback
@@ -406,7 +476,9 @@ impl DialecticServer {
     /// Supports actions: wait_for_feedback, add_comment, approve, request_changes.
     /// Used for iterative review workflows between AI and developer.
     // ANCHOR: update_review_tool
-    #[tool(description = "Update an existing synthetic pull request or wait for user feedback.")]
+    #[tool(description = "Update an existing synthetic pull request or wait for user feedback. \
+                         This tool is used to interact with the user through their IDE. \
+                         Do not invoke it except when asked to do so by other tools within dialectic.")]
     async fn update_review(
         &self,
         Parameters(params): Parameters<UpdateReviewParams>,
@@ -418,7 +490,7 @@ impl DialecticServer {
             )
             .await;
 
-        let result = crate::synthetic_pr::update_review(params)
+        let result = crate::synthetic_pr::update_review(params.clone())
             .await
             .map_err(|e| {
                 McpError::internal_error(
@@ -428,6 +500,24 @@ impl DialecticServer {
                     })),
                 )
             })?;
+
+        // Handle WaitForFeedback action - this blocks until user responds
+        if let crate::synthetic_pr::UpdateReviewAction::WaitForFeedback = params.action {
+            let user_feedback = self.ipc
+                .wait_for_user_feedback(&params.review_id)
+                .await
+                .map_err(|e| {
+                    McpError::internal_error(
+                        "Failed to wait for user feedback",
+                        Some(serde_json::json!({
+                            "error": e.to_string()
+                        })),
+                    )
+                })?;
+
+            let message = self.format_user_feedback_message(&user_feedback);
+            return Ok(CallToolResult::success(vec![Content::text(message)]));
+        }
 
         self.ipc
             .send_log(LogLevel::Info, format!("Review updated: {}", result.status))
