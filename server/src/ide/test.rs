@@ -577,14 +577,52 @@ async fn test_gitdiff_function() {
     assert!(result.is_ok());
     let changes = result.unwrap();
     
-    // Should be an array with one file change (src/main.rs)
-    if let serde_json::Value::Array(arr) = changes {
-        assert_eq!(arr.len(), 1);
-        if let serde_json::Value::Object(file_change) = &arr[0] {
-            assert_eq!(file_change.get("path").unwrap(), "src/main.rs");
-            assert_eq!(file_change.get("status").unwrap(), "Modified");
-        }
-    } else {
-        panic!("Expected array of file changes");
-    }
+    // Verify the structure using expect-test
+    use expect_test::expect;
+    expect![[r#"
+        Array [
+            Object {
+                "additions": Number(1),
+                "deletions": Number(1),
+                "hunks": Array [
+                    Object {
+                        "header": String("@@ -1,3 +1,3 @@"),
+                        "lines": Array [
+                            Object {
+                                "content": String("fn main() {"),
+                                "line_type": String("Context"),
+                                "new_line_number": Number(1),
+                                "old_line_number": Number(1),
+                            },
+                            Object {
+                                "content": String("    println!(\"Hello\");"),
+                                "line_type": String("Removed"),
+                                "new_line_number": Null,
+                                "old_line_number": Number(2),
+                            },
+                            Object {
+                                "content": String("    println!(\"Hello, World!\");"),
+                                "line_type": String("Added"),
+                                "new_line_number": Number(2),
+                                "old_line_number": Null,
+                            },
+                            Object {
+                                "content": String("}"),
+                                "line_type": String("Context"),
+                                "new_line_number": Number(3),
+                                "old_line_number": Number(3),
+                            },
+                        ],
+                        "new_lines": Number(3),
+                        "new_start": Number(1),
+                        "old_lines": Number(3),
+                        "old_start": Number(1),
+                    },
+                ],
+                "path": String("src/main.rs"),
+                "status": String("Modified"),
+            },
+        ]
+    "#]]
+    .assert_debug_eq(&changes);
 }
