@@ -572,17 +572,11 @@ class DaemonClient implements vscode.Disposable {
     private async collectUserFeedback(reviewId: string): Promise<UserFeedback> {
         this.currentReviewId = reviewId;
 
+        // Automatically show the review
+        vscode.commands.executeCommand('dialectic.showReview');
+
         return new Promise<UserFeedback>((resolve) => {
             this.pendingFeedbackResolvers.set(reviewId, resolve);
-            
-            vscode.window.showInformationMessage(
-                'Review ready! Use the action buttons in the Dialectic tree view to provide feedback.',
-                'Show Tree View'
-            ).then((selection) => {
-                if (selection === 'Show Tree View') {
-                    vscode.commands.executeCommand('dialectic.showReview');
-                }
-            });
         });
     }
 

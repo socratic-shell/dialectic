@@ -64,7 +64,7 @@
         {
           "id": "dialectic",
           "title": "Dialectic",
-          "icon": "$(git-pull-request)"
+          "icon": "logo.png"
         }
       ]
     },
