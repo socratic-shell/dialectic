@@ -51,6 +51,13 @@ class PRTreeItem extends vscode.TreeItem {
                     { selection: new vscode.Range(data.line_number - 1, 0, data.line_number - 1, 0) }
                 ]
             };
+        } else if (itemType === 'action') {
+            // Add command for action buttons
+            this.command = {
+                command: 'dialectic.reviewAction',
+                title: 'Review Action',
+                arguments: [data.action]
+            };
         }
     }
 }
@@ -168,19 +175,31 @@ export class SyntheticPRTreeProvider implements vscode.TreeDataProvider<PRTreeIt
         }
 
         if (element.itemType === 'actions') {
-            // Show approve/request changes actions
+            // Show feedback actions
             return Promise.resolve([
                 new PRTreeItem(
-                    '✅ Approve',
+                    '💬 Add Comment',
                     vscode.TreeItemCollapsibleState.None,
                     'action',
-                    { action: 'approve' }
+                    { action: 'comment' }
                 ),
                 new PRTreeItem(
-                    '🔄 Request Changes',
+                    '✅ Request Changes',
                     vscode.TreeItemCollapsibleState.None,
                     'action',
                     { action: 'request_changes' }
+                ),
+                new PRTreeItem(
+                    '📝 Checkpoint Work',
+                    vscode.TreeItemCollapsibleState.None,
+                    'action',
+                    { action: 'checkpoint' }
+                ),
+                new PRTreeItem(
+                    '↩️ Close Review',
+                    vscode.TreeItemCollapsibleState.None,
+                    'action',
+                    { action: 'return' }
                 )
             ]);
         }
