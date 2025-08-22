@@ -49,9 +49,10 @@ pub struct UserFeedback {
 }
 // ANCHOR_END: user_feedback
 
-/// Response data from synthetic pull request creation.
+/// Data generated from the working directory and sent over IPC to the extension
+/// as the basis for a review.
 #[derive(Debug, Serialize, Deserialize, JsonSchema)]
-pub struct ReviewResponse {
+pub struct ReviewData {
     pub review_id: String,
     pub title: String,
     pub description: serde_json::Value,
@@ -61,9 +62,8 @@ pub struct ReviewResponse {
     pub status: String,
 }
 
-/// MCP tool parameters for updating an existing synthetic pull request.
-/// Uses Dialect-style nested structure for extensibility.
 // ANCHOR: update_review_params
+/// MCP tool parameters for updating an existing synthetic pull request.
 #[derive(Debug, Serialize, Deserialize, JsonSchema, Clone)]
 pub struct UpdateReviewParams {
     /// What review are we updating
@@ -124,7 +124,7 @@ pub struct ReviewStatusResponse {
 /// * `Err(Box<dyn std::error::Error>)` - Git operation or file system error
 pub async fn request_review(
     params: RequestReviewParams,
-) -> Result<ReviewResponse, Box<dyn std::error::Error>> {
+) -> Result<ReviewData, Box<dyn std::error::Error>> {
     // Use provided repo path or default to current directory
     let repo_path = params.repo_path.as_deref().unwrap_or(".");
 
@@ -156,7 +156,7 @@ pub async fn request_review(
     review_state.save_to_file(None::<&str>)?;
 
     // Return response for VSCode extension
-    Ok(ReviewResponse {
+    Ok(ReviewData {
         review_id: review_state.review_id,
         title: review_state.title,
         description: review_state.description,

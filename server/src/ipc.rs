@@ -6,7 +6,7 @@
 use crate::types::{
     FindAllReferencesPayload, GetSelectionResult, GoodbyePayload, IPCMessage, IPCMessageType,
     LogLevel, LogParams, PoloPayload, PresentReviewParams, PresentReviewResult,
-    ResolveSymbolByNamePayload, ResponsePayload, SyntheticPRPayload, UserFeedbackPayload,
+    ResolveSymbolByNamePayload, ResponsePayload, UserFeedbackPayload,
 };
 use futures::FutureExt;
 use serde_json;
@@ -361,7 +361,10 @@ impl IPCCommunicator {
     }
 
     /// Send synthetic PR data to VSCode extension
-    pub async fn send_create_synthetic_pr(&self, review_response: &crate::synthetic_pr::ReviewResponse) -> Result<()> {
+    pub async fn send_create_synthetic_pr(
+        &self,
+        review_response: &crate::synthetic_pr::ReviewData,
+    ) -> Result<()> {
         if self.test_mode {
             info!("Synthetic PR creation message sent (test mode)");
             return Ok(());
@@ -389,15 +392,24 @@ impl IPCCommunicator {
             id: Uuid::new_v4().to_string(),
         };
 
-        debug!("Sending create_synthetic_pr message for review: {}", review_response.review_id);
+        debug!(
+            "Sending create_synthetic_pr message for review: {}",
+            review_response.review_id
+        );
         self.send_message_without_reply(message).await
     }
 
     /// Wait for user feedback on a specific review
     /// This method blocks until the user provides feedback via the VSCode extension
-    pub async fn wait_for_user_feedback(&self, review_id: &str) -> Result<crate::synthetic_pr::UserFeedback> {
+    pub async fn wait_for_user_feedback(
+        &self,
+        review_id: &str,
+    ) -> Result<crate::synthetic_pr::UserFeedback> {
         if self.test_mode {
-            info!("Wait for user feedback called (test mode) for review: {}", review_id);
+            info!(
+                "Wait for user feedback called (test mode) for review: {}",
+                review_id
+            );
             // Return mock feedback for testing
             return Ok(crate::synthetic_pr::UserFeedback {
                 review_id: Some(review_id.to_string()),
@@ -407,7 +419,11 @@ impl IPCCommunicator {
                 comment_text: Some("This is a test comment".to_string()),
                 completion_action: None,
                 additional_notes: None,
-                context_lines: Some(vec!["fn test() {".to_string(), "    // Line 42".to_string(), "}".to_string()]),
+                context_lines: Some(vec![
+                    "fn test() {".to_string(),
+                    "    // Line 42".to_string(),
+                    "}".to_string(),
+                ]),
             });
         }
 
@@ -434,9 +450,50 @@ impl IPCCommunicator {
                 inner.pending_feedback.remove(review_id);
                 Err(IPCError::ConnectionFailed {
                     path: "user_feedback".to_string(),
-                    source: std::io::Error::new(std::io::ErrorKind::BrokenPipe, "User feedback channel closed")
+                    source: std::io::Error::new(
+                        std::io::ErrorKind::BrokenPipe,
+                        "User feedback channel closed",
+                    ),
                 })
             }
+        }
+    }
+
+    /// Send review update to VSCode extension and wait for user response
+    /// This method blocks until the user provides feedback via the VSCode extension
+    pub async fn send_review_update<T: serde::Serialize>(&self, review: &T) -> Result<String> {
+        if self.test_mode {
+            info!("Send review update called (test mode)");
+            return Ok("User responded: This looks good to me!".to_string());
+        }
+
+        let shell_pid = {
+            let inner = self.inner.lock().await;
+            inner.terminal_shell_pid
+        };
+
+        // Create update payload
+        let payload = serde_json::to_value(review)?;
+
+        let message = IPCMessage {
+            shell_pid,
+            message_type: IPCMessageType::UpdateSyntheticPr,
+            payload,
+            id: Uuid::new_v4().to_string(),
+        };
+
+        // Send message and wait for response
+        let response = self.send_message_with_reply(message).await?;
+
+        // Extract user response text from the response
+        if let Some(data) = response.data {
+            if let Some(user_text) = data.get("user_response").and_then(|v| v.as_str()) {
+                Ok(user_text.to_string())
+            } else {
+                Ok("User completed the review.".to_string())
+            }
+        } else {
+            Ok("User completed the review.".to_string())
         }
     }
 
@@ -805,13 +862,14 @@ impl IPCCommunicator {
                 info!("Received user feedback message");
 
                 // Parse the user feedback payload
-                let feedback_payload: UserFeedbackPayload = match serde_json::from_value(message.payload) {
-                    Ok(payload) => payload,
-                    Err(e) => {
-                        error!("Failed to parse user feedback payload: {}", e);
-                        return;
-                    }
-                };
+                let feedback_payload: UserFeedbackPayload =
+                    match serde_json::from_value(message.payload) {
+                        Ok(payload) => payload,
+                        Err(e) => {
+                            error!("Failed to parse user feedback payload: {}", e);
+                            return;
+                        }
+                    };
 
                 // Convert to UserFeedback struct
                 let user_feedback = crate::synthetic_pr::UserFeedback {
@@ -823,26 +881,36 @@ impl IPCCommunicator {
                     file_path: feedback_payload.file_path,
                     line_number: feedback_payload.line_number,
                     comment_text: feedback_payload.comment_text,
-                    completion_action: feedback_payload.completion_action.as_deref().and_then(|action| {
-                        match action {
-                            "request_changes" => Some(crate::synthetic_pr::CompletionAction::RequestChanges),
+                    completion_action: feedback_payload.completion_action.as_deref().and_then(
+                        |action| match action {
+                            "request_changes" => {
+                                Some(crate::synthetic_pr::CompletionAction::RequestChanges)
+                            }
                             "checkpoint" => Some(crate::synthetic_pr::CompletionAction::Checkpoint),
                             "return" => Some(crate::synthetic_pr::CompletionAction::Return),
                             _ => None,
-                        }
-                    }),
+                        },
+                    ),
                     additional_notes: feedback_payload.additional_notes,
                     context_lines: feedback_payload.context_lines,
                 };
 
                 // Send to waiting MCP tool
                 let mut inner_guard = inner.lock().await;
-                if let Some(sender) = inner_guard.pending_feedback.remove(&feedback_payload.review_id) {
+                if let Some(sender) = inner_guard
+                    .pending_feedback
+                    .remove(&feedback_payload.review_id)
+                {
                     if let Err(_) = sender.send(user_feedback) {
-                        warn!("Failed to send user feedback to waiting MCP tool - receiver dropped");
+                        warn!(
+                            "Failed to send user feedback to waiting MCP tool - receiver dropped"
+                        );
                     }
                 } else {
-                    warn!("Received user feedback for unknown review ID: {}", feedback_payload.review_id);
+                    warn!(
+                        "Received user feedback for unknown review ID: {}",
+                        feedback_payload.review_id
+                    );
                 }
             }
             _ => {
