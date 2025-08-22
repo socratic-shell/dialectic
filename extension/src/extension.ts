@@ -476,6 +476,36 @@ class DaemonClient implements vscode.Disposable {
     }
 
     /**
+     * Handle comment feedback from diff view
+     */
+    public handleCommentFeedback(comment: string, filePath: string, lineNumber: number): void {
+        const reviewId = this.currentReviewId;
+        if (!reviewId) {
+            vscode.window.showErrorMessage('No active review found');
+            return;
+        }
+
+        const resolver = this.pendingFeedbackResolvers.get(reviewId);
+        if (!resolver) {
+            vscode.window.showErrorMessage('No pending feedback request found');
+            return;
+        }
+
+        // Resolve with comment feedback
+        resolver({
+            feedback_type: 'comment',
+            review_id: reviewId,
+            comment_text: comment,
+            file_path: filePath,
+            line_number: lineNumber
+        });
+
+        // Clear tree view and cleanup
+        this.syntheticPRProvider.clearPR();
+        this.pendingFeedbackResolvers.delete(reviewId);
+    }
+
+    /**
      * Handle review action from tree view button click
      */
     public handleReviewAction(action: string): void {
@@ -774,6 +804,11 @@ export function activate(context: vscode.ExtensionContext) {
     // 💡: Set up daemon client connection for message bus communication
     const daemonClient = new DaemonClient(context, reviewProvider, outputChannel, syntheticPRProvider);
     daemonClient.start();
+
+    // Set up comment callback to send comments as feedback
+    syntheticPRProvider.setCommentCallback((comment: string, filePath: string, lineNumber: number) => {
+        daemonClient.handleCommentFeedback(comment, filePath, lineNumber);
+    });
 
     // 💡: Set up universal selection detection for interactive code review
     setupSelectionDetection(context, outputChannel, daemonClient);

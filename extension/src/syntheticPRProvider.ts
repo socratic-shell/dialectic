@@ -68,6 +68,7 @@ export class SyntheticPRProvider implements vscode.Disposable {
     private treeProvider: SyntheticPRTreeProvider;
     private diffContentProvider: DialecticDiffContentProvider;
     private currentPR: SyntheticPRData | null = null;
+    private onCommentCallback?: (comment: string, filePath: string, lineNumber: number) => void;
 
     constructor(private context: vscode.ExtensionContext) {
         // Create diff content provider for virtual diff content
@@ -455,6 +456,24 @@ export class SyntheticPRProvider implements vscode.Disposable {
         
         // Ensure the thread can accept more replies
         reply.thread.canReply = true;
+
+        // Send comment as feedback to LLM
+        if (this.onCommentCallback && reply.thread.range) {
+            const uri = reply.thread.uri;
+            const lineNumber = reply.thread.range.start.line + 1; // Convert to 1-based
+            const filePath = uri.scheme === 'dialectic-diff' ? 
+                uri.path.replace('/diff/', '') : // Extract file path from diff URI
+                vscode.workspace.asRelativePath(uri);
+            
+            this.onCommentCallback(reply.text, filePath, lineNumber);
+        }
+    }
+
+    /**
+     * Set callback for when user submits a comment
+     */
+    setCommentCallback(callback: (comment: string, filePath: string, lineNumber: number) => void): void {
+        this.onCommentCallback = callback;
     }
 
     /**
