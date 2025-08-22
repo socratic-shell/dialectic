@@ -823,7 +823,14 @@ impl IPCCommunicator {
                     file_path: feedback_payload.file_path,
                     line_number: feedback_payload.line_number,
                     comment_text: feedback_payload.comment_text,
-                    completion_action: feedback_payload.completion_action,
+                    completion_action: feedback_payload.completion_action.as_deref().and_then(|action| {
+                        match action {
+                            "request_changes" => Some(crate::synthetic_pr::CompletionAction::RequestChanges),
+                            "checkpoint" => Some(crate::synthetic_pr::CompletionAction::Checkpoint),
+                            "return" => Some(crate::synthetic_pr::CompletionAction::Return),
+                            _ => None,
+                        }
+                    }),
                     additional_notes: feedback_payload.additional_notes,
                     context_lines: feedback_payload.context_lines,
                 };

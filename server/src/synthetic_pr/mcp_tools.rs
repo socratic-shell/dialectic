@@ -25,6 +25,15 @@ pub enum FeedbackType {
     CompleteReview,
 }
 
+/// Completion action for review completion
+#[derive(Debug, Serialize, Deserialize, JsonSchema, Clone)]
+#[serde(rename_all = "snake_case")]
+pub enum CompletionAction {
+    RequestChanges,
+    Checkpoint,
+    Return,
+}
+
 /// User feedback data from blocking MCP tools
 // ANCHOR: user_feedback
 #[derive(Debug, Serialize, Deserialize, JsonSchema)]
@@ -34,7 +43,7 @@ pub struct UserFeedback {
     pub file_path: Option<String>,
     pub line_number: Option<u32>,
     pub comment_text: Option<String>,
-    pub completion_action: Option<String>, // "request_changes", "checkpoint", "return"
+    pub completion_action: Option<CompletionAction>,
     pub additional_notes: Option<String>,
     pub context_lines: Option<Vec<String>>,
 }

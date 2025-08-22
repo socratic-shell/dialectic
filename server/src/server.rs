@@ -112,7 +112,7 @@ impl DialecticServer {
                 )
             }
             crate::synthetic_pr::FeedbackType::CompleteReview => {
-                let action = feedback.completion_action.as_deref().unwrap_or("return");
+                let action = feedback.completion_action.as_ref();
                 let notes = feedback.additional_notes.as_deref().unwrap_or("");
                 
                 let notes_section = if !notes.is_empty() {
@@ -122,14 +122,14 @@ impl DialecticServer {
                 };
 
                 match action {
-                    "request_changes" => format!(
+                    Some(crate::synthetic_pr::CompletionAction::RequestChanges) => format!(
                         "User completed their review and selected: 'Request agent to make changes'{}\n\
                         Based on the review discussion, please implement the requested changes. \
                         You may now edit files as needed.\n\n\
                         When finished, invoke: update_review(review_id: '{}', action: Approve)",
                         notes_section, feedback.review_id.as_deref().unwrap_or("unknown")
                     ),
-                    "checkpoint" => format!(
+                    Some(crate::synthetic_pr::CompletionAction::Checkpoint) => format!(
                         "User completed their review and selected: 'Request agent to checkpoint this work'{}\n\
                         Please commit the current changes and document the work completed.\n\n\
                         When finished, invoke: update_review(review_id: '{}', action: Approve)",
