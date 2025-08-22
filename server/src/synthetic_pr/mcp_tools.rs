@@ -39,14 +39,14 @@ pub enum CompletionAction {
 #[serde(tag = "feedback_type", rename_all = "snake_case")]
 pub enum UserFeedback {
     Comment {
-        review_id: Option<String>,
+        review_id: String,
         file_path: Option<String>,
         line_number: Option<u32>,
         comment_text: String,
         context_lines: Option<Vec<String>>,
     },
     CompleteReview {
-        review_id: Option<String>,
+        review_id: String,
         completion_action: CompletionAction,
         additional_notes: Option<String>,
     },

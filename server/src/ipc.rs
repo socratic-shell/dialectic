@@ -342,7 +342,7 @@ impl IPCCommunicator {
         if self.test_mode {
             info!("Send create synthetic PR called (test mode)");
             return Ok(UserFeedback::CompleteReview {
-                review_id: None,
+                review_id: "test_review".to_string(),
                 completion_action: crate::synthetic_pr::CompletionAction::Return,
                 additional_notes: None,
             });
@@ -390,7 +390,7 @@ impl IPCCommunicator {
             );
             // Return mock feedback for testing
             return Ok(UserFeedback::Comment {
-                review_id: Some(review_id.to_string()),
+                review_id: review_id.to_string(),
                 file_path: Some("test.rs".to_string()),
                 line_number: Some(42),
                 comment_text: "This is a test comment".to_string(),
@@ -443,7 +443,7 @@ impl IPCCommunicator {
         if self.test_mode {
             info!("Send review update called (test mode)");
             return Ok(UserFeedback::Comment {
-                review_id: Some("test_review".to_string()),
+                review_id: "test_review".to_string(),
                 file_path: Some("test.rs".to_string()),
                 line_number: Some(42),
                 comment_text: "This looks good to me!".to_string(),
@@ -865,7 +865,7 @@ impl IPCCommunicator {
                 // Convert to UserFeedback enum
                 let user_feedback = match feedback_payload.feedback_type.as_str() {
                     "comment" => UserFeedback::Comment {
-                        review_id: Some(feedback_payload.review_id.clone()),
+                        review_id: feedback_payload.review_id.clone(),
                         file_path: feedback_payload.file_path,
                         line_number: feedback_payload.line_number,
                         comment_text: feedback_payload.comment_text.unwrap_or_default(),
@@ -882,13 +882,13 @@ impl IPCCommunicator {
                             .unwrap_or(crate::synthetic_pr::CompletionAction::Return);
                         
                         UserFeedback::CompleteReview {
-                            review_id: Some(feedback_payload.review_id.clone()),
+                            review_id: feedback_payload.review_id.clone(),
                             completion_action,
                             additional_notes: feedback_payload.additional_notes,
                         }
                     }
                     _ => UserFeedback::CompleteReview {
-                        review_id: Some(feedback_payload.review_id.clone()),
+                        review_id: feedback_payload.review_id.clone(),
                         completion_action: crate::synthetic_pr::CompletionAction::Return,
                         additional_notes: None,
                     }

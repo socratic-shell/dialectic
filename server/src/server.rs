@@ -117,7 +117,7 @@ impl DialecticServer {
                     line_number,
                     comment_text,
                     context,
-                    review_id.as_deref().unwrap_or("unknown")
+                    review_id
                 )
             }
             UserFeedback::CompleteReview {
@@ -140,14 +140,14 @@ impl DialecticServer {
                         You may now edit files as needed.\n\n\
                         When finished, invoke: update_review(review_id: '{}', action: Approve)",
                         notes_section,
-                        review_id.as_deref().unwrap_or("unknown")
+                        review_id
                     ),
                     CompletionAction::Checkpoint => format!(
                         "User completed their review and selected: 'Request agent to checkpoint this work'{}\n\
                         Please commit the current changes and document the work completed.\n\n\
                         When finished, invoke: update_review(review_id: '{}', action: Approve)",
                         notes_section,
-                        review_id.as_deref().unwrap_or("unknown")
+                        review_id
                     ),
                     CompletionAction::Return => format!(
                         "User completed their review and selected: 'Return to agent without explicit request'{}\n\

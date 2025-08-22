@@ -98,8 +98,8 @@ interface CommentThread {
 
 interface UserFeedback {
     feedback_type: 'comment' | 'complete_review';
+    review_id: string;
     // For Comment variant
-    review_id?: string;
     file_path?: string;
     line_number?: number;
     comment_text?: string;
