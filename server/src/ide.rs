@@ -169,9 +169,15 @@ impl<U: IpcClient> DialectFunction<U> for FindReferences {
     }
 }
 
+/// Search for regex patterns in files, respecting gitignore rules.
+///
+/// Examples:
+/// - `{"search": {"path": "src/auth.rs", "regex": "fn\\s+\\w+"}}` - Find functions in specific file
+/// - `{"search": {"path": "src/", "regex": "TODO|FIXME"}}` - Find todos in directory
+/// - `{"search": {"path": ".", "regex": "struct User\\b"}}` - Find User struct in project
 #[derive(Deserialize)]
 pub struct Search {
-    pub file: String,
+    pub path: String,
     pub regex: String,
 }
 
@@ -191,15 +197,15 @@ impl<U: IpcClient> DialectFunction<U> for Search {
 
         let regex = Regex::new(&self.regex)?;
         let mut results = Vec::new();
-        let search_path = Path::new(&self.file);
+        let search_path = Path::new(&self.path);
 
         // If it's a specific file, search just that file
         if search_path.is_file() {
-            if let Ok(content) = fs::read_to_string(&self.file) {
+            if let Ok(content) = fs::read_to_string(&self.path) {
                 for (line_num, line) in content.lines().enumerate() {
                     if let Some(mat) = regex.find(line) {
                         results.push(FileRange {
-                            path: self.file.clone(),
+                            path: self.path.clone(),
                             start: FileLocation {
                                 line: (line_num + 1) as u32,
                                 column: (mat.start() + 1) as u32,
@@ -215,7 +221,7 @@ impl<U: IpcClient> DialectFunction<U> for Search {
             }
         } else if search_path.is_dir() {
             // Directory search with gitignore support
-            for result in Walk::new(&self.file) {
+            for result in Walk::new(&self.path) {
                 let entry = result?;
                 if entry.file_type().map_or(false, |ft| ft.is_file()) {
                     if let Ok(content) = fs::read_to_string(entry.path()) {

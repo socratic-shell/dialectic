@@ -521,7 +521,7 @@ async fn test_search_function() {
     // Test search for a pattern in a nonexistent file
     let program = serde_json::json!({
         "search": {
-            "file": "nonexistent_file.rs", 
+            "path": "nonexistent_file.rs", 
             "regex": "fn\\s+\\w+"
         }
     });
