@@ -692,8 +692,39 @@ async fn test_comment_function_with_symbol_def() {
     
     // Should normalize SymbolDef to its definedAt FileRange
     expect![[r#"
-        Err(
-            Error("data did not match any variant of untagged enum ResolvedLocation", line: 0, column: 0),
+        Ok(
+            Object {
+                "content": Array [
+                    String("This function needs better error handling"),
+                ],
+                "icon": String("warning"),
+                "locations": Array [
+                    Object {
+                        "content": String("fn validateToken(token: &str) -> bool {"),
+                        "end": Object {
+                            "column": Number(13),
+                            "line": Number(42),
+                        },
+                        "path": String("src/auth.rs"),
+                        "start": Object {
+                            "column": Number(0),
+                            "line": Number(42),
+                        },
+                    },
+                    Object {
+                        "content": String("pub fn validateToken(token: String) -> Result<(), Error> {"),
+                        "end": Object {
+                            "column": Number(13),
+                            "line": Number(15),
+                        },
+                        "path": String("src/utils.rs"),
+                        "start": Object {
+                            "column": Number(0),
+                            "line": Number(15),
+                        },
+                    },
+                ],
+            },
         )
     "#]]
     .assert_debug_eq(&result);

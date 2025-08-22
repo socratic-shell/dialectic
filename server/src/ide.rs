@@ -236,7 +236,11 @@ impl<U: IpcClient> DialectFunction<U> for Search {
 #[derive(Deserialize)]
 pub struct GitDiff {
     pub range: String,
+
+    #[expect(dead_code)]
     pub exclude_unstaged: Option<bool>,
+
+    #[expect(dead_code)]
     pub exclude_staged: Option<bool>,
 }
 
@@ -271,22 +275,31 @@ impl<U: IpcClient> DialectFunction<U> for GitDiff {
 /// - `{"comment": {"location": {"search": {"path": "src/", "regex": "fn main"}}, "icon": "warning", "content": ["Entry point"]}}`
 #[derive(Deserialize)]
 pub struct Comment {
+    /// Location for the comment.
     pub location: ResolvedLocation,
+
+    /// Optional icon.
     pub icon: Option<String>,
+
+    /// Optional content.
+    ///
+    /// FIXME: These should be content elements.
     pub content: Vec<String>,
 }
 
+/// We accept either symbols or file ranges.
 #[derive(Deserialize)]
 #[serde(untagged)]
 pub enum ResolvedLocation {
     FileRange(FileRange),
-    SymbolDef(SymbolDef),
     SearchResults(Vec<FileRange>),
+    SymbolDefs(Vec<SymbolDef>),
 }
 
+/// The fully normalized struct that we send over IPC.
 #[derive(Serialize)]
 pub struct ResolvedComment {
-    pub location: FileRange,
+    pub locations: Vec<FileRange>,
     pub icon: Option<String>,
     pub content: Vec<String>,
 }
@@ -298,22 +311,21 @@ impl<U: IpcClient> DialectFunction<U> for Comment {
 
     async fn execute(
         self,
-        interpreter: &mut DialectInterpreter<U>,
+        _interpreter: &mut DialectInterpreter<U>,
     ) -> anyhow::Result<Self::Output> {
-        // Normalize different location types to FileRange
-        let file_range = match self.location {
-            ResolvedLocation::FileRange(range) => range,
-            ResolvedLocation::SymbolDef(def) => def.defined_at,
-            ResolvedLocation::SearchResults(mut results) => {
-                if results.is_empty() {
-                    return Err(anyhow::anyhow!("Location resolved to empty search results"));
-                }
-                results.remove(0)
-            }
+        // Normalize different location types to a Vec<FileRange>
+        let locations = match self.location {
+            ResolvedLocation::FileRange(range) => vec![range],
+            ResolvedLocation::SymbolDefs(def) => def.iter().map(|d| d.defined_at.clone()).collect(),
+            ResolvedLocation::SearchResults(results) => results,
         };
 
+        if locations.is_empty() {
+            return Err(anyhow::anyhow!("Location resolved to empty search results"));
+        }
+
         Ok(ResolvedComment {
-            location: file_range,
+            locations,
             icon: self.icon,
             content: self.content,
         })
