@@ -18,6 +18,7 @@ pub struct RequestReviewParams {
 }
 
 /// User feedback data from blocking MCP tools
+// ANCHOR: user_feedback
 #[derive(Debug, Serialize, Deserialize, JsonSchema)]
 pub struct UserFeedback {
     pub review_id: Option<String>,
@@ -29,6 +30,7 @@ pub struct UserFeedback {
     pub additional_notes: Option<String>,
     pub context_lines: Option<Vec<String>>,
 }
+// ANCHOR_END: user_feedback
 
 /// Response data from synthetic pull request creation.
 #[derive(Debug, Serialize, Deserialize, JsonSchema)]

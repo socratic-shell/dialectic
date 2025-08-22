@@ -256,97 +256,87 @@ extension/src/
 └── extension.ts               # IPC and main logic
 ```
 
-## Implementation Plan
+## Implementation Status
 
-### 1. Update MCP Tool Interface
+### ✅ Completed: Server-Side Blocking Pattern
 
-**Current `update_review()` signature**:
+**MCP Tool Interface** - Real implementation in `server/src/synthetic_pr/mcp_tools.rs`:
+
 ```rust
-pub enum UpdateReviewAction {
-    WaitForFeedback,
-    AddComment { comment: serde_json::Value },
-    Approve,
-    RequestChanges,
+{{#include ../../server/src/synthetic_pr/mcp_tools.rs:user_feedback}}
+```
+
+**Blocking MCP Tools** - Real implementation in `server/src/server.rs`:
+
+```rust
+{{#include ../../server/src/server.rs:request_review_tool}}
+```
+
+```rust
+{{#include ../../server/src/server.rs:update_review_tool}}
+```
+
+**LLM Instruction Formatting** - The `format_user_feedback_message` method creates explicit instructions:
+
+For **comment feedback**:
+```
+The user reviewed your code changes and left a comment on file `src/auth.rs` at line 42:
+
+User comment: 'This validation logic looks incomplete - what about edge cases?'
+
+Code context:
+```rust
+function validateInput(input: string) {
+    return input.length > 0; // Line 42
 }
 ```
 
-**Enhanced for blocking pattern**:
-```rust
-// Tool blocks until user provides feedback
-// Returns structured user feedback data
-pub struct UserFeedbackResponse {
-    pub review_id: String,
-    pub comment_id: String,
-    pub file_path: String,
-    pub line_number: u32,
-    pub user_comment: String,
-    pub context_lines: Vec<String>, // Surrounding code for context
-}
+Please analyze the user's feedback and prepare a thoughtful response addressing their concern. 
+Do NOT modify any files on disk.
+
+When ready, invoke the update_review tool with:
+- review_id: 'abc123'
+- action: AddComment
+- comment: { response: 'Your response text here' }
+
+After responding, invoke update_review again with action: WaitForFeedback to continue the conversation.
 ```
 
-### 2. IPC Message Extension
+For **completion feedback**:
+```
+User completed their review and selected: 'Request agent to make changes'
+Additional notes: 'Focus on the validation logic we discussed'
 
-**New IPC message type**:
+Based on the review discussion, please implement the requested changes.
+You may now edit files as needed.
+
+When finished, invoke: update_review(review_id: 'abc123', action: Approve)
+```
+
+### 🔄 Next: IPC Message Handling
+
+**Missing IPC Implementation**:
+- `wait_for_user_feedback()` method currently returns stub/error
+- Need to implement actual blocking mechanism with message queues
+- Extension must send `user_comment` IPC messages to unblock server
+
+**Required IPC Message Types**:
 ```typescript
 interface UserCommentPayload {
     review_id: string;
-    comment_id: string;
-    file_path: string;
-    line_number: number;
-    comment_text: string;
-    context_lines: string[];
+    feedback_type: "comment" | "complete_review";
+    file_path?: string;
+    line_number?: number;
+    comment_text?: string;
+    completion_action?: "request_changes" | "checkpoint" | "return";
+    additional_notes?: string;
+    context_lines?: string[];
 }
 ```
 
-### 3. Extension Changes
+### 🚧 Remaining: Extension Integration
 
-**Enhanced `handleCommentSubmission()`**:
-```typescript
-private handleCommentSubmission(reply: vscode.CommentReply): void {
-    // Current: Add comment locally
-    const newComment = { /* ... */ };
-    reply.thread.comments = [...reply.thread.comments, newComment];
-    
-    // NEW: Send to MCP server via IPC
-    this.sendUserComment({
-        review_id: this.currentPR.review_id,
-        comment_id: generateCommentId(),
-        file_path: reply.thread.uri.fsPath,
-        line_number: reply.thread.range.start.line + 1,
-        comment_text: reply.text,
-        context_lines: this.getContextLines(reply.thread.uri, reply.thread.range)
-    });
-}
-```
-
-### 4. Server Blocking Logic
-
-**MCP tool implementation**:
-```rust
-pub async fn update_review(params: UpdateReviewParams) -> Result<UpdateReviewResponse> {
-    match params.action {
-        UpdateReviewAction::WaitForFeedback => {
-            // Block until IPC message arrives
-            let user_feedback = ipc_communicator.wait_for_user_comment().await?;
-            
-            Ok(UpdateReviewResponse {
-                status: "user_feedback_received".to_string(),
-                user_feedback: Some(user_feedback),
-                message: Some(format!(
-                    "User commented on {}:{} - '{}'. Please respond with update_review()",
-                    user_feedback.file_path,
-                    user_feedback.line_number,
-                    user_feedback.user_comment
-                ))
-            })
-        }
-        // ... other actions
-    }
-}
-```
-
-This creates a **natural conversation loop** where:
-1. AI blocks waiting for user input
-2. User comments unblock the AI with structured feedback
-3. AI processes and responds
-4. Cycle repeats for continuous interaction
+**Extension Changes Needed**:
+1. **Enhanced `handleCommentSubmission()`** - Send user comments via IPC
+2. **Complete Review UI** - Tree panel action with three completion choices
+3. **IPC Message Routing** - Handle `user_comment` message type
