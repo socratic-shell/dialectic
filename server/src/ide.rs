@@ -262,6 +262,70 @@ impl<U: IpcClient> DialectFunction<U> for GitDiff {
     }
 }
 
+/// Create a comment at a specific location with optional icon and content.
+///
+/// Normalizes different location types (FileRange, SymbolDef, SymbolRef) into FileRange.
+///
+/// Examples:
+/// - `{"comment": {"location": {"path": "src/main.rs", "start": {"line": 10, "column": 1}, "end": {"line": 10, "column": 20}}, "content": ["This needs refactoring"]}}`
+/// - `{"comment": {"location": {"search": {"path": "src/", "regex": "fn main"}}, "icon": "warning", "content": ["Entry point"]}}`
+#[derive(Deserialize)]
+pub struct Comment {
+    pub location: serde_json::Value, // Will be resolved to FileRange
+    pub icon: Option<String>,
+    pub content: Vec<String>,
+}
+
+#[derive(Serialize)]
+pub struct ResolvedComment {
+    pub location: FileRange,
+    pub icon: Option<String>, 
+    pub content: Vec<String>,
+}
+
+impl<U: IpcClient> DialectFunction<U> for Comment {
+    type Output = ResolvedComment;
+
+    const DEFAULT_FIELD_NAME: Option<&'static str> = None;
+
+    async fn execute(
+        self,
+        interpreter: &mut DialectInterpreter<U>,
+    ) -> anyhow::Result<Self::Output> {
+        // Evaluate the location to get concrete location data
+        let location_result = interpreter.evaluate(self.location).await?;
+        
+        // Normalize different location types to FileRange
+        let file_range = match location_result {
+            serde_json::Value::Object(obj) => {
+                // Check if it's a SymbolDef or SymbolRef with definedAt/referencedAt field
+                if let Some(defined_at) = obj.get("definedAt") {
+                    serde_json::from_value(defined_at.clone())?
+                } else if let Some(referenced_at) = obj.get("referencedAt") {
+                    serde_json::from_value(referenced_at.clone())?
+                } else {
+                    // Assume it's already a FileRange
+                    serde_json::from_value(serde_json::Value::Object(obj))?
+                }
+            }
+            // If it's an array, take the first element (e.g., from Search results)
+            serde_json::Value::Array(mut arr) => {
+                if arr.is_empty() {
+                    return Err(anyhow::anyhow!("Location resolved to empty array"));
+                }
+                serde_json::from_value(arr.remove(0))?
+            }
+            _ => return Err(anyhow::anyhow!("Invalid location type")),
+        };
+
+        Ok(ResolvedComment {
+            location: file_range,
+            icon: self.icon,
+            content: self.content,
+        })
+    }
+}
+
 fn search_file_content(file_path: &str, content: &str, regex: &regex::Regex) -> Vec<FileRange> {
     let mut results = Vec::new();
     for (line_num, line) in content.lines().enumerate() {

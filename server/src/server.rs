@@ -73,6 +73,7 @@ impl DialecticServer {
         interpreter.add_function::<crate::ide::FindReferences>();
         interpreter.add_function::<crate::ide::Search>();
         interpreter.add_function::<crate::ide::GitDiff>();
+        interpreter.add_function::<crate::ide::Comment>();
 
         Ok(Self {
             ipc: ipc.clone(),
@@ -176,6 +177,7 @@ impl DialecticServer {
         interpreter.add_function::<crate::ide::FindReferences>();
         interpreter.add_function::<crate::ide::Search>();
         interpreter.add_function::<crate::ide::GitDiff>();
+        interpreter.add_function::<crate::ide::Comment>();
 
         Self {
             ipc,

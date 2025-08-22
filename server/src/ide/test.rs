@@ -626,3 +626,41 @@ async fn test_gitdiff_function() {
     "#]]
     .assert_debug_eq(&changes);
 }
+
+#[tokio::test]
+async fn test_comment_function() {
+    use expect_test::expect;
+    
+    let mock_client = MockIpcClient::new();
+    let mut interpreter = DialectInterpreter::new(mock_client);
+    interpreter.add_function::<FindDefinitions>();
+    interpreter.add_function::<FindReferences>();
+    interpreter.add_function::<crate::ide::Search>();
+    interpreter.add_function::<crate::ide::GitDiff>();
+    interpreter.add_function::<crate::ide::Comment>();
+    
+    // Test comment with direct FileRange location (wrapped as Dialect value)
+    let program = serde_json::json!({
+        "comment": {
+            "location": {
+                "FileRange": {
+                    "path": "src/main.rs",
+                    "start": {"line": 10, "column": 1},
+                    "end": {"line": 10, "column": 20},
+                    "content": "fn main() {"
+                }
+            },
+            "icon": "info",
+            "content": ["This is the main function", "Entry point of the program"]
+        }
+    });
+    
+    let result = interpreter.evaluate(program).await;
+    
+    expect![[r#"
+        Err(
+            "[invalid dialect program] object must have exactly one key: {\n    \"column\": Number(20),\n    \"line\": Number(10),\n}",
+        )
+    "#]]
+    .assert_debug_eq(&result);
+}
