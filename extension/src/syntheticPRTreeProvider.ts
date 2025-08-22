@@ -178,12 +178,6 @@ export class SyntheticPRTreeProvider implements vscode.TreeDataProvider<PRTreeIt
             // Show feedback actions
             return Promise.resolve([
                 new PRTreeItem(
-                    '💬 Add Comment',
-                    vscode.TreeItemCollapsibleState.None,
-                    'action',
-                    { action: 'comment' }
-                ),
-                new PRTreeItem(
                     '✅ Request Changes',
                     vscode.TreeItemCollapsibleState.None,
                     'action',
