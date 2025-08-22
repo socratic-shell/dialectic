@@ -193,7 +193,6 @@ impl<U: IpcClient> DialectFunction<U> for Search {
     ) -> anyhow::Result<Self::Output> {
         use ignore::Walk;
         use regex::Regex;
-        use std::fs;
         use std::path::Path;
 
         let regex = Regex::new(&self.regex)?;
@@ -211,22 +210,14 @@ impl<U: IpcClient> DialectFunction<U> for Search {
 
         // If it's a specific file, search just that file
         if search_path.is_file() {
-            if matches_extension(&self.path, &extension_filter) {
-                if let Ok(content) = fs::read_to_string(&self.path) {
-                    results.extend(search_file_content(&self.path, &content, &regex));
-                }
-            }
+            results.extend(process_file(&self.path, &extension_filter, &regex));
         } else if search_path.is_dir() {
             // Directory search with gitignore support
             for result in Walk::new(&self.path) {
                 let entry = result?;
                 if entry.file_type().map_or(false, |ft| ft.is_file()) {
                     let path_str = entry.path().to_string_lossy().to_string();
-                    if matches_extension(&path_str, &extension_filter) {
-                        if let Ok(content) = fs::read_to_string(entry.path()) {
-                            results.extend(search_file_content(&path_str, &content, &regex));
-                        }
-                    }
+                    results.extend(process_file(&path_str, &extension_filter, &regex));
                 }
             }
         }
@@ -262,4 +253,13 @@ fn matches_extension(file_path: &str, extension_filter: &Option<String>) -> bool
         Some(ext) => file_path.ends_with(ext),
         None => true,
     }
+}
+
+fn process_file(file_path: &str, extension_filter: &Option<String>, regex: &regex::Regex) -> Vec<FileRange> {
+    if matches_extension(file_path, extension_filter) {
+        if let Ok(content) = std::fs::read_to_string(file_path) {
+            return search_file_content(file_path, &content, regex);
+        }
+    }
+    Vec::new()
 }
