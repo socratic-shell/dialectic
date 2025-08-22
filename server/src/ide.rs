@@ -202,22 +202,7 @@ impl<U: IpcClient> DialectFunction<U> for Search {
         // If it's a specific file, search just that file
         if search_path.is_file() {
             if let Ok(content) = fs::read_to_string(&self.path) {
-                for (line_num, line) in content.lines().enumerate() {
-                    if let Some(mat) = regex.find(line) {
-                        results.push(FileRange {
-                            path: self.path.clone(),
-                            start: FileLocation {
-                                line: (line_num + 1) as u32,
-                                column: (mat.start() + 1) as u32,
-                            },
-                            end: FileLocation {
-                                line: (line_num + 1) as u32,
-                                column: (mat.end() + 1) as u32,
-                            },
-                            content: Some(line.to_string()),
-                        });
-                    }
-                }
+                results.extend(search_file_content(&self.path, &content, &regex));
             }
         } else if search_path.is_dir() {
             // Directory search with gitignore support
@@ -225,22 +210,8 @@ impl<U: IpcClient> DialectFunction<U> for Search {
                 let entry = result?;
                 if entry.file_type().map_or(false, |ft| ft.is_file()) {
                     if let Ok(content) = fs::read_to_string(entry.path()) {
-                        for (line_num, line) in content.lines().enumerate() {
-                            if let Some(mat) = regex.find(line) {
-                                results.push(FileRange {
-                                    path: entry.path().to_string_lossy().to_string(),
-                                    start: FileLocation {
-                                        line: (line_num + 1) as u32,
-                                        column: (mat.start() + 1) as u32,
-                                    },
-                                    end: FileLocation {
-                                        line: (line_num + 1) as u32,
-                                        column: (mat.end() + 1) as u32,
-                                    },
-                                    content: Some(line.to_string()),
-                                });
-                            }
-                        }
+                        let path_str = entry.path().to_string_lossy().to_string();
+                        results.extend(search_file_content(&path_str, &content, &regex));
                     }
                 }
             }
@@ -249,4 +220,25 @@ impl<U: IpcClient> DialectFunction<U> for Search {
 
         Ok(results)
     }
+}
+
+fn search_file_content(file_path: &str, content: &str, regex: &regex::Regex) -> Vec<FileRange> {
+    let mut results = Vec::new();
+    for (line_num, line) in content.lines().enumerate() {
+        if let Some(mat) = regex.find(line) {
+            results.push(FileRange {
+                path: file_path.to_string(),
+                start: FileLocation {
+                    line: (line_num + 1) as u32,
+                    column: (mat.start() + 1) as u32,
+                },
+                end: FileLocation {
+                    line: (line_num + 1) as u32,
+                    column: (mat.end() + 1) as u32,
+                },
+                content: Some(line.to_string()),
+            });
+        }
+    }
+    results
 }
