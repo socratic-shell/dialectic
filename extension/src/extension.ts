@@ -147,6 +147,10 @@ class DaemonClient implements vscode.Disposable {
     // Terminal registry: track active shell PIDs with MCP servers
     private activeTerminals: Set<number> = new Set();
 
+    // Review feedback handling
+    private pendingFeedbackResolvers: Map<string, (feedback: UserFeedback) => void> = new Map();
+    private currentReviewId?: string;
+
     constructor(
         private context: vscode.ExtensionContext,
         private reviewProvider: ReviewWebviewProvider,
@@ -472,80 +476,82 @@ class DaemonClient implements vscode.Disposable {
     }
 
     /**
-     * Collect user feedback for a review
-     * This method blocks until the user provides feedback via UI
+     * Handle review action from tree view button click
      */
-    private async collectUserFeedback(reviewId: string): Promise<UserFeedback> {
-        // Show quick pick for user action
-        const action = await vscode.window.showQuickPick([
-            {
-                label: '💬 Add Comment',
-                description: 'Leave a comment on the review',
-                action: 'comment'
-            },
-            {
-                label: '✅ Request Changes',
-                description: 'Ask the agent to make changes',
-                action: 'request_changes'
-            },
-            {
-                label: '📝 Checkpoint Work',
-                description: 'Ask the agent to commit and document progress',
-                action: 'checkpoint'
-            },
-            {
-                label: '↩️ Return to Agent',
-                description: 'Return control without specific request',
-                action: 'return'
-            }
-        ], {
-            placeHolder: 'What would you like to do with this review?',
-            ignoreFocusOut: true
-        });
-
-        if (!action) {
-            // User cancelled - return default feedback
-            return {
-                feedback_type: 'complete_review',
-                review_id: reviewId,
-                completion_action: 'return'
-            };
+    public handleReviewAction(action: string): void {
+        const reviewId = this.currentReviewId;
+        if (!reviewId) {
+            vscode.window.showErrorMessage('No active review found');
+            return;
         }
 
-        if (action.action === 'comment') {
-            // Collect comment from user
+        const resolver = this.pendingFeedbackResolvers.get(reviewId);
+        if (!resolver) {
+            vscode.window.showErrorMessage('No pending feedback request found');
+            return;
+        }
+
+        this.handleSpecificAction(action, reviewId, resolver);
+    }
+
+    private async handleSpecificAction(action: string, reviewId: string, resolver: (feedback: UserFeedback) => void): Promise<void> {
+        if (action === 'comment') {
             const commentText = await vscode.window.showInputBox({
                 prompt: 'Enter your comment',
                 placeHolder: 'Type your comment here...',
                 ignoreFocusOut: true
             });
 
-            return {
+            resolver({
                 feedback_type: 'comment',
                 review_id: reviewId,
                 comment_text: commentText || '',
-                file_path: 'review', // TODO: Get actual file if commenting on specific file
-                line_number: 1 // TODO: Get actual line number
-            };
-        } else {
-            // Completion action
-            let additionalNotes: string | undefined;
-            
-            if (action.action === 'request_changes' || action.action === 'checkpoint') {
-                additionalNotes = await vscode.window.showInputBox({
-                    prompt: 'Any additional notes? (optional)',
-                    placeHolder: 'Additional instructions or context...',
-                    ignoreFocusOut: true
-                });
-            }
+                file_path: 'review',
+                line_number: 1
+            });
+        } else if (action === 'request_changes' || action === 'checkpoint') {
+            const additionalNotes = await vscode.window.showInputBox({
+                prompt: 'Any additional notes? (optional)',
+                placeHolder: 'Additional instructions or context...',
+                ignoreFocusOut: true
+            });
 
-            return {
+            resolver({
                 feedback_type: 'complete_review',
                 review_id: reviewId,
-                completion_action: action.action as 'request_changes' | 'checkpoint' | 'return',
+                completion_action: action as 'request_changes' | 'checkpoint',
                 additional_notes: additionalNotes
-            };
+            });
+        } else {
+            resolver({
+                feedback_type: 'complete_review',
+                review_id: reviewId,
+                completion_action: 'return'
+            });
         }
+
+        this.pendingFeedbackResolvers.delete(reviewId);
+    }
+
+    /**
+     * Collect user feedback for a review
+     * This method blocks until the user provides feedback via tree view buttons
+     */
+    private async collectUserFeedback(reviewId: string): Promise<UserFeedback> {
+        this.currentReviewId = reviewId;
+
+        return new Promise<UserFeedback>((resolve) => {
+            this.pendingFeedbackResolvers.set(reviewId, resolve);
+            
+            vscode.window.showInformationMessage(
+                'Review ready! Use the action buttons in the Dialectic tree view to provide feedback.',
+                'Show Tree View'
+            ).then((selection) => {
+                if (selection === 'Show Tree View') {
+                    vscode.commands.executeCommand('dialectic.showReview');
+                }
+            });
+        });
     }
 
     private sendResponse(messageId: string, response: ResponsePayload): void {
@@ -775,6 +781,11 @@ export function activate(context: vscode.ExtensionContext) {
         reviewProvider.showReview();
     });
 
+    // Register review action command for tree view buttons
+    const reviewActionCommand = vscode.commands.registerCommand('dialectic.reviewAction', (action: string) => {
+        daemonClient.handleReviewAction(action);
+    });
+
     // 💡: Copy review command is now handled via webview postMessage
     const copyReviewCommand = vscode.commands.registerCommand('dialectic.copyReview', () => {
         vscode.window.showInformationMessage('Use the Copy Review button in the review panel');
@@ -787,7 +798,7 @@ export function activate(context: vscode.ExtensionContext) {
         vscode.window.showInformationMessage('PID information logged to Dialectic output channel');
     });
 
-    context.subscriptions.push(showReviewCommand, copyReviewCommand, logPIDsCommand, reviewProvider, syntheticPRProvider, daemonClient);
+    context.subscriptions.push(showReviewCommand, reviewActionCommand, copyReviewCommand, logPIDsCommand, reviewProvider, syntheticPRProvider, daemonClient);
 
     // Return API for Ask Socratic Shell integration
     return {
