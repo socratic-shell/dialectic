@@ -154,13 +154,6 @@ impl DialecticServer {
                     ),
                 }
             }
-            crate::synthetic_pr::FeedbackData::KeepAlive => {
-                format!(
-                    "User is still reviewing (keepalive received). Please wait for their feedback.\n\n\
-                    Invoke: update_review(review_id: '{}', action: WaitForFeedback)",
-                    &feedback.review_id
-                )
-            }
         }
     }
 

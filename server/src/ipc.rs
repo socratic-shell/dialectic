@@ -497,13 +497,19 @@ impl IPCCommunicator {
 
     /// Sends an IPC message and waits for a response from VSCode extension
     ///
-    /// Sets up response correlation using the message UUID and waits up to 5 seconds
-    /// for the background reader task to deliver the matching response.
+    /// Sets up response correlation using the message UUID and waits for response.
     /// Uses the underlying `write_message` primitive to send the data.
     async fn send_message_with_reply<R>(&self, message: IPCMessage) -> Result<R>
     where
         R: DeserializeOwned,
     {
+        // Use longer timeout for user feedback messages
+        let timeout_duration = match message.message_type {
+            IPCMessageType::CreateSyntheticPr | IPCMessageType::UpdateSyntheticPr => {
+                std::time::Duration::from_secs(3600) // 1 hour for user interactions
+            }
+            _ => std::time::Duration::from_secs(5), // 5 seconds for normal operations
+        };
         debug!(
             "Sending IPC message with ID: {} (PID: {})",
             message.id,
@@ -530,8 +536,8 @@ impl IPCCommunicator {
 
         trace!("Waiting for response with 5 second timeout...");
 
-        // Wait for response with timeout
-        let response = tokio::time::timeout(std::time::Duration::from_secs(5), rx)
+        // Wait for response with appropriate timeout
+        let response = tokio::time::timeout(timeout_duration, rx)
             .await
             .map_err(|_| {
                 // Clean up the leaked entry on timeout to fix memory leak
@@ -893,7 +899,6 @@ impl IPCCommunicator {
                                 additional_notes: feedback_payload.additional_notes,
                             }
                         }
-                        "keep_alive" => crate::synthetic_pr::FeedbackData::KeepAlive,
                         _ => crate::synthetic_pr::FeedbackData::CompleteReview {
                             completion_action: crate::synthetic_pr::CompletionAction::Return,
                             additional_notes: None,
