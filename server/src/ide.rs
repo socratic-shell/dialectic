@@ -21,7 +21,7 @@ pub trait IpcClient: Send {
 /// will canonicalize to a list of [`SymbolDef`][] structures.
 ///
 /// Note that `Symbols` is not actually a [`DialectFunction`][].
-/// It is only intended for use as the value of a *function argument* 
+/// It is only intended for use as the value of a *function argument*
 /// -- it doesn't have a canonical function format.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(untagged)]
@@ -271,7 +271,7 @@ impl<U: IpcClient> DialectFunction<U> for GitDiff {
 /// - `{"comment": {"location": {"search": {"path": "src/", "regex": "fn main"}}, "icon": "warning", "content": ["Entry point"]}}`
 #[derive(Deserialize)]
 pub struct Comment {
-    pub location: serde_json::Value, // Dialect program that resolves to a location
+    pub location: ResolvedLocation,
     pub icon: Option<String>,
     pub content: Vec<String>,
 }
@@ -281,14 +281,13 @@ pub struct Comment {
 pub enum ResolvedLocation {
     FileRange(FileRange),
     SymbolDef(SymbolDef),
-    SymbolRef(SymbolRef),
     SearchResults(Vec<FileRange>),
 }
 
 #[derive(Serialize)]
 pub struct ResolvedComment {
     pub location: FileRange,
-    pub icon: Option<String>, 
+    pub icon: Option<String>,
     pub content: Vec<String>,
 }
 
@@ -301,17 +300,10 @@ impl<U: IpcClient> DialectFunction<U> for Comment {
         self,
         interpreter: &mut DialectInterpreter<U>,
     ) -> anyhow::Result<Self::Output> {
-        // Evaluate the location Dialect program
-        let location_result = interpreter.evaluate(self.location).await?;
-        
-        // Deserialize to our typed enum for proper handling
-        let resolved_location: ResolvedLocation = serde_json::from_value(location_result)?;
-        
         // Normalize different location types to FileRange
-        let file_range = match resolved_location {
+        let file_range = match self.location {
             ResolvedLocation::FileRange(range) => range,
             ResolvedLocation::SymbolDef(def) => def.defined_at,
-            ResolvedLocation::SymbolRef(ref_) => ref_.referenced_at,
             ResolvedLocation::SearchResults(mut results) => {
                 if results.is_empty() {
                     return Err(anyhow::anyhow!("Location resolved to empty search results"));
@@ -356,7 +348,11 @@ fn matches_extension(file_path: &str, extension_filter: &Option<String>) -> bool
     }
 }
 
-fn process_file(file_path: &str, extension_filter: &Option<String>, regex: &regex::Regex) -> Vec<FileRange> {
+fn process_file(
+    file_path: &str,
+    extension_filter: &Option<String>,
+    regex: &regex::Regex,
+) -> Vec<FileRange> {
     if matches_extension(file_path, extension_filter) {
         if let Ok(content) = std::fs::read_to_string(file_path) {
             return search_file_content(file_path, &content, regex);

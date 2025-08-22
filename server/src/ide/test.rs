@@ -664,3 +664,37 @@ async fn test_comment_function() {
     "#]]
     .assert_debug_eq(&result);
 }
+
+#[tokio::test]
+async fn test_comment_function_with_symbol_def() {
+    use expect_test::expect;
+    
+    let mock_client = MockIpcClient::new();
+    let mut interpreter = DialectInterpreter::new(mock_client);
+    interpreter.add_function::<FindDefinitions>();
+    interpreter.add_function::<FindReferences>();
+    interpreter.add_function::<crate::ide::Search>();
+    interpreter.add_function::<crate::ide::GitDiff>();
+    interpreter.add_function::<crate::ide::Comment>();
+    
+    // Test comment with SymbolDef location (should extract definedAt field)
+    let program = serde_json::json!({
+        "comment": {
+            "location": {
+                "findDefinitions": "validateToken"
+            },
+            "icon": "warning",
+            "content": ["This function needs better error handling"]
+        }
+    });
+    
+    let result = interpreter.evaluate(program).await;
+    
+    // Should normalize SymbolDef to its definedAt FileRange
+    expect![[r#"
+        Err(
+            Error("data did not match any variant of untagged enum ResolvedLocation", line: 0, column: 0),
+        )
+    "#]]
+    .assert_debug_eq(&result);
+}
