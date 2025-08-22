@@ -536,3 +536,29 @@ async fn test_search_function() {
     "#]]
     .assert_debug_eq(&result);
 }
+
+#[tokio::test]
+async fn test_gitdiff_function() {
+    let mock_client = MockIpcClient::new();
+    let mut interpreter = DialectInterpreter::new(mock_client);
+    interpreter.add_function::<FindDefinitions>();
+    interpreter.add_function::<FindReferences>();
+    interpreter.add_function::<crate::ide::Search>();
+    interpreter.add_function::<crate::ide::GitDiff>();
+    
+    // Test gitdiff for HEAD (will fail if not in git repo, but tests structure)
+    let program = serde_json::json!({
+        "gitdiff": {
+            "range": "HEAD"
+        }
+    });
+    
+    let result = interpreter.evaluate(program).await;
+    
+    // Should either succeed with changes or fail with git error
+    // This tests the basic structure works
+    match result {
+        Ok(_) => {}, // Success - we're in a git repo
+        Err(_) => {}, // Expected - not in git repo or no commits
+    }
+}

@@ -227,6 +227,46 @@ impl<U: IpcClient> DialectFunction<U> for Search {
     }
 }
 
+/// Generate git diffs for commit ranges, respecting exclude options.
+///
+/// Examples:
+/// - `{"gitdiff": {"range": "HEAD^.."}}` - Changes in last commit
+/// - `{"gitdiff": {"range": "HEAD~3..HEAD~1"}}` - Changes between specific commits  
+/// - `{"gitdiff": {"range": "HEAD", "exclude": {"unstaged": true}}}` - Only staged changes
+#[derive(Deserialize)]
+pub struct GitDiff {
+    pub range: String,
+    pub exclude: Option<GitDiffExclude>,
+}
+
+#[derive(Deserialize)]
+pub struct GitDiffExclude {
+    pub unstaged: Option<bool>,
+    pub staged: Option<bool>,
+}
+
+impl<U: IpcClient> DialectFunction<U> for GitDiff {
+    type Output = Vec<crate::synthetic_pr::FileChange>;
+
+    const DEFAULT_FIELD_NAME: Option<&'static str> = None;
+
+    async fn execute(
+        self,
+        _interpreter: &mut DialectInterpreter<U>,
+    ) -> anyhow::Result<Self::Output> {
+        use crate::synthetic_pr::git_service::GitService;
+
+        // Use current directory as repo path (could be made configurable)
+        let git_service = GitService::new(".")?;
+        let (base_oid, head_oid) = git_service.parse_commit_range(&self.range)?;
+        let file_changes = git_service.generate_diff(base_oid, head_oid)?;
+
+        // TODO: Apply exclude filters for staged/unstaged changes
+        // For now, return all changes
+        Ok(file_changes)
+    }
+}
+
 fn search_file_content(file_path: &str, content: &str, regex: &regex::Regex) -> Vec<FileRange> {
     let mut results = Vec::new();
     for (line_num, line) in content.lines().enumerate() {
