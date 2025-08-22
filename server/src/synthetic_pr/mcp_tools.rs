@@ -36,17 +36,23 @@ pub enum CompletionAction {
 
 /// User feedback from VSCode extension
 #[derive(Debug, Serialize, Deserialize, JsonSchema, Clone)]
+pub struct UserFeedback {
+    pub review_id: String,
+    #[serde(flatten)]
+    pub feedback: FeedbackData,
+}
+
+/// Different types of feedback data
+#[derive(Debug, Serialize, Deserialize, JsonSchema, Clone)]
 #[serde(tag = "feedback_type", rename_all = "snake_case")]
-pub enum UserFeedback {
+pub enum FeedbackData {
     Comment {
-        review_id: String,
         file_path: Option<String>,
         line_number: Option<u32>,
         comment_text: String,
         context_lines: Option<Vec<String>>,
     },
     CompleteReview {
-        review_id: String,
         completion_action: CompletionAction,
         additional_notes: Option<String>,
     },
