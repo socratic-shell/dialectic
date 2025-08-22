@@ -457,6 +457,14 @@ export class SyntheticPRProvider implements vscode.Disposable {
         reply.thread.canReply = true;
     }
 
+    /**
+     * Clear the current PR from tree view
+     */
+    clearPR(): void {
+        this.treeProvider.clearPR();
+        this.currentPR = null;
+    }
+
     dispose(): void {
         this.commentController.dispose();
         this.treeProvider.clearPR();

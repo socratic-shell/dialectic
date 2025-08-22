@@ -530,6 +530,8 @@ class DaemonClient implements vscode.Disposable {
             });
         }
 
+        // Clear tree view after action
+        this.syntheticPRProvider.clearPR();
         this.pendingFeedbackResolvers.delete(reviewId);
     }
 
