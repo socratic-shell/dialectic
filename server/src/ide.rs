@@ -173,12 +173,13 @@ impl<U: IpcClient> DialectFunction<U> for FindReferences {
 ///
 /// Examples:
 /// - `{"search": {"path": "src/auth.rs", "regex": "fn\\s+\\w+"}}` - Find functions in specific file
-/// - `{"search": {"path": "src/", "regex": "TODO|FIXME"}}` - Find todos in directory
-/// - `{"search": {"path": ".", "regex": "struct User\\b"}}` - Find User struct in project
+/// - `{"search": {"path": "src/", "regex": "TODO|FIXME", "extension": ".rs"}}` - Find todos in Rust files
+/// - `{"search": {"path": ".", "regex": "struct User\\b", "extension": "rs"}}` - Find User struct in Rust files
 #[derive(Deserialize)]
 pub struct Search {
     pub path: String,
     pub regex: String,
+    pub extension: Option<String>,
 }
 
 impl<U: IpcClient> DialectFunction<U> for Search {
@@ -199,19 +200,32 @@ impl<U: IpcClient> DialectFunction<U> for Search {
         let mut results = Vec::new();
         let search_path = Path::new(&self.path);
 
+        // Normalize extension (add dot if missing)
+        let extension_filter = self.extension.as_ref().map(|ext| {
+            if ext.starts_with('.') {
+                ext.clone()
+            } else {
+                format!(".{}", ext)
+            }
+        });
+
         // If it's a specific file, search just that file
         if search_path.is_file() {
-            if let Ok(content) = fs::read_to_string(&self.path) {
-                results.extend(search_file_content(&self.path, &content, &regex));
+            if matches_extension(&self.path, &extension_filter) {
+                if let Ok(content) = fs::read_to_string(&self.path) {
+                    results.extend(search_file_content(&self.path, &content, &regex));
+                }
             }
         } else if search_path.is_dir() {
             // Directory search with gitignore support
             for result in Walk::new(&self.path) {
                 let entry = result?;
                 if entry.file_type().map_or(false, |ft| ft.is_file()) {
-                    if let Ok(content) = fs::read_to_string(entry.path()) {
-                        let path_str = entry.path().to_string_lossy().to_string();
-                        results.extend(search_file_content(&path_str, &content, &regex));
+                    let path_str = entry.path().to_string_lossy().to_string();
+                    if matches_extension(&path_str, &extension_filter) {
+                        if let Ok(content) = fs::read_to_string(entry.path()) {
+                            results.extend(search_file_content(&path_str, &content, &regex));
+                        }
                     }
                 }
             }
@@ -241,4 +255,11 @@ fn search_file_content(file_path: &str, content: &str, regex: &regex::Regex) -> 
         }
     }
     results
+}
+
+fn matches_extension(file_path: &str, extension_filter: &Option<String>) -> bool {
+    match extension_filter {
+        Some(ext) => file_path.ends_with(ext),
+        None => true,
+    }
 }
