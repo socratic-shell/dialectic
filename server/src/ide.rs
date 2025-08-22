@@ -232,17 +232,12 @@ impl<U: IpcClient> DialectFunction<U> for Search {
 /// Examples:
 /// - `{"gitdiff": {"range": "HEAD^.."}}` - Changes in last commit
 /// - `{"gitdiff": {"range": "HEAD~3..HEAD~1"}}` - Changes between specific commits  
-/// - `{"gitdiff": {"range": "HEAD", "exclude": {"unstaged": true}}}` - Only staged changes
+/// - `{"gitdiff": {"range": "HEAD", "exclude_unstaged": true}}` - Only staged changes
 #[derive(Deserialize)]
 pub struct GitDiff {
     pub range: String,
-    pub exclude: Option<GitDiffExclude>,
-}
-
-#[derive(Deserialize)]
-pub struct GitDiffExclude {
-    pub unstaged: Option<bool>,
-    pub staged: Option<bool>,
+    pub exclude_unstaged: Option<bool>,
+    pub exclude_staged: Option<bool>,
 }
 
 impl<U: IpcClient> DialectFunction<U> for GitDiff {
