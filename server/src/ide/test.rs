@@ -539,6 +539,17 @@ async fn test_search_function() {
 
 #[tokio::test]
 async fn test_gitdiff_function() {
+    use test_utils::TestRepo;
+    
+    // Create a temporary git repo with some changes
+    let temp_repo = TestRepo::new()
+        .overwrite_and_add("src/main.rs", "fn main() {\n    println!(\"Hello\");\n}\n")
+        .commit("Initial commit")
+        .overwrite("src/main.rs", "fn main() {\n    println!(\"Hello, World!\");\n}\n")
+        .add("src/main.rs")
+        .commit("Update greeting")
+        .create();
+    
     let mock_client = MockIpcClient::new();
     let mut interpreter = DialectInterpreter::new(mock_client);
     interpreter.add_function::<FindDefinitions>();
@@ -546,19 +557,34 @@ async fn test_gitdiff_function() {
     interpreter.add_function::<crate::ide::Search>();
     interpreter.add_function::<crate::ide::GitDiff>();
     
-    // Test gitdiff for HEAD (will fail if not in git repo, but tests structure)
+    // Change to the temp repo directory
+    let original_dir = std::env::current_dir().unwrap();
+    std::env::set_current_dir(temp_repo.path()).unwrap();
+    
+    // Test gitdiff for last commit (HEAD~1 to HEAD)
     let program = serde_json::json!({
         "gitdiff": {
-            "range": "HEAD"
+            "range": "HEAD~1..HEAD"
         }
     });
     
     let result = interpreter.evaluate(program).await;
     
-    // Should either succeed with changes or fail with git error
-    // This tests the basic structure works
-    match result {
-        Ok(_) => {}, // Success - we're in a git repo
-        Err(_) => {}, // Expected - not in git repo or no commits
+    // Restore original directory
+    std::env::set_current_dir(original_dir).unwrap();
+    
+    // Should succeed and return file changes
+    assert!(result.is_ok());
+    let changes = result.unwrap();
+    
+    // Should be an array with one file change (src/main.rs)
+    if let serde_json::Value::Array(arr) = changes {
+        assert_eq!(arr.len(), 1);
+        if let serde_json::Value::Object(file_change) = &arr[0] {
+            assert_eq!(file_change.get("path").unwrap(), "src/main.rs");
+            assert_eq!(file_change.get("status").unwrap(), "Modified");
+        }
+    } else {
+        panic!("Expected array of file changes");
     }
 }
