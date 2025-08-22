@@ -199,24 +199,21 @@ pub trait DialectFunction<U: Send>: DeserializeOwned + Send {
 }
 // ANCHOR_END: dialect_function_trait
 
-/// Shorthand for structs that evaluate to an instante of themselves.
-// ANCHOR: dialect_value_trait
-pub trait DialectValue<U: Send>: Send + DeserializeOwned + Serialize {}
-// ANCHOR_END: dialect_value_trait
+/// Macro to implement DialectFunction for value types that evaluate to themselves
+#[macro_export]
+macro_rules! dialect_value {
+    ($ty:ty) => {
+        impl<U: Send> $crate::dialect::DialectFunction<U> for $ty {
+            type Output = $ty;
 
-impl<V, U> DialectFunction<U> for V
-where
-    V: DialectValue<U>,
-    U: Send,
-{
-    type Output = V;
+            const DEFAULT_FIELD_NAME: Option<&'static str> = None;
 
-    const DEFAULT_FIELD_NAME: Option<&'static str> = None;
-
-    async fn execute(
-        self,
-        _interpreter: &mut DialectInterpreter<U>,
-    ) -> anyhow::Result<Self::Output> {
-        Ok(self)
-    }
+            async fn execute(
+                self,
+                _interpreter: &mut $crate::dialect::DialectInterpreter<U>,
+            ) -> anyhow::Result<Self::Output> {
+                Ok(self)
+            }
+        }
+    };
 }

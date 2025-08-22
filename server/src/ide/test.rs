@@ -135,11 +135,18 @@ async fn test_find_definition_with_to_string_symbol() {
             Array [
                 Object {
                     "definedAt": Object {
-                        "column": Number(0),
-                        "context": String("struct User {"),
-                        "file": String("src/models.rs"),
-                        "line": Number(10),
+                        "content": String("struct User {"),
+                        "end": Object {
+                            "column": Number(4),
+                            "line": Number(10),
+                        },
+                        "path": String("src/models.rs"),
+                        "start": Object {
+                            "column": Number(0),
+                            "line": Number(10),
+                        },
                     },
+                    "kind": String("struct"),
                     "name": String("User"),
                 },
             ],
@@ -164,20 +171,34 @@ async fn test_find_definition_ambiguous_symbol() {
             Array [
                 Object {
                     "definedAt": Object {
-                        "column": Number(0),
-                        "context": String("fn validateToken(token: &str) -> bool {"),
-                        "file": String("src/auth.rs"),
-                        "line": Number(42),
+                        "content": String("fn validateToken(token: &str) -> bool {"),
+                        "end": Object {
+                            "column": Number(13),
+                            "line": Number(42),
+                        },
+                        "path": String("src/auth.rs"),
+                        "start": Object {
+                            "column": Number(0),
+                            "line": Number(42),
+                        },
                     },
+                    "kind": String("function"),
                     "name": String("validateToken"),
                 },
                 Object {
                     "definedAt": Object {
-                        "column": Number(0),
-                        "context": String("pub fn validateToken(token: String) -> Result<(), Error> {"),
-                        "file": String("src/utils.rs"),
-                        "line": Number(15),
+                        "content": String("pub fn validateToken(token: String) -> Result<(), Error> {"),
+                        "end": Object {
+                            "column": Number(13),
+                            "line": Number(15),
+                        },
+                        "path": String("src/utils.rs"),
+                        "start": Object {
+                            "column": Number(0),
+                            "line": Number(15),
+                        },
                     },
+                    "kind": String("function"),
                     "name": String("validateToken"),
                 },
             ],
@@ -201,32 +222,58 @@ async fn test_find_references() {
             Array [
                 Object {
                     "definedAt": Object {
-                        "column": Number(0),
-                        "context": String("struct User {"),
-                        "file": String("src/models.rs"),
-                        "line": Number(10),
+                        "content": String("struct User {"),
+                        "end": Object {
+                            "column": Number(4),
+                            "line": Number(10),
+                        },
+                        "path": String("src/models.rs"),
+                        "start": Object {
+                            "column": Number(0),
+                            "line": Number(10),
+                        },
                     },
+                    "kind": String("struct"),
                     "name": String("User"),
                     "referencedAt": Object {
-                        "column": Number(12),
-                        "context": String("use models::User;"),
-                        "file": String("src/auth.rs"),
-                        "line": Number(5),
+                        "content": String("use models::User;"),
+                        "end": Object {
+                            "column": Number(16),
+                            "line": Number(5),
+                        },
+                        "path": String("src/auth.rs"),
+                        "start": Object {
+                            "column": Number(12),
+                            "line": Number(5),
+                        },
                     },
                 },
                 Object {
                     "definedAt": Object {
-                        "column": Number(0),
-                        "context": String("struct User {"),
-                        "file": String("src/models.rs"),
-                        "line": Number(10),
+                        "content": String("struct User {"),
+                        "end": Object {
+                            "column": Number(4),
+                            "line": Number(10),
+                        },
+                        "path": String("src/models.rs"),
+                        "start": Object {
+                            "column": Number(0),
+                            "line": Number(10),
+                        },
                     },
+                    "kind": String("struct"),
                     "name": String("User"),
                     "referencedAt": Object {
-                        "column": Number(8),
-                        "context": String("fn create_user() -> User {"),
-                        "file": String("src/handlers.rs"),
-                        "line": Number(23),
+                        "content": String("fn create_user() -> User {"),
+                        "end": Object {
+                            "column": Number(12),
+                            "line": Number(23),
+                        },
+                        "path": String("src/handlers.rs"),
+                        "start": Object {
+                            "column": Number(8),
+                            "line": Number(23),
+                        },
                     },
                 },
             ],

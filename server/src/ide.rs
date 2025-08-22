@@ -2,7 +2,7 @@ use std::{future::Future, pin::Pin};
 
 use serde::{Deserialize, Serialize};
 
-use crate::dialect::{DialectFunction, DialectInterpreter, DialectValue};
+use crate::dialect::{DialectFunction, DialectInterpreter};
 
 pub mod ambiguity;
 mod test;
@@ -20,10 +20,9 @@ pub trait IpcClient: Send {
 /// symbol definition. In all cases the [`Symbols::resolve`][]
 /// will canonicalize to a list of [`SymbolDef`][] structures.
 ///
-/// Note that `Symbols` is not actually a [`DialectFunction`][]
-/// (nor a [`DialectValue`][]). It is only intended for use as the
-/// value of a *function argument* -- it doesn't have a canonical
-/// function format.
+/// Note that `Symbols` is not actually a [`DialectFunction`][].
+/// It is only intended for use as the value of a *function argument* 
+/// -- it doesn't have a canonical function format.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(untagged)]
 pub enum Symbols {
@@ -59,9 +58,9 @@ impl Symbols {
     }
 }
 
-/// A [`DialectValue`][] representing the definition of a symbol.
+/// A symbol definition representing where a symbol is defined.
 ///
-/// Corresponds loosely to
+/// Corresponds loosely to LSP SymbolInformation
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct SymbolDef {
     /// The symbol name (e.g., "User", "validateToken")
@@ -76,7 +75,7 @@ pub struct SymbolDef {
     pub defined_at: FileRange,
 }
 
-impl<U: Send> DialectValue<U> for SymbolDef {}
+crate::dialect_value!(SymbolDef);
 
 /// A *reference* to a symbol -- includes the information about the symbol itself.
 /// A [`SymbolRef`][] can therefore be seen as a subtype of [`SymbolDef`][].
@@ -91,7 +90,7 @@ pub struct SymbolRef {
     pub referenced_at: FileRange,
 }
 
-impl<U: Send> DialectValue<U> for SymbolRef {}
+crate::dialect_value!(SymbolRef);
 
 /// Represents a range of bytes in a file (or URI, etc).
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -110,7 +109,7 @@ pub struct FileRange {
     pub content: Option<String>,
 }
 
-impl<U: Send> DialectValue<U> for FileRange {}
+crate::dialect_value!(FileRange);
 
 /// A line/colum index.
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -122,7 +121,7 @@ pub struct FileLocation {
     pub column: u32,
 }
 
-impl<U: Send> DialectValue<U> for FileLocation {}
+crate::dialect_value!(FileLocation);
 
 // IDE Functions
 #[derive(Deserialize)]
