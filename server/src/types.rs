@@ -194,6 +194,8 @@ pub enum IPCMessageType {
     CreateSyntheticPr,
     /// Update synthetic pull request
     UpdateSyntheticPr,
+    /// User feedback from VSCode extension (comments, review completion)
+    UserFeedback,
 }
 
 /// Payload for synthetic PR creation/update messages
@@ -206,4 +208,17 @@ pub struct SyntheticPRPayload {
     pub files_changed: Vec<crate::synthetic_pr::FileChange>,
     pub comment_threads: Vec<crate::synthetic_pr::CommentThread>,
     pub status: String,
+}
+
+/// Payload for user feedback messages from VSCode extension
+#[derive(Debug, Clone, Deserialize, Serialize)]
+pub struct UserFeedbackPayload {
+    pub review_id: String,
+    pub feedback_type: String, // "comment" or "complete_review"
+    pub file_path: Option<String>,
+    pub line_number: Option<u32>,
+    pub comment_text: Option<String>,
+    pub completion_action: Option<String>, // "request_changes", "checkpoint", "return"
+    pub additional_notes: Option<String>,
+    pub context_lines: Option<Vec<String>>,
 }

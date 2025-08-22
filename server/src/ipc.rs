@@ -6,7 +6,7 @@
 use crate::types::{
     FindAllReferencesPayload, GetSelectionResult, GoodbyePayload, IPCMessage, IPCMessageType,
     LogLevel, LogParams, PoloPayload, PresentReviewParams, PresentReviewResult,
-    ResolveSymbolByNamePayload, ResponsePayload, SyntheticPRPayload,
+    ResolveSymbolByNamePayload, ResponsePayload, SyntheticPRPayload, UserFeedbackPayload,
 };
 use futures::FutureExt;
 use serde_json;
@@ -76,6 +76,10 @@ struct IPCCommunicatorInner {
     /// Enables concurrent request/response handling with proper correlation
     pending_requests: HashMap<String, oneshot::Sender<ResponsePayload>>,
 
+    /// Tracks pending user feedback requests for blocking MCP tools
+    /// Key: review_id, Value: channel to send UserFeedback back to caller
+    pending_feedback: HashMap<String, oneshot::Sender<crate::synthetic_pr::UserFeedback>>,
+
     /// Flag to track if we have an active connection and reader task
     /// When true, ensure_connection() is a no-op
     connected: bool,
@@ -97,6 +101,7 @@ impl IPCCommunicator {
             inner: Arc::new(Mutex::new(IPCCommunicatorInner {
                 write_half: None,
                 pending_requests: HashMap::new(),
+                pending_feedback: HashMap::new(),
                 connected: false,
                 vscode_pid,
                 terminal_shell_pid: shell_pid,
@@ -112,6 +117,7 @@ impl IPCCommunicator {
             inner: Arc::new(Mutex::new(IPCCommunicatorInner {
                 write_half: None,
                 pending_requests: HashMap::new(),
+                pending_feedback: HashMap::new(),
                 connected: false,
                 vscode_pid: 0,         // Dummy PID for test mode
                 terminal_shell_pid: 0, // Dummy PID for test mode
@@ -405,17 +411,33 @@ impl IPCCommunicator {
             });
         }
 
-        // TODO: Implement actual blocking mechanism
-        // This should:
-        // 1. Register a pending feedback request for this review_id
-        // 2. Block until IPC message arrives with user feedback
-        // 3. Return the structured UserFeedback data
-        
-        // For now, return an error indicating this is not yet implemented
-        Err(IPCError::ConnectionFailed {
-            path: "user_feedback".to_string(),
-            source: std::io::Error::new(std::io::ErrorKind::NotFound, "wait_for_user_feedback not yet implemented")
-        })
+        // Create a channel to receive the user feedback
+        let (sender, receiver) = oneshot::channel();
+
+        // Register the pending feedback request
+        {
+            let mut inner = self.inner.lock().await;
+            inner.pending_feedback.insert(review_id.to_string(), sender);
+        }
+
+        info!("Waiting for user feedback on review: {}", review_id);
+
+        // Block until user feedback arrives via IPC message
+        match receiver.await {
+            Ok(feedback) => {
+                info!("Received user feedback for review: {}", review_id);
+                Ok(feedback)
+            }
+            Err(_) => {
+                // Channel was dropped, remove from pending requests
+                let mut inner = self.inner.lock().await;
+                inner.pending_feedback.remove(review_id);
+                Err(IPCError::ConnectionFailed {
+                    path: "user_feedback".to_string(),
+                    source: std::io::Error::new(std::io::ErrorKind::BrokenPipe, "User feedback channel closed")
+                })
+            }
+        }
     }
 
     /// Gracefully shutdown the IPC communicator, sending Goodbye discovery message
@@ -777,6 +799,40 @@ impl IPCCommunicator {
 
                 if let Err(e) = temp_communicator.send_polo(shell_pid).await {
                     error!("Failed to send Polo response to Marco: {}", e);
+                }
+            }
+            IPCMessageType::UserFeedback => {
+                info!("Received user feedback message");
+
+                // Parse the user feedback payload
+                let feedback_payload: UserFeedbackPayload = match serde_json::from_value(message.payload) {
+                    Ok(payload) => payload,
+                    Err(e) => {
+                        error!("Failed to parse user feedback payload: {}", e);
+                        return;
+                    }
+                };
+
+                // Convert to UserFeedback struct
+                let user_feedback = crate::synthetic_pr::UserFeedback {
+                    review_id: Some(feedback_payload.review_id.clone()),
+                    feedback_type: feedback_payload.feedback_type,
+                    file_path: feedback_payload.file_path,
+                    line_number: feedback_payload.line_number,
+                    comment_text: feedback_payload.comment_text,
+                    completion_action: feedback_payload.completion_action,
+                    additional_notes: feedback_payload.additional_notes,
+                    context_lines: feedback_payload.context_lines,
+                };
+
+                // Send to waiting MCP tool
+                let mut inner_guard = inner.lock().await;
+                if let Some(sender) = inner_guard.pending_feedback.remove(&feedback_payload.review_id) {
+                    if let Err(_) = sender.send(user_feedback) {
+                        warn!("Failed to send user feedback to waiting MCP tool - receiver dropped");
+                    }
+                } else {
+                    warn!("Received user feedback for unknown review ID: {}", feedback_payload.review_id);
                 }
             }
             _ => {
