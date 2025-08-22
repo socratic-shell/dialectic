@@ -3,7 +3,7 @@
 //! Handles Unix socket/named pipe communication with the VSCode extension.
 //! Ports the logic from server/src/ipc.ts to Rust with cross-platform support.
 
-use crate::synthetic_pr::{FeedbackType, UserFeedback};
+use crate::synthetic_pr::UserFeedback;
 use crate::types::{
     FindAllReferencesPayload, GetSelectionResult, GoodbyePayload, IPCMessage, IPCMessageType,
     LogLevel, LogParams, PoloPayload, PresentReviewParams, ResolveSymbolByNamePayload,
@@ -340,16 +340,11 @@ impl IPCCommunicator {
         review_response: &crate::synthetic_pr::ReviewData,
     ) -> Result<UserFeedback> {
         if self.test_mode {
-            info!("Synthetic PR creation message sent (test mode)");
-            return Ok(UserFeedback {
+            info!("Send create synthetic PR called (test mode)");
+            return Ok(UserFeedback::CompleteReview {
                 review_id: None,
-                feedback_type: FeedbackType::CompleteReview,
-                file_path: None,
-                line_number: None,
-                comment_text: None,
-                completion_action: None,
+                completion_action: crate::synthetic_pr::CompletionAction::Return,
                 additional_notes: None,
-                context_lines: None,
             });
         }
 
@@ -394,14 +389,11 @@ impl IPCCommunicator {
                 review_id
             );
             // Return mock feedback for testing
-            return Ok(crate::synthetic_pr::UserFeedback {
+            return Ok(UserFeedback::Comment {
                 review_id: Some(review_id.to_string()),
-                feedback_type: crate::synthetic_pr::FeedbackType::Comment,
                 file_path: Some("test.rs".to_string()),
                 line_number: Some(42),
-                comment_text: Some("This is a test comment".to_string()),
-                completion_action: None,
-                additional_notes: None,
+                comment_text: "This is a test comment".to_string(),
                 context_lines: Some(vec![
                     "fn test() {".to_string(),
                     "    // Line 42".to_string(),
@@ -450,14 +442,11 @@ impl IPCCommunicator {
     ) -> Result<crate::synthetic_pr::UserFeedback> {
         if self.test_mode {
             info!("Send review update called (test mode)");
-            return Ok(crate::synthetic_pr::UserFeedback {
+            return Ok(UserFeedback::Comment {
                 review_id: Some("test_review".to_string()),
-                feedback_type: crate::synthetic_pr::FeedbackType::Comment,
                 file_path: Some("test.rs".to_string()),
                 line_number: Some(42),
-                comment_text: Some("This looks good to me!".to_string()),
-                completion_action: None,
-                additional_notes: None,
+                comment_text: "This looks good to me!".to_string(),
                 context_lines: None,
             });
         }
@@ -873,28 +862,36 @@ impl IPCCommunicator {
                         }
                     };
 
-                // Convert to UserFeedback struct
-                let user_feedback = crate::synthetic_pr::UserFeedback {
-                    review_id: Some(feedback_payload.review_id.clone()),
-                    feedback_type: match feedback_payload.feedback_type.as_str() {
-                        "complete_review" => crate::synthetic_pr::FeedbackType::CompleteReview,
-                        _ => crate::synthetic_pr::FeedbackType::Comment,
+                // Convert to UserFeedback enum
+                let user_feedback = match feedback_payload.feedback_type.as_str() {
+                    "comment" => UserFeedback::Comment {
+                        review_id: Some(feedback_payload.review_id.clone()),
+                        file_path: feedback_payload.file_path,
+                        line_number: feedback_payload.line_number,
+                        comment_text: feedback_payload.comment_text.unwrap_or_default(),
+                        context_lines: feedback_payload.context_lines,
                     },
-                    file_path: feedback_payload.file_path,
-                    line_number: feedback_payload.line_number,
-                    comment_text: feedback_payload.comment_text,
-                    completion_action: feedback_payload.completion_action.as_deref().and_then(
-                        |action| match action {
-                            "request_changes" => {
-                                Some(crate::synthetic_pr::CompletionAction::RequestChanges)
-                            }
-                            "checkpoint" => Some(crate::synthetic_pr::CompletionAction::Checkpoint),
-                            "return" => Some(crate::synthetic_pr::CompletionAction::Return),
-                            _ => None,
-                        },
-                    ),
-                    additional_notes: feedback_payload.additional_notes,
-                    context_lines: feedback_payload.context_lines,
+                    "complete_review" => {
+                        let completion_action = feedback_payload.completion_action.as_deref()
+                            .and_then(|action| match action {
+                                "request_changes" => Some(crate::synthetic_pr::CompletionAction::RequestChanges),
+                                "checkpoint" => Some(crate::synthetic_pr::CompletionAction::Checkpoint),
+                                "return" => Some(crate::synthetic_pr::CompletionAction::Return),
+                                _ => None,
+                            })
+                            .unwrap_or(crate::synthetic_pr::CompletionAction::Return);
+                        
+                        UserFeedback::CompleteReview {
+                            review_id: Some(feedback_payload.review_id.clone()),
+                            completion_action,
+                            additional_notes: feedback_payload.additional_notes,
+                        }
+                    }
+                    _ => UserFeedback::CompleteReview {
+                        review_id: Some(feedback_payload.review_id.clone()),
+                        completion_action: crate::synthetic_pr::CompletionAction::Return,
+                        additional_notes: None,
+                    }
                 };
 
                 // Send to waiting MCP tool

@@ -34,20 +34,23 @@ pub enum CompletionAction {
     Return,
 }
 
-/// User feedback data from blocking MCP tools
-// ANCHOR: user_feedback
-#[derive(Debug, Serialize, Deserialize, JsonSchema)]
-pub struct UserFeedback {
-    pub review_id: Option<String>,
-    pub feedback_type: FeedbackType,
-    pub file_path: Option<String>,
-    pub line_number: Option<u32>,
-    pub comment_text: Option<String>,
-    pub completion_action: Option<CompletionAction>,
-    pub additional_notes: Option<String>,
-    pub context_lines: Option<Vec<String>>,
+/// User feedback from VSCode extension
+#[derive(Debug, Serialize, Deserialize, JsonSchema, Clone)]
+#[serde(tag = "feedback_type", rename_all = "snake_case")]
+pub enum UserFeedback {
+    Comment {
+        review_id: Option<String>,
+        file_path: Option<String>,
+        line_number: Option<u32>,
+        comment_text: String,
+        context_lines: Option<Vec<String>>,
+    },
+    CompleteReview {
+        review_id: Option<String>,
+        completion_action: CompletionAction,
+        additional_notes: Option<String>,
+    },
 }
-// ANCHOR_END: user_feedback
 
 /// Data generated from the working directory and sent over IPC to the extension
 /// as the basis for a review.

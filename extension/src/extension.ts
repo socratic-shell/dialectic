@@ -97,14 +97,16 @@ interface CommentThread {
 }
 
 interface UserFeedback {
-    review_id?: string;
     feedback_type: 'comment' | 'complete_review';
+    // For Comment variant
+    review_id?: string;
     file_path?: string;
     line_number?: number;
     comment_text?: string;
+    context_lines?: string[];
+    // For CompleteReview variant
     completion_action?: 'request_changes' | 'checkpoint' | 'return';
     additional_notes?: string;
-    context_lines?: string[];
 }
 
 // 💡: Corresponds to `dialectic_mcp_server::ide::SymbolRef` in the Rust code
@@ -504,8 +506,8 @@ class DaemonClient implements vscode.Disposable {
         if (!action) {
             // User cancelled - return default feedback
             return {
-                review_id: reviewId,
                 feedback_type: 'complete_review',
+                review_id: reviewId,
                 completion_action: 'return'
             };
         }
@@ -519,8 +521,8 @@ class DaemonClient implements vscode.Disposable {
             });
 
             return {
-                review_id: reviewId,
                 feedback_type: 'comment',
+                review_id: reviewId,
                 comment_text: commentText || '',
                 file_path: 'review', // TODO: Get actual file if commenting on specific file
                 line_number: 1 // TODO: Get actual line number
@@ -538,8 +540,8 @@ class DaemonClient implements vscode.Disposable {
             }
 
             return {
-                review_id: reviewId,
                 feedback_type: 'complete_review',
+                review_id: reviewId,
                 completion_action: action.action as 'request_changes' | 'checkpoint' | 'return',
                 additional_notes: additionalNotes
             };
