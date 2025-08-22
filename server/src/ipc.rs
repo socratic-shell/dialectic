@@ -3,12 +3,15 @@
 //! Handles Unix socket/named pipe communication with the VSCode extension.
 //! Ports the logic from server/src/ipc.ts to Rust with cross-platform support.
 
+use crate::synthetic_pr::{FeedbackType, UserFeedback};
 use crate::types::{
     FindAllReferencesPayload, GetSelectionResult, GoodbyePayload, IPCMessage, IPCMessageType,
-    LogLevel, LogParams, PoloPayload, PresentReviewParams, PresentReviewResult,
-    ResolveSymbolByNamePayload, ResponsePayload, UserFeedbackPayload,
+    LogLevel, LogParams, PoloPayload, PresentReviewParams, ResolveSymbolByNamePayload,
+    ResponsePayload, UserFeedbackPayload,
 };
+use anyhow::Context;
 use futures::FutureExt;
+use serde::de::DeserializeOwned;
 use serde_json;
 use std::collections::HashMap;
 use std::future::Future;
@@ -139,13 +142,10 @@ impl IPCCommunicator {
         Ok(())
     }
 
-    pub async fn present_review(&self, params: PresentReviewParams) -> Result<PresentReviewResult> {
+    pub async fn present_review(&self, params: PresentReviewParams) -> Result<()> {
         if self.test_mode {
             info!("Present review called (test mode): {:?}", params);
-            return Ok(PresentReviewResult {
-                success: true,
-                message: Some("Review successfully displayed (test mode)".to_string()),
-            });
+            return Ok(());
         }
 
         // Ensure connection is established before proceeding
@@ -169,7 +169,7 @@ impl IPCCommunicator {
         debug!("Sending present_review message: {:?}", message);
         trace!("About to call send_message_with_reply for present_review");
 
-        let response = self.send_message_with_reply(message).await?;
+        let response: () = self.send_message_with_reply(message).await?;
 
         trace!(
             "Received response from send_message_with_reply: {:?}",
@@ -177,16 +177,7 @@ impl IPCCommunicator {
         );
 
         // Convert response to PresentReviewResult
-        Ok(PresentReviewResult {
-            success: response.success,
-            message: response.error.or_else(|| {
-                if response.success {
-                    Some("Review successfully displayed".to_string())
-                } else {
-                    Some("Unknown error".to_string())
-                }
-            }),
-        })
+        Ok(())
     }
 
     pub async fn get_selection(&self) -> Result<GetSelectionResult> {
@@ -224,25 +215,8 @@ impl IPCCommunicator {
 
         debug!("Sending get_selection message: {:?}", message);
 
-        let response = self.send_message_with_reply(message).await?;
-
-        if let Some(data) = response.data {
-            let selection: GetSelectionResult = serde_json::from_value(data)?;
-            Ok(selection)
-        } else {
-            Ok(GetSelectionResult {
-                selected_text: None,
-                file_path: None,
-                start_line: None,
-                start_column: None,
-                end_line: None,
-                end_column: None,
-                line_number: None,
-                document_language: None,
-                is_untitled: None,
-                message: Some("No selection data in response".to_string()),
-            })
-        }
+        let selection: GetSelectionResult = self.send_message_with_reply(message).await?;
+        Ok(selection)
     }
 
     pub async fn send_log(&self, level: LogLevel, message: String) {
@@ -364,10 +338,19 @@ impl IPCCommunicator {
     pub async fn send_create_synthetic_pr(
         &self,
         review_response: &crate::synthetic_pr::ReviewData,
-    ) -> Result<()> {
+    ) -> Result<UserFeedback> {
         if self.test_mode {
             info!("Synthetic PR creation message sent (test mode)");
-            return Ok(());
+            return Ok(UserFeedback {
+                review_id: None,
+                feedback_type: FeedbackType::CompleteReview,
+                file_path: None,
+                line_number: None,
+                comment_text: None,
+                completion_action: None,
+                additional_notes: None,
+                context_lines: None,
+            });
         }
 
         let shell_pid = {
@@ -396,7 +379,7 @@ impl IPCCommunicator {
             "Sending create_synthetic_pr message for review: {}",
             review_response.review_id
         );
-        self.send_message_without_reply(message).await
+        self.send_message_with_reply(message).await
     }
 
     /// Wait for user feedback on a specific review
@@ -461,7 +444,10 @@ impl IPCCommunicator {
 
     /// Send review update to VSCode extension and wait for user response
     /// This method blocks until the user provides feedback via the VSCode extension
-    pub async fn send_review_update<T: serde::Serialize>(&self, review: &T) -> Result<crate::synthetic_pr::UserFeedback> {
+    pub async fn send_review_update<T: serde::Serialize>(
+        &self,
+        review: &T,
+    ) -> Result<crate::synthetic_pr::UserFeedback> {
         if self.test_mode {
             info!("Send review update called (test mode)");
             return Ok(crate::synthetic_pr::UserFeedback {
@@ -492,19 +478,9 @@ impl IPCCommunicator {
         };
 
         // Send message and wait for response
-        let response = self.send_message_with_reply(message).await?;
+        let response: UserFeedback = self.send_message_with_reply(message).await?;
 
-        // Parse UserFeedback from response data
-        if let Some(data) = response.data {
-            let user_feedback: crate::synthetic_pr::UserFeedback = serde_json::from_value(data)
-                .map_err(IPCError::SerializationError)?;
-            Ok(user_feedback)
-        } else {
-            Err(IPCError::ConnectionFailed {
-                path: "user_feedback".to_string(),
-                source: std::io::Error::new(std::io::ErrorKind::InvalidData, "No user feedback data in response")
-            })
-        }
+        Ok(response)
     }
 
     /// Gracefully shutdown the IPC communicator, sending Goodbye discovery message
@@ -529,7 +505,10 @@ impl IPCCommunicator {
     /// Sets up response correlation using the message UUID and waits up to 5 seconds
     /// for the background reader task to deliver the matching response.
     /// Uses the underlying `write_message` primitive to send the data.
-    async fn send_message_with_reply(&self, message: IPCMessage) -> Result<ResponsePayload> {
+    async fn send_message_with_reply<R>(&self, message: IPCMessage) -> Result<R>
+    where
+        R: DeserializeOwned,
+    {
         debug!(
             "Sending IPC message with ID: {} (PID: {})",
             message.id,
@@ -572,7 +551,20 @@ impl IPCCommunicator {
             })?
             .map_err(|_| IPCError::ChannelClosed)?;
 
-        Ok(response)
+        // Parse UserFeedback from response data
+        if let Some(data) = response.data {
+            let user_feedback: R =
+                serde_json::from_value(data).map_err(IPCError::SerializationError)?;
+            Ok(user_feedback)
+        } else {
+            Err(IPCError::ConnectionFailed {
+                path: format!("{:?}", message.message_type),
+                source: std::io::Error::new(
+                    std::io::ErrorKind::InvalidData,
+                    "No response data in response",
+                ),
+            })
+        }
     }
 
     /// Sends an IPC message without waiting for a response (fire-and-forget)
@@ -962,23 +954,10 @@ impl crate::ide::IpcClient for IPCCommunicator {
             id: Uuid::new_v4().to_string(),
         };
 
-        let response = self.send_message_with_reply(message).await?;
-
-        if !response.success {
-            return Err(anyhow::anyhow!(
-                "VSCode extension failed to resolve symbol '{}': {}",
-                name,
-                response
-                    .error
-                    .unwrap_or_else(|| "Unknown error".to_string())
-            ));
-        }
-
-        // Parse the response data as Vec<ResolvedSymbol>
-        let symbols: Vec<crate::ide::SymbolDef> = match response.data {
-            Some(data) => serde_json::from_value(data)?,
-            None => vec![],
-        };
+        let symbols: Vec<crate::ide::SymbolDef> = self
+            .send_message_with_reply(message)
+            .await
+            .with_context(|| format!("failed to resolve symbol '{name}'"))?;
 
         Ok(symbols)
     }
@@ -1008,23 +987,15 @@ impl crate::ide::IpcClient for IPCCommunicator {
             id: Uuid::new_v4().to_string(),
         };
 
-        let response = self.send_message_with_reply(message).await?;
-
-        if !response.success {
-            return Err(anyhow::anyhow!(
-                "VSCode extension failed to find references for symbol '{}': {}",
-                symbol.name,
-                response
-                    .error
-                    .unwrap_or_else(|| "Unknown error".to_string())
-            ));
-        }
-
-        // Parse the response data as Vec<FileLocation>
-        let locations: Vec<crate::ide::FileRange> = match response.data {
-            Some(data) => serde_json::from_value(data)?,
-            None => vec![],
-        };
+        let locations: Vec<crate::ide::FileRange> = self
+            .send_message_with_reply(message)
+            .await
+            .with_context(|| {
+                format!(
+                    "VSCode extension failed to find references for symbol '{}'",
+                    symbol.name
+                )
+            })?;
 
         Ok(locations)
     }
@@ -1059,10 +1030,7 @@ mod test {
         let result = ipc.present_review(params).await;
         assert!(result.is_ok());
 
-        let review_result = result.unwrap();
-        assert!(review_result.success);
-        assert!(review_result.message.is_some());
-        assert!(review_result.message.unwrap().contains("test mode"));
+        result.unwrap();
     }
 
     #[tokio::test]
@@ -1097,8 +1065,7 @@ mod test {
         let result = ipc.present_review(params).await;
         assert!(result.is_ok());
 
-        let review_result = result.unwrap();
-        assert!(review_result.success);
+        result.unwrap();
     }
 
     #[tokio::test]

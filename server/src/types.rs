@@ -42,16 +42,6 @@ impl Default for ReviewMode {
     }
 }
 
-/// Response from the present-review tool
-#[derive(Debug, Clone, Deserialize, Serialize)]
-pub struct PresentReviewResult {
-    /// Whether the review was successfully presented
-    pub success: bool,
-
-    /// Optional message about the operation
-    pub message: Option<String>,
-}
-
 /// Parameters for log messages sent via IPC
 #[derive(Debug, Clone, Deserialize, Serialize)]
 pub struct LogParams {

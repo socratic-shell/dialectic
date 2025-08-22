@@ -217,7 +217,7 @@ impl DialecticServer {
             )
             .await;
 
-        let result = self.ipc.present_review(params).await.map_err(|e| {
+        self.ipc.present_review(params).await.map_err(|e| {
             McpError::internal_error(
                 "IPC communication failed",
                 Some(serde_json::json!({
@@ -226,38 +226,16 @@ impl DialecticServer {
             )
         })?;
 
-        if result.success {
-            self.ipc
-                .send_log(
-                    LogLevel::Info,
-                    "Review successfully displayed in VSCode".to_string(),
-                )
-                .await;
+        self.ipc
+            .send_log(
+                LogLevel::Info,
+                "Review successfully displayed in VSCode".to_string(),
+            )
+            .await;
 
-            let message = result
-                .message
-                .unwrap_or_else(|| "Review successfully displayed in VSCode".to_string());
-
-            Ok(CallToolResult::success(vec![Content::text(message)]))
-        } else {
-            let error_msg = result
-                .message
-                .unwrap_or_else(|| "Unknown error".to_string());
-
-            self.ipc
-                .send_log(
-                    LogLevel::Error,
-                    format!("Failed to display review: {}", error_msg),
-                )
-                .await;
-
-            Err(McpError::internal_error(
-                "Failed to display review",
-                Some(serde_json::json!({
-                    "error": format!("Failed to display review: {}", error_msg)
-                })),
-            ))
-        }
+        Ok(CallToolResult::success(vec![Content::text(
+            "Review successfully displayed in VSCode",
+        )]))
     }
 
     /// Get the currently selected text from any active editor in VSCode
