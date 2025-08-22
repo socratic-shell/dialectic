@@ -11,6 +11,17 @@
 {{#include ../../server/src/types.rs:present_review_params}}
 ```
 
+## present_walkthrough
+
+```rust
+{{#include ../../server/src/server.rs:present_walkthrough_tool}}
+```
+
+**Parameters:**
+```rust
+{{#include ../../server/src/types.rs:present_walkthrough_params}}
+```
+
 ## get_selection
 
 ```rust

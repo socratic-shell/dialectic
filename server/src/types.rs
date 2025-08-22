@@ -6,6 +6,30 @@
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 
+/// Parameters for the present-walkthrough MCP tool
+///
+/// Walkthroughs are Dialect programs that execute dynamically to resolve locations
+// ANCHOR: present_walkthrough_params
+#[derive(Debug, Clone, Deserialize, Serialize, JsonSchema)]
+pub struct PresentWalkthroughParams {
+    /// Introduction section - Dialect program that evaluates to List
+    pub introduction: Option<Vec<serde_json::Value>>,
+    
+    /// Highlights section - Dialect program that evaluates to List  
+    pub highlights: Option<Vec<serde_json::Value>>,
+    
+    /// Changes section - Dialect program that evaluates to List
+    pub changes: Option<Vec<serde_json::Value>>,
+    
+    /// Actions section - Dialect program that evaluates to List
+    pub actions: Option<Vec<serde_json::Value>>,
+    
+    /// Base directory path for resolving relative file references
+    #[serde(rename = "baseUri")]
+    pub base_uri: String,
+}
+// ANCHOR_END: present_walkthrough_params
+
 /// Parameters for the present-review MCP tool
 ///
 /// Matches PresentReviewParams from TypeScript implementation
@@ -166,6 +190,7 @@ pub struct IPCMessage {
 #[serde(rename_all = "snake_case")]
 pub enum IPCMessageType {
     PresentReview,
+    PresentWalkthrough,
     Log,
     GetSelection,
     /// Extension broadcasts "who's out there?" to discover active MCP servers

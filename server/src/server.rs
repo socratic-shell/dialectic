@@ -18,7 +18,7 @@ use tracing::info;
 use crate::dialect::DialectInterpreter;
 use crate::ipc::IPCCommunicator;
 use crate::synthetic_pr::{CompletionAction, RequestReviewParams, UpdateReviewParams, UserFeedback};
-use crate::types::{LogLevel, PresentReviewParams};
+use crate::types::{LogLevel, PresentReviewParams, PresentWalkthroughParams};
 use serde::{Deserialize, Serialize};
 
 /// Parameters for the ide_operation tool
@@ -241,6 +241,44 @@ impl DialecticServer {
 
         Ok(CallToolResult::success(vec![Content::text(
             "Review successfully displayed in VSCode",
+        )]))
+    }
+
+    /// Display a code walkthrough in VSCode
+    ///
+    /// Walkthroughs are structured guides with introduction, highlights, changes, and actions.
+    /// Uses Dialect programs for dynamic location resolution.
+    // ANCHOR: present_walkthrough_tool
+    #[tool(description = "Display a code walkthrough in VSCode. \
+                       Walkthroughs are structured guides with introduction, highlights, changes, and actions. \
+                       Uses Dialect programs for dynamic location resolution.")]
+    async fn present_walkthrough(
+        &self,
+        Parameters(params): Parameters<PresentWalkthroughParams>,
+    ) -> Result<CallToolResult, McpError> {
+        // ANCHOR_END: present_walkthrough_tool
+        // Log the tool call via IPC (also logs locally)
+        self.ipc
+            .send_log(
+                LogLevel::Debug,
+                format!(
+                    "Received present_walkthrough tool call with params: {:?}",
+                    params
+                ),
+            )
+            .await;
+
+        // TODO: Execute Dialect programs to resolve locations and render walkthrough
+        // For now, just return success to establish the interface
+        self.ipc
+            .send_log(
+                LogLevel::Info,
+                "Walkthrough tool called - implementation pending".to_string(),
+            )
+            .await;
+
+        Ok(CallToolResult::success(vec![Content::text(
+            "Walkthrough tool interface established - implementation pending",
         )]))
     }
 
