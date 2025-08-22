@@ -96,6 +96,17 @@ interface CommentThread {
     content: string;
 }
 
+interface UserFeedback {
+    review_id?: string;
+    feedback_type: 'comment' | 'complete_review';
+    file_path?: string;
+    line_number?: number;
+    comment_text?: string;
+    completion_action?: 'request_changes' | 'checkpoint' | 'return';
+    additional_notes?: string;
+    context_lines?: string[];
+}
+
 // 💡: Corresponds to `dialectic_mcp_server::ide::SymbolRef` in the Rust code
 interface SymbolDef {
     name: String,
@@ -339,9 +350,14 @@ class DaemonClient implements vscode.Disposable {
                 await this.syntheticPRProvider.createSyntheticPR(prPayload);
                 this.outputChannel.appendLine(`[SYNTHETIC PR] ${Date.now() - startTime}ms: syntheticPRProvider.createSyntheticPR completed`);
 
-                this.outputChannel.appendLine(`[SYNTHETIC PR] ${Date.now() - startTime}ms: Sending success response`);
-                this.sendResponse(message.id, { success: true });
-                this.outputChannel.appendLine(`[SYNTHETIC PR] ${Date.now() - startTime}ms: Success response sent`);
+                // Collect user feedback
+                this.outputChannel.appendLine(`[SYNTHETIC PR] ${Date.now() - startTime}ms: Collecting user feedback`);
+                const userFeedback = await this.collectUserFeedback(prPayload.review_id);
+                this.outputChannel.appendLine(`[SYNTHETIC PR] ${Date.now() - startTime}ms: User feedback collected`);
+
+                this.outputChannel.appendLine(`[SYNTHETIC PR] ${Date.now() - startTime}ms: Sending feedback response`);
+                this.sendResponse(message.id, { success: true, data: userFeedback });
+                this.outputChannel.appendLine(`[SYNTHETIC PR] ${Date.now() - startTime}ms: Feedback response sent`);
             } catch (error) {
                 this.outputChannel.appendLine(`Error handling create_synthetic_pr: ${error}`);
                 this.sendResponse(message.id, {
@@ -358,7 +374,10 @@ class DaemonClient implements vscode.Disposable {
                 // Update PR UI using SyntheticPRProvider
                 await this.syntheticPRProvider.updateSyntheticPR(prPayload);
 
-                this.sendResponse(message.id, { success: true });
+                // Collect user feedback
+                const userFeedback = await this.collectUserFeedback(prPayload.review_id);
+
+                this.sendResponse(message.id, { success: true, data: userFeedback });
             } catch (error) {
                 this.outputChannel.appendLine(`Error handling update_synthetic_pr: ${error}`);
                 this.sendResponse(message.id, {
@@ -448,6 +467,83 @@ class DaemonClient implements vscode.Disposable {
             isUntitled: activeEditor.document.isUntitled,
             message: `Selected ${selectedText.length} characters from ${startLine === endLine ? `line ${startLine}, columns ${startColumn}-${endColumn}` : `lines ${startLine}:${startColumn} to ${endLine}:${endColumn}`}`
         };
+    }
+
+    /**
+     * Collect user feedback for a review
+     * This method blocks until the user provides feedback via UI
+     */
+    private async collectUserFeedback(reviewId: string): Promise<UserFeedback> {
+        // Show quick pick for user action
+        const action = await vscode.window.showQuickPick([
+            {
+                label: '💬 Add Comment',
+                description: 'Leave a comment on the review',
+                action: 'comment'
+            },
+            {
+                label: '✅ Request Changes',
+                description: 'Ask the agent to make changes',
+                action: 'request_changes'
+            },
+            {
+                label: '📝 Checkpoint Work',
+                description: 'Ask the agent to commit and document progress',
+                action: 'checkpoint'
+            },
+            {
+                label: '↩️ Return to Agent',
+                description: 'Return control without specific request',
+                action: 'return'
+            }
+        ], {
+            placeHolder: 'What would you like to do with this review?',
+            ignoreFocusOut: true
+        });
+
+        if (!action) {
+            // User cancelled - return default feedback
+            return {
+                review_id: reviewId,
+                feedback_type: 'complete_review',
+                completion_action: 'return'
+            };
+        }
+
+        if (action.action === 'comment') {
+            // Collect comment from user
+            const commentText = await vscode.window.showInputBox({
+                prompt: 'Enter your comment',
+                placeHolder: 'Type your comment here...',
+                ignoreFocusOut: true
+            });
+
+            return {
+                review_id: reviewId,
+                feedback_type: 'comment',
+                comment_text: commentText || '',
+                file_path: 'review', // TODO: Get actual file if commenting on specific file
+                line_number: 1 // TODO: Get actual line number
+            };
+        } else {
+            // Completion action
+            let additionalNotes: string | undefined;
+            
+            if (action.action === 'request_changes' || action.action === 'checkpoint') {
+                additionalNotes = await vscode.window.showInputBox({
+                    prompt: 'Any additional notes? (optional)',
+                    placeHolder: 'Additional instructions or context...',
+                    ignoreFocusOut: true
+                });
+            }
+
+            return {
+                review_id: reviewId,
+                feedback_type: 'complete_review',
+                completion_action: action.action as 'request_changes' | 'checkpoint' | 'return',
+                additional_notes: additionalNotes
+            };
+        }
     }
 
     private sendResponse(messageId: string, response: ResponsePayload): void {
