@@ -271,9 +271,18 @@ impl<U: IpcClient> DialectFunction<U> for GitDiff {
 /// - `{"comment": {"location": {"search": {"path": "src/", "regex": "fn main"}}, "icon": "warning", "content": ["Entry point"]}}`
 #[derive(Deserialize)]
 pub struct Comment {
-    pub location: serde_json::Value, // Will be resolved to FileRange
+    pub location: serde_json::Value, // Dialect program that resolves to a location
     pub icon: Option<String>,
     pub content: Vec<String>,
+}
+
+#[derive(Deserialize)]
+#[serde(untagged)]
+pub enum ResolvedLocation {
+    FileRange(FileRange),
+    SymbolDef(SymbolDef),
+    SymbolRef(SymbolRef),
+    SearchResults(Vec<FileRange>),
 }
 
 #[derive(Serialize)]
@@ -292,30 +301,23 @@ impl<U: IpcClient> DialectFunction<U> for Comment {
         self,
         interpreter: &mut DialectInterpreter<U>,
     ) -> anyhow::Result<Self::Output> {
-        // Evaluate the location to get concrete location data
+        // Evaluate the location Dialect program
         let location_result = interpreter.evaluate(self.location).await?;
         
+        // Deserialize to our typed enum for proper handling
+        let resolved_location: ResolvedLocation = serde_json::from_value(location_result)?;
+        
         // Normalize different location types to FileRange
-        let file_range = match location_result {
-            serde_json::Value::Object(obj) => {
-                // Check if it's a SymbolDef or SymbolRef with definedAt/referencedAt field
-                if let Some(defined_at) = obj.get("definedAt") {
-                    serde_json::from_value(defined_at.clone())?
-                } else if let Some(referenced_at) = obj.get("referencedAt") {
-                    serde_json::from_value(referenced_at.clone())?
-                } else {
-                    // Assume it's already a FileRange
-                    serde_json::from_value(serde_json::Value::Object(obj))?
+        let file_range = match resolved_location {
+            ResolvedLocation::FileRange(range) => range,
+            ResolvedLocation::SymbolDef(def) => def.defined_at,
+            ResolvedLocation::SymbolRef(ref_) => ref_.referenced_at,
+            ResolvedLocation::SearchResults(mut results) => {
+                if results.is_empty() {
+                    return Err(anyhow::anyhow!("Location resolved to empty search results"));
                 }
+                results.remove(0)
             }
-            // If it's an array, take the first element (e.g., from Search results)
-            serde_json::Value::Array(mut arr) => {
-                if arr.is_empty() {
-                    return Err(anyhow::anyhow!("Location resolved to empty array"));
-                }
-                serde_json::from_value(arr.remove(0))?
-            }
-            _ => return Err(anyhow::anyhow!("Invalid location type")),
         };
 
         Ok(ResolvedComment {
