@@ -24,6 +24,7 @@
     - [AI Guidance design considerations](./design/ai-guidance.md) <!-- 💡: Design decisions made specifically to work well with AI collaboration patterns from socratic shell -->
     - [Codebase structure](./design/codebase-structure.md) <!-- 💡: Overview of project structure, key files, and how components connect for contributors -->
 - [How each feature works]() <!-- 💡: Walk through the flow of particular features -->
+    - [Code walkthroughs](./design/code-walkthroughs.md)
     - [Present Review](./design/present-review.md) <!-- 💡: How AI assistants present code reviews, message flows, and implementation details -->
     - [Synthetic Pull Requests](./design/synthetic-pr.md) <!-- 💡: Git operations with git2, AI comment parsing (💡❓TODO/FIXME), MCP tool implementation, and VSCode CommentController integration for PR-like workflows -->
     - [Ask Socratic Shell](./design/ask-socratic-shell.md) <!-- 💡: How Ask Socratic Shell works, message flows, and implementation details -->
@@ -33,6 +34,7 @@
     - [MCP Tool interface](./design/mcp-tool-interface.md) <!-- 💡: API specification for AI assistants calling present_review tool with markdown content -->
 - [VSCode extension](./design/extension.md) <!-- 💡: Highlights of the VSCode Extension design and implementation: activation, establishing IPC protocol -->
 - [Dialect language](./design/dialect-language.md) <!-- 💡: JSON mini-language semantics for IDE operations - function composition, value types, and execution model -->
+
 
 # References
 
