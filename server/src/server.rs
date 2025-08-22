@@ -17,7 +17,7 @@ use tracing::info;
 
 use crate::dialect::DialectInterpreter;
 use crate::ipc::IPCCommunicator;
-use crate::synthetic_pr::{RequestReviewParams, UpdateReviewParams};
+use crate::synthetic_pr::{RequestReviewParams, UpdateReviewParams, UserFeedback};
 use crate::types::{LogLevel, PresentReviewParams};
 use serde::{Deserialize, Serialize};
 
@@ -82,6 +82,73 @@ impl DialecticServer {
     /// Get a reference to the IPC communicator
     pub fn ipc(&self) -> &IPCCommunicator {
         &self.ipc
+    }
+
+    /// Format user feedback into clear instructions for the LLM
+    fn format_user_feedback_message(&self, feedback: &UserFeedback) -> String {
+        match feedback.feedback_type {
+            crate::synthetic_pr::FeedbackType::Comment => {
+                let file_path = feedback.file_path.as_deref().unwrap_or("unknown file");
+                let line_number = feedback.line_number.unwrap_or(0);
+                let comment_text = feedback.comment_text.as_deref().unwrap_or("(no comment)");
+
+                let context = if let Some(lines) = &feedback.context_lines {
+                    format!("\n\nCode context:\n```\n{}\n```", lines.join("\n"))
+                } else {
+                    String::new()
+                };
+
+                format!(
+                    "The user reviewed your code changes and left a comment on file `{}` at line {}:\n\n\
+                    User comment: '{}'{}\n\n\
+                    Please analyze the user's feedback and prepare a thoughtful response addressing their concern. \
+                    Do NOT modify any files on disk.\n\n\
+                    When ready, invoke the update_review tool with:\n\
+                    - review_id: '{}'\n\
+                    - action: AddComment\n\
+                    - comment: {{ response: 'Your response text here' }}\n\n\
+                    After responding, invoke update_review again with action: WaitForFeedback to continue the conversation.",
+                    file_path,
+                    line_number,
+                    comment_text,
+                    context,
+                    feedback.review_id.as_deref().unwrap_or("unknown")
+                )
+            }
+            crate::synthetic_pr::FeedbackType::CompleteReview => {
+                let action = feedback.completion_action.as_ref();
+                let notes = feedback.additional_notes.as_deref().unwrap_or("");
+
+                let notes_section = if !notes.is_empty() {
+                    format!("\nAdditional notes: '{}'\n", notes)
+                } else {
+                    String::new()
+                };
+
+                match action {
+                    Some(crate::synthetic_pr::CompletionAction::RequestChanges) => format!(
+                        "User completed their review and selected: 'Request agent to make changes'{}\n\
+                        Based on the review discussion, please implement the requested changes. \
+                        You may now edit files as needed.\n\n\
+                        When finished, invoke: update_review(review_id: '{}', action: Approve)",
+                        notes_section,
+                        feedback.review_id.as_deref().unwrap_or("unknown")
+                    ),
+                    Some(crate::synthetic_pr::CompletionAction::Checkpoint) => format!(
+                        "User completed their review and selected: 'Request agent to checkpoint this work'{}\n\
+                        Please commit the current changes and document the work completed.\n\n\
+                        When finished, invoke: update_review(review_id: '{}', action: Approve)",
+                        notes_section,
+                        feedback.review_id.as_deref().unwrap_or("unknown")
+                    ),
+                    _ => format!(
+                        "User completed their review and selected: 'Return to agent without explicit request'{}\n\
+                        The review is complete. You may proceed as you see fit.",
+                        notes_section
+                    ),
+                }
+            }
+        }
     }
 
     /// Ensure the message bus daemon is running for the given VSCode PID
@@ -359,7 +426,7 @@ impl DialecticServer {
             .await;
 
         // Execute the synthetic PR creation
-        let result = crate::synthetic_pr::request_review(params)
+        let result = crate::synthetic_pr::harvest_review_data(params)
             .await
             .map_err(|e| {
                 McpError::internal_error(
@@ -391,19 +458,17 @@ impl DialecticServer {
             .await;
 
         // Send initial review to VSCode extension and wait for user response
-        let user_response = self.ipc
-            .send_review_update(&result)
-            .await
-            .map_err(|e| {
-                McpError::internal_error(
-                    "Failed to send initial review",
-                    Some(serde_json::json!({
-                        "error": e.to_string()
-                    })),
-                )
-            })?;
+        let user_feedback = self.ipc.send_review_update(&result).await.map_err(|e| {
+            McpError::internal_error(
+                "Failed to send initial review",
+                Some(serde_json::json!({
+                    "error": e.to_string()
+                })),
+            )
+        })?;
 
-        Ok(CallToolResult::success(vec![Content::text(user_response)]))
+        let message = self.format_user_feedback_message(&user_feedback);
+        Ok(CallToolResult::success(vec![Content::text(message)]))
     }
 
     // ANCHOR: update_review_tool
@@ -440,7 +505,8 @@ impl DialecticServer {
             })?;
 
         // 2. Send updated state to VSCode extension via IPC and wait for response
-        let user_response = self.ipc
+        let user_feedback = self
+            .ipc
             .send_review_update(&updated_review)
             .await
             .map_err(|e| {
@@ -452,8 +518,9 @@ impl DialecticServer {
                 )
             })?;
 
-        // 3. Return user's response to LLM
-        Ok(CallToolResult::success(vec![Content::text(user_response)]))
+        // 3. Return formatted user response to LLM
+        let message = self.format_user_feedback_message(&user_feedback);
+        Ok(CallToolResult::success(vec![Content::text(message)]))
     }
 
     /// Get the status of the current synthetic pull request

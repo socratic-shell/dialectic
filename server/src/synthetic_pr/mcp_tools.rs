@@ -122,7 +122,7 @@ pub struct ReviewStatusResponse {
 /// # Returns
 /// * `Ok(ReviewResponse)` - Complete review data with files and comments
 /// * `Err(Box<dyn std::error::Error>)` - Git operation or file system error
-pub async fn request_review(
+pub async fn harvest_review_data(
     params: RequestReviewParams,
 ) -> Result<ReviewData, Box<dyn std::error::Error>> {
     // Use provided repo path or default to current directory

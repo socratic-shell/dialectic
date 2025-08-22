@@ -461,10 +461,19 @@ impl IPCCommunicator {
 
     /// Send review update to VSCode extension and wait for user response
     /// This method blocks until the user provides feedback via the VSCode extension
-    pub async fn send_review_update<T: serde::Serialize>(&self, review: &T) -> Result<String> {
+    pub async fn send_review_update<T: serde::Serialize>(&self, review: &T) -> Result<crate::synthetic_pr::UserFeedback> {
         if self.test_mode {
             info!("Send review update called (test mode)");
-            return Ok("User responded: This looks good to me!".to_string());
+            return Ok(crate::synthetic_pr::UserFeedback {
+                review_id: Some("test_review".to_string()),
+                feedback_type: crate::synthetic_pr::FeedbackType::Comment,
+                file_path: Some("test.rs".to_string()),
+                line_number: Some(42),
+                comment_text: Some("This looks good to me!".to_string()),
+                completion_action: None,
+                additional_notes: None,
+                context_lines: None,
+            });
         }
 
         let shell_pid = {
@@ -485,15 +494,16 @@ impl IPCCommunicator {
         // Send message and wait for response
         let response = self.send_message_with_reply(message).await?;
 
-        // Extract user response text from the response
+        // Parse UserFeedback from response data
         if let Some(data) = response.data {
-            if let Some(user_text) = data.get("user_response").and_then(|v| v.as_str()) {
-                Ok(user_text.to_string())
-            } else {
-                Ok("User completed the review.".to_string())
-            }
+            let user_feedback: crate::synthetic_pr::UserFeedback = serde_json::from_value(data)
+                .map_err(IPCError::SerializationError)?;
+            Ok(user_feedback)
         } else {
-            Ok("User completed the review.".to_string())
+            Err(IPCError::ConnectionFailed {
+                path: "user_feedback".to_string(),
+                source: std::io::Error::new(std::io::ErrorKind::InvalidData, "No user feedback data in response")
+            })
         }
     }
 
