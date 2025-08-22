@@ -86,8 +86,8 @@ impl DialecticServer {
 
     /// Format user feedback into clear instructions for the LLM
     fn format_user_feedback_message(&self, feedback: &UserFeedback) -> String {
-        match feedback.feedback_type.as_str() {
-            "comment" => {
+        match feedback.feedback_type {
+            crate::synthetic_pr::FeedbackType::Comment => {
                 let file_path = feedback.file_path.as_deref().unwrap_or("unknown file");
                 let line_number = feedback.line_number.unwrap_or(0);
                 let comment_text = feedback.comment_text.as_deref().unwrap_or("(no comment)");
@@ -111,7 +111,7 @@ impl DialecticServer {
                     file_path, line_number, comment_text, context, feedback.review_id.as_deref().unwrap_or("unknown")
                 )
             }
-            "complete_review" => {
+            crate::synthetic_pr::FeedbackType::CompleteReview => {
                 let action = feedback.completion_action.as_deref().unwrap_or("return");
                 let notes = feedback.additional_notes.as_deref().unwrap_or("");
                 
@@ -142,7 +142,6 @@ impl DialecticServer {
                     )
                 }
             }
-            _ => format!("User provided feedback: {:?}", feedback)
         }
     }
 

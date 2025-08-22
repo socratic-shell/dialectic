@@ -401,7 +401,7 @@ impl IPCCommunicator {
             // Return mock feedback for testing
             return Ok(crate::synthetic_pr::UserFeedback {
                 review_id: Some(review_id.to_string()),
-                feedback_type: "comment".to_string(),
+                feedback_type: crate::synthetic_pr::FeedbackType::Comment,
                 file_path: Some("test.rs".to_string()),
                 line_number: Some(42),
                 comment_text: Some("This is a test comment".to_string()),
@@ -816,7 +816,10 @@ impl IPCCommunicator {
                 // Convert to UserFeedback struct
                 let user_feedback = crate::synthetic_pr::UserFeedback {
                     review_id: Some(feedback_payload.review_id.clone()),
-                    feedback_type: feedback_payload.feedback_type,
+                    feedback_type: match feedback_payload.feedback_type.as_str() {
+                        "complete_review" => crate::synthetic_pr::FeedbackType::CompleteReview,
+                        _ => crate::synthetic_pr::FeedbackType::Comment,
+                    },
                     file_path: feedback_payload.file_path,
                     line_number: feedback_payload.line_number,
                     comment_text: feedback_payload.comment_text,

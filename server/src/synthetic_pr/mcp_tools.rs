@@ -17,12 +17,20 @@ pub struct RequestReviewParams {
     pub repo_path: Option<String>,
 }
 
+/// User feedback type from VSCode extension
+#[derive(Debug, Serialize, Deserialize, JsonSchema, Clone)]
+#[serde(rename_all = "snake_case")]
+pub enum FeedbackType {
+    Comment,
+    CompleteReview,
+}
+
 /// User feedback data from blocking MCP tools
 // ANCHOR: user_feedback
 #[derive(Debug, Serialize, Deserialize, JsonSchema)]
 pub struct UserFeedback {
     pub review_id: Option<String>,
-    pub feedback_type: String, // "comment" or "complete_review"
+    pub feedback_type: FeedbackType,
     pub file_path: Option<String>,
     pub line_number: Option<u32>,
     pub comment_text: Option<String>,
