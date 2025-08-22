@@ -97,7 +97,7 @@ interface CommentThread {
 }
 
 interface UserFeedback {
-    feedback_type: 'comment' | 'complete_review';
+    feedback_type: 'comment' | 'complete_review' | 'keep_alive';
     review_id: string;
     // For Comment variant
     file_path?: string;
@@ -476,76 +476,96 @@ class DaemonClient implements vscode.Disposable {
      * This method blocks until the user provides feedback via UI
      */
     private async collectUserFeedback(reviewId: string): Promise<UserFeedback> {
-        // Show quick pick for user action
-        const action = await vscode.window.showQuickPick([
-            {
-                label: '💬 Add Comment',
-                description: 'Leave a comment on the review',
-                action: 'comment'
-            },
-            {
-                label: '✅ Request Changes',
-                description: 'Ask the agent to make changes',
-                action: 'request_changes'
-            },
-            {
-                label: '📝 Checkpoint Work',
-                description: 'Ask the agent to commit and document progress',
-                action: 'checkpoint'
-            },
-            {
-                label: '↩️ Return to Agent',
-                description: 'Return control without specific request',
-                action: 'return'
-            }
-        ], {
-            placeHolder: 'What would you like to do with this review?',
-            ignoreFocusOut: true
-        });
+        // Set up keepalive mechanism
+        const keepaliveInterval = setInterval(() => {
+            // Send keepalive back to server
+            this.sendKeepAlive(reviewId);
+        }, 30000); // Every 30 seconds
 
-        if (!action) {
-            // User cancelled - return default feedback
-            return {
-                feedback_type: 'complete_review',
-                review_id: reviewId,
-                completion_action: 'return'
-            };
-        }
-
-        if (action.action === 'comment') {
-            // Collect comment from user
-            const commentText = await vscode.window.showInputBox({
-                prompt: 'Enter your comment',
-                placeHolder: 'Type your comment here...',
+        try {
+            // Show quick pick for user action
+            const action = await vscode.window.showQuickPick([
+                {
+                    label: '💬 Add Comment',
+                    description: 'Leave a comment on the review',
+                    action: 'comment'
+                },
+                {
+                    label: '✅ Request Changes',
+                    description: 'Ask the agent to make changes',
+                    action: 'request_changes'
+                },
+                {
+                    label: '📝 Checkpoint Work',
+                    description: 'Ask the agent to commit and document progress',
+                    action: 'checkpoint'
+                },
+                {
+                    label: '↩️ Return to Agent',
+                    description: 'Return control without specific request',
+                    action: 'return'
+                }
+            ], {
+                placeHolder: 'What would you like to do with this review?',
                 ignoreFocusOut: true
             });
 
-            return {
-                feedback_type: 'comment',
-                review_id: reviewId,
-                comment_text: commentText || '',
-                file_path: 'review', // TODO: Get actual file if commenting on specific file
-                line_number: 1 // TODO: Get actual line number
-            };
-        } else {
-            // Completion action
-            let additionalNotes: string | undefined;
-            
-            if (action.action === 'request_changes' || action.action === 'checkpoint') {
-                additionalNotes = await vscode.window.showInputBox({
-                    prompt: 'Any additional notes? (optional)',
-                    placeHolder: 'Additional instructions or context...',
-                    ignoreFocusOut: true
-                });
+            if (!action) {
+                // User cancelled - return default feedback
+                return {
+                    feedback_type: 'complete_review',
+                    review_id: reviewId,
+                    completion_action: 'return'
+                };
             }
 
-            return {
-                feedback_type: 'complete_review',
-                review_id: reviewId,
-                completion_action: action.action as 'request_changes' | 'checkpoint' | 'return',
-                additional_notes: additionalNotes
-            };
+            if (action.action === 'comment') {
+                // Collect comment from user
+                const commentText = await vscode.window.showInputBox({
+                    prompt: 'Enter your comment',
+                    placeHolder: 'Type your comment here...',
+                    ignoreFocusOut: true
+                });
+
+                return {
+                    feedback_type: 'comment',
+                    review_id: reviewId,
+                    comment_text: commentText || '',
+                    file_path: 'review', // TODO: Get actual file if commenting on specific file
+                    line_number: 1 // TODO: Get actual line number
+                };
+            } else {
+                // Completion action
+                let additionalNotes: string | undefined;
+                
+                if (action.action === 'request_changes' || action.action === 'checkpoint') {
+                    additionalNotes = await vscode.window.showInputBox({
+                        prompt: 'Any additional notes? (optional)',
+                        placeHolder: 'Additional instructions or context...',
+                        ignoreFocusOut: true
+                    });
+                }
+
+                return {
+                    feedback_type: 'complete_review',
+                    review_id: reviewId,
+                    completion_action: action.action as 'request_changes' | 'checkpoint' | 'return',
+                    additional_notes: additionalNotes
+                };
+            }
+        } finally {
+            // Always clear the keepalive interval
+            clearInterval(keepaliveInterval);
         }
+    }
+
+    /**
+     * Send keepalive message to indicate user is still active
+     */
+    private sendKeepAlive(reviewId: string): void {
+        this.outputChannel.appendLine(`[KEEPALIVE] Sending keepalive for review: ${reviewId}`);
+        // Note: This would need to be sent back through the same response channel
+        // For now, we'll implement this as a separate message or extend the current response mechanism
     }
 
     private sendResponse(messageId: string, response: ResponsePayload): void {

@@ -56,6 +56,7 @@ pub enum FeedbackData {
         completion_action: CompletionAction,
         additional_notes: Option<String>,
     },
+    KeepAlive,
 }
 
 /// Data generated from the working directory and sent over IPC to the extension

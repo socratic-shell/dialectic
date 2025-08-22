@@ -893,6 +893,7 @@ impl IPCCommunicator {
                                 additional_notes: feedback_payload.additional_notes,
                             }
                         }
+                        "keep_alive" => crate::synthetic_pr::FeedbackData::KeepAlive,
                         _ => crate::synthetic_pr::FeedbackData::CompleteReview {
                             completion_action: crate::synthetic_pr::CompletionAction::Return,
                             additional_notes: None,
