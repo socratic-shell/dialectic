@@ -63,7 +63,7 @@
       "activitybar": [
         {
           "id": "dialectic",
-          "title": "Dialectic",
+          "title": "Socratic Shell",
           "icon": "logo.svg"
         }
       ]
@@ -72,7 +72,7 @@
       "dialectic": [
         {
           "id": "dialectic.syntheticPR",
-          "name": "Pull Request"
+          "name": "Code Review"
         }
       ]
     },
