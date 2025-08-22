@@ -168,3 +168,79 @@ impl<U: IpcClient> DialectFunction<U> for FindReferences {
         Ok(output)
     }
 }
+
+#[derive(Deserialize)]
+pub struct Search {
+    pub file: String,
+    pub regex: String,
+}
+
+impl<U: IpcClient> DialectFunction<U> for Search {
+    type Output = Vec<FileRange>;
+
+    const DEFAULT_FIELD_NAME: Option<&'static str> = None;
+
+    async fn execute(
+        self,
+        _interpreter: &mut DialectInterpreter<U>,
+    ) -> anyhow::Result<Self::Output> {
+        use ignore::Walk;
+        use regex::Regex;
+        use std::fs;
+        use std::path::Path;
+
+        let regex = Regex::new(&self.regex)?;
+        let mut results = Vec::new();
+        let search_path = Path::new(&self.file);
+
+        // If it's a specific file, search just that file
+        if search_path.is_file() {
+            if let Ok(content) = fs::read_to_string(&self.file) {
+                for (line_num, line) in content.lines().enumerate() {
+                    if let Some(mat) = regex.find(line) {
+                        results.push(FileRange {
+                            path: self.file.clone(),
+                            start: FileLocation {
+                                line: (line_num + 1) as u32,
+                                column: (mat.start() + 1) as u32,
+                            },
+                            end: FileLocation {
+                                line: (line_num + 1) as u32,
+                                column: (mat.end() + 1) as u32,
+                            },
+                            content: Some(line.to_string()),
+                        });
+                    }
+                }
+            }
+        } else if search_path.is_dir() {
+            // Directory search with gitignore support
+            for result in Walk::new(&self.file) {
+                let entry = result?;
+                if entry.file_type().map_or(false, |ft| ft.is_file()) {
+                    if let Ok(content) = fs::read_to_string(entry.path()) {
+                        for (line_num, line) in content.lines().enumerate() {
+                            if let Some(mat) = regex.find(line) {
+                                results.push(FileRange {
+                                    path: entry.path().to_string_lossy().to_string(),
+                                    start: FileLocation {
+                                        line: (line_num + 1) as u32,
+                                        column: (mat.start() + 1) as u32,
+                                    },
+                                    end: FileLocation {
+                                        line: (line_num + 1) as u32,
+                                        column: (mat.end() + 1) as u32,
+                                    },
+                                    content: Some(line.to_string()),
+                                });
+                            }
+                        }
+                    }
+                }
+            }
+        }
+        // If path doesn't exist, just return empty results
+
+        Ok(results)
+    }
+}

@@ -71,6 +71,7 @@ impl DialecticServer {
         let mut interpreter = DialectInterpreter::new(ipc.clone());
         interpreter.add_function::<crate::ide::FindDefinitions>();
         interpreter.add_function::<crate::ide::FindReferences>();
+        interpreter.add_function::<crate::ide::Search>();
 
         Ok(Self {
             ipc: ipc.clone(),
@@ -172,6 +173,7 @@ impl DialecticServer {
         let mut interpreter = DialectInterpreter::new(ipc.clone());
         interpreter.add_function::<crate::ide::FindDefinitions>();
         interpreter.add_function::<crate::ide::FindReferences>();
+        interpreter.add_function::<crate::ide::Search>();
 
         Self {
             ipc,

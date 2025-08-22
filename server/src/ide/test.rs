@@ -507,3 +507,32 @@ async fn test_invalid_function_format() {
     let result = interpreter.evaluate(input).await;
     assert!(result.is_err());
 }
+
+#[tokio::test]
+async fn test_search_function() {
+    use expect_test::expect;
+    
+    let mock_client = MockIpcClient::new();
+    let mut interpreter = DialectInterpreter::new(mock_client);
+    interpreter.add_function::<FindDefinitions>();
+    interpreter.add_function::<FindReferences>();
+    interpreter.add_function::<crate::ide::Search>();
+    
+    // Test search for a pattern in a nonexistent file
+    let program = serde_json::json!({
+        "search": {
+            "file": "nonexistent_file.rs", 
+            "regex": "fn\\s+\\w+"
+        }
+    });
+    
+    let result = interpreter.evaluate(program).await;
+    
+    // Should return empty results since file doesn't exist
+    expect![[r#"
+        Ok(
+            Array [],
+        )
+    "#]]
+    .assert_debug_eq(&result);
+}
