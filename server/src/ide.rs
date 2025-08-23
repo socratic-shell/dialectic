@@ -472,19 +472,22 @@ fn process_markdown_links(markdown: String) -> String {
     let parser = Parser::new(&markdown);
     let mut events: Vec<Event> = parser.collect();
     
-    // Pass 1: Convert well-formed Link events
-    for event in &mut events {
-        if let Event::Start(Tag::Link { dest_url, .. }) = event {
-            let converted_url = convert_url_to_dialectic(dest_url);
-            *dest_url = converted_url.into();
-        }
-    }
-    
-    // Pass 2: Coalesce adjacent Text events
+    // Pass 1: Coalesce adjacent Text events first
     events = coalesce_text_events(events);
     
-    // Pass 3: Process malformed links in Text events
+    // Pass 2: Process malformed links in Text events
     events = process_malformed_links_in_events(events);
+    
+    // Pass 3: Convert well-formed Link events (but skip ones already processed)
+    for event in &mut events {
+        if let Event::Start(Tag::Link { dest_url, .. }) = event {
+            // Only convert if it doesn't already start with dialectic:
+            if !dest_url.starts_with("dialectic:") {
+                let converted_url = convert_url_to_dialectic(dest_url);
+                *dest_url = converted_url.into();
+            }
+        }
+    }
     
     // Convert events back to markdown
     let mut output = String::new();
@@ -529,13 +532,7 @@ fn process_malformed_links_in_events(events: Vec<Event>) -> Vec<Event> {
     for event in events {
         match event {
             Event::Text(text) => {
-                let processed_text = process_malformed_links_in_text(&text);
-                if processed_text != text.as_ref() {
-                    // Text was modified, create a new owned Text event
-                    result.push(Event::Text(processed_text.into()));
-                } else {
-                    result.push(Event::Text(text));
-                }
+                process_malformed_links_in_text(&text, &mut result);
             }
             _ => {
                 result.push(event);
@@ -546,45 +543,90 @@ fn process_malformed_links_in_events(events: Vec<Event>) -> Vec<Event> {
     result
 }
 
-fn process_malformed_links_in_text(text: &str) -> String {
-    let mut result = text.to_string();
+fn process_malformed_links_in_text(text: &str, events: &mut Vec<Event>) {
+    use pulldown_cmark::{Event, Tag, TagEnd, LinkType};
+    
+    let mut remaining = text;
     
     // Handle malformed links with problematic characters: spaces, {, [, (
-    // Pattern: [text](url with spaces or {[( characters)
-    result = regex::Regex::new(r"\[([^\]]+)\]\(([^)]*[ \{\[\(][^)]*)\)")
-        .unwrap()
-        .replace_all(&result, |caps: &regex::Captures| {
-            let link_text = &caps[1];
-            let url = &caps[2];
-            let converted_url = convert_url_to_dialectic(url);
-            format!("[{}]({})", link_text, converted_url)
-        })
-        .to_string();
+    let malformed_regex = regex::Regex::new(r"\[([^\]]+)\]\(([^)]*[ \{\[\(][^)]*)\)").unwrap();
     
     // Handle reference-style links: [foo.rs][] or [foo.rs:22][]
-    result = regex::Regex::new(r"\[([^\]]+)\]\[\]")
-        .unwrap()
-        .replace_all(&result, |caps: &regex::Captures| {
-            let link_text = &caps[1];
+    let reference_regex = regex::Regex::new(r"\[([^\]]+)\]\[\]").unwrap();
+    
+    let mut last_end = 0;
+    
+    // Process malformed links first
+    for m in malformed_regex.find_iter(text) {
+        // Add text before the match
+        if m.start() > last_end {
+            events.push(Event::Text(text[last_end..m.start()].to_string().into()));
+        }
+        
+        if let Some(caps) = malformed_regex.captures(&text[m.start()..m.end()]) {
+            let link_text = caps[1].to_string();
+            let url = caps[2].to_string();
             
-            // Handle [filename.ext:line][] format
-            if let Some(line_caps) = regex::Regex::new(r"^([^:]+\.[a-z]+):(\d+)$").unwrap().captures(link_text) {
+            // Generate proper link events
+            events.push(Event::Start(Tag::Link { 
+                link_type: LinkType::Inline, 
+                dest_url: url.into(), 
+                title: "".into(), 
+                id: "".into() 
+            }));
+            events.push(Event::Text(link_text.into()));
+            events.push(Event::End(TagEnd::Link));
+        }
+        
+        last_end = m.end();
+    }
+    
+    // Update remaining text
+    remaining = &text[last_end..];
+    last_end = 0;
+    
+    // Process reference-style links in remaining text
+    for m in reference_regex.find_iter(remaining) {
+        // Add text before the match
+        if m.start() > last_end {
+            events.push(Event::Text(remaining[last_end..m.start()].to_string().into()));
+        }
+        
+        if let Some(caps) = reference_regex.captures(&remaining[m.start()..m.end()]) {
+            let link_text = caps[1].to_string();
+            
+            // Determine URL based on pattern
+            let url = if let Some(line_caps) = regex::Regex::new(r"^([^:]+\.[a-z]+):(\d+)$").unwrap().captures(&link_text) {
                 let filename = &line_caps[1];
                 let line_num = &line_caps[2];
-                return format!("[{}](dialectic:{}#L{})", link_text, filename, line_num);
-            }
+                format!("dialectic:{}#L{}", filename, line_num)
+            } else if regex::Regex::new(r"^[^:]+\.[a-z]+$").unwrap().is_match(&link_text) {
+                format!("dialectic:{}", link_text)
+            } else {
+                // For other reference links, leave as-is for now
+                events.push(Event::Text(remaining[m.start()..m.end()].to_string().into()));
+                last_end = m.end();
+                continue;
+            };
             
-            // Handle [filename.ext][] format
-            if regex::Regex::new(r"^[^:]+\.[a-z]+$").unwrap().is_match(link_text) {
-                return format!("[{}](dialectic:{})", link_text, link_text);
-            }
-            
-            // For other reference links, leave unchanged for now
-            format!("[{}][]", link_text)
-        })
-        .to_string();
+            // Generate proper link events
+            events.push(Event::Start(Tag::Link { 
+                link_type: LinkType::Inline, 
+                dest_url: url.into(), 
+                title: "".into(), 
+                id: "".into() 
+            }));
+            events.push(Event::Text(link_text.into()));
+            events.push(Event::End(TagEnd::Link));
+        }
+        
+        last_end = m.end();
+    }
     
-    result
+    // Add any remaining text
+    if last_end < remaining.len() {
+        events.push(Event::Text(remaining[last_end..].to_string().into()));
+    }
 }
 
 fn convert_url_to_dialectic(url: &str) -> String {
@@ -630,6 +672,7 @@ pub enum ResolvedWalkthroughElement {
 #[cfg(test)]
 mod url_conversion_tests {
     use super::*;
+    use pulldown_cmark::{Parser, Event, Tag};
 
     #[test]
     fn test_markdown_url_conversion() {
