@@ -180,6 +180,40 @@ impl IPCCommunicator {
         Ok(())
     }
 
+    pub async fn present_walkthrough(&self, walkthrough: crate::ide::ResolvedWalkthrough) -> Result<()> {
+        if self.test_mode {
+            info!("Present walkthrough called (test mode): {:?}", walkthrough);
+            return Ok(());
+        }
+
+        let payload = serde_json::to_value(&walkthrough)?;
+
+        let shell_pid = {
+            let inner = self.inner.lock().await;
+            inner.terminal_shell_pid
+        };
+        
+        let message = IPCMessage {
+            shell_pid,
+            message_type: IPCMessageType::PresentWalkthrough,
+            payload,
+            id: Uuid::new_v4().to_string(),
+        };
+
+        debug!("Sending present_walkthrough message: {:?}", message);
+        trace!("About to call send_message_with_reply for present_walkthrough");
+
+        let response: () = self.send_message_with_reply(message).await?;
+
+        trace!(
+            "Received response from send_message_with_reply: {:?}",
+            response
+        );
+        info!("Successfully presented walkthrough to VSCode");
+
+        Ok(())
+    }
+
     pub async fn get_selection(&self) -> Result<GetSelectionResult> {
         if self.test_mode {
             info!("Get selection called (test mode)");

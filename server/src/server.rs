@@ -282,20 +282,25 @@ impl DialecticServer {
             highlights: self.process_walkthrough_elements(params.highlights.as_ref()).await?,
             changes: self.process_walkthrough_elements(params.changes.as_ref()).await?,
             actions: self.process_walkthrough_elements(params.actions.as_ref()).await?,
+            base_uri: params.base_uri.clone(),
         };
         
-        // Log the processing result
+        // Send resolved walkthrough to VSCode extension
+        self.ipc
+            .present_walkthrough(resolved)
+            .await
+            .map_err(|e| McpError::internal_error("Failed to present walkthrough", Some(serde_json::json!({"error": e.to_string()}))))?;
+        
+        // Log success
         self.ipc
             .send_log(
                 LogLevel::Info,
-                format!("Processed walkthrough with {} sections", 
-                    [&resolved.introduction, &resolved.highlights, &resolved.changes, &resolved.actions]
-                        .iter().filter(|s| s.is_some()).count()),
+                "Walkthrough successfully sent to VSCode".to_string(),
             )
             .await;
 
         Ok(CallToolResult::success(vec![Content::text(
-            "Walkthrough successfully processed",
+            "Walkthrough successfully processed and presented in VSCode",
         )]))
     }
 

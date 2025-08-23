@@ -297,7 +297,7 @@ pub enum ResolvedLocation {
 }
 
 /// The fully normalized struct that we send over IPC.
-#[derive(Serialize, Deserialize)]
+#[derive(Serialize, Deserialize, Debug)]
 pub struct ResolvedComment {
     pub locations: Vec<FileRange>,
     pub icon: Option<String>,
@@ -403,7 +403,7 @@ pub struct Action {
     pub tell_agent: Option<String>,
 }
 
-#[derive(Serialize, Deserialize)]
+#[derive(Serialize, Deserialize, Debug)]
 pub struct ResolvedAction {
     pub button: String,
     pub tell_agent: Option<String>,
@@ -428,15 +428,16 @@ impl<U: IpcClient> DialectFunction<U> for Action {
 
 /// Resolved walkthrough types for IPC communication with VSCode extension
 
-#[derive(Serialize)]
+#[derive(Serialize, Debug)]
 pub struct ResolvedWalkthrough {
     pub introduction: Option<Vec<ResolvedWalkthroughElement>>,
     pub highlights: Option<Vec<ResolvedWalkthroughElement>>,
     pub changes: Option<Vec<ResolvedWalkthroughElement>>,
     pub actions: Option<Vec<ResolvedWalkthroughElement>>,
+    pub base_uri: String,
 }
 
-#[derive(Serialize, Deserialize)]
+#[derive(Serialize, Deserialize, Debug)]
 #[serde(untagged)]
 pub enum ResolvedWalkthroughElement {
     /// Plain markdown text
