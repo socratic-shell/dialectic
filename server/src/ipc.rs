@@ -180,7 +180,10 @@ impl IPCCommunicator {
         Ok(())
     }
 
-    pub async fn present_walkthrough(&self, walkthrough: crate::ide::ResolvedWalkthrough) -> Result<()> {
+    pub async fn present_walkthrough(
+        &self,
+        walkthrough: crate::ide::ResolvedWalkthrough,
+    ) -> Result<()> {
         if self.test_mode {
             info!("Present walkthrough called (test mode): {:?}", walkthrough);
             return Ok(());
@@ -192,7 +195,7 @@ impl IPCCommunicator {
             let inner = self.inner.lock().await;
             inner.terminal_shell_pid
         };
-        
+
         let message = IPCMessage {
             shell_pid,
             message_type: IPCMessageType::PresentWalkthrough,
@@ -587,19 +590,12 @@ impl IPCCommunicator {
             .map_err(|_| IPCError::ChannelClosed)?;
 
         // Parse UserFeedback from response data
-        if let Some(data) = response.data {
-            let user_feedback: R =
-                serde_json::from_value(data).map_err(IPCError::SerializationError)?;
-            Ok(user_feedback)
+        let user_feedback: R = if let Some(data) = response.data {
+            serde_json::from_value(data).map_err(IPCError::SerializationError)?
         } else {
-            Err(IPCError::ConnectionFailed {
-                path: format!("{:?}", message.message_type),
-                source: std::io::Error::new(
-                    std::io::ErrorKind::InvalidData,
-                    "No response data in response",
-                ),
-            })
-        }
+            serde_json::from_value(serde_json::Value::Null)?
+        };
+        Ok(user_feedback)
     }
 
     /// Sends an IPC message without waiting for a response (fire-and-forget)
@@ -919,15 +915,21 @@ impl IPCCommunicator {
                             context_lines: feedback_payload.context_lines,
                         },
                         "complete_review" => {
-                            let completion_action = feedback_payload.completion_action.as_deref()
+                            let completion_action = feedback_payload
+                                .completion_action
+                                .as_deref()
                                 .and_then(|action| match action {
-                                    "request_changes" => Some(crate::synthetic_pr::CompletionAction::RequestChanges),
-                                    "checkpoint" => Some(crate::synthetic_pr::CompletionAction::Checkpoint),
+                                    "request_changes" => {
+                                        Some(crate::synthetic_pr::CompletionAction::RequestChanges)
+                                    }
+                                    "checkpoint" => {
+                                        Some(crate::synthetic_pr::CompletionAction::Checkpoint)
+                                    }
                                     "return" => Some(crate::synthetic_pr::CompletionAction::Return),
                                     _ => None,
                                 })
                                 .unwrap_or(crate::synthetic_pr::CompletionAction::Return);
-                            
+
                             crate::synthetic_pr::FeedbackData::CompleteReview {
                                 completion_action,
                                 additional_notes: feedback_payload.additional_notes,
@@ -936,8 +938,8 @@ impl IPCCommunicator {
                         _ => crate::synthetic_pr::FeedbackData::CompleteReview {
                             completion_action: crate::synthetic_pr::CompletionAction::Return,
                             additional_notes: None,
-                        }
-                    }
+                        },
+                    },
                 };
 
                 // Send to waiting MCP tool
