@@ -278,18 +278,10 @@ impl DialecticServer {
 
         // Execute Dialect programs to resolve locations and render walkthrough
         let resolved = crate::ide::ResolvedWalkthrough {
-            introduction: if let Some(elements) = &params.introduction {
-                Some(self.process_walkthrough_elements(elements).await?)
-            } else { None },
-            highlights: if let Some(elements) = &params.highlights {
-                Some(self.process_walkthrough_elements(elements).await?)
-            } else { None },
-            changes: if let Some(elements) = &params.changes {
-                Some(self.process_walkthrough_elements(elements).await?)
-            } else { None },
-            actions: if let Some(elements) = &params.actions {
-                Some(self.process_walkthrough_elements(elements).await?)
-            } else { None },
+            introduction: self.process_walkthrough_elements(params.introduction.as_ref()).await?,
+            highlights: self.process_walkthrough_elements(params.highlights.as_ref()).await?,
+            changes: self.process_walkthrough_elements(params.changes.as_ref()).await?,
+            actions: self.process_walkthrough_elements(params.actions.as_ref()).await?,
         };
         
         // Log the processing result
@@ -310,13 +302,18 @@ impl DialecticServer {
     /// Process a list of walkthrough elements
     async fn process_walkthrough_elements(
         &self,
-        elements: &[serde_json::Value],
-    ) -> Result<Vec<crate::ide::ResolvedWalkthroughElement>, McpError> {
-        let mut resolved_elements = Vec::new();
-        for element in elements {
-            resolved_elements.push(self.process_walkthrough_element(element.clone()).await?);
+        elements: Option<&Vec<serde_json::Value>>,
+    ) -> Result<Option<Vec<crate::ide::ResolvedWalkthroughElement>>, McpError> {
+        match elements {
+            Some(elements) => {
+                let mut resolved_elements = Vec::new();
+                for element in elements {
+                    resolved_elements.push(self.process_walkthrough_element(element.clone()).await?);
+                }
+                Ok(Some(resolved_elements))
+            }
+            None => Ok(None),
         }
-        Ok(resolved_elements)
     }
 
     /// Process a single walkthrough element, executing Dialect programs if needed
