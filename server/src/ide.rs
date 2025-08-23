@@ -546,26 +546,16 @@ fn process_malformed_links_in_events(events: Vec<Event>) -> Vec<Event> {
 fn process_malformed_links_in_text(text: &str, events: &mut Vec<Event>) {
     use pulldown_cmark::{Event, Tag, TagEnd, LinkType};
     
-    let mut remaining = text;
+    // Combined regex with named captures
+    let combined_regex = regex::Regex::new(
+        r"(?P<malformed>\[(?P<malformed_text>[^\]]+)\]\((?P<malformed_url>[^)]*[ \{\[\(][^)]*)\))|(?P<reference>\[(?P<reference_text>[^\]]+)\]\[\])"
+    ).unwrap();
     
-    // Handle malformed links with problematic characters: spaces, {, [, (
-    let malformed_regex = regex::Regex::new(r"\[([^\]]+)\]\(([^)]*[ \{\[\(][^)]*)\)").unwrap();
-    
-    // Handle reference-style links: [foo.rs][] or [foo.rs:22][]
-    let reference_regex = regex::Regex::new(r"\[([^\]]+)\]\[\]").unwrap();
-    
-    let mut last_end = 0;
-    
-    // Process malformed links first
-    for m in malformed_regex.find_iter(text) {
-        // Add text before the match
-        if m.start() > last_end {
-            events.push(Event::Text(text[last_end..m.start()].to_string().into()));
-        }
-        
-        if let Some(caps) = malformed_regex.captures(&text[m.start()..m.end()]) {
-            let link_text = caps[1].to_string();
-            let url = caps[2].to_string();
+    process_regex_matches(text, &combined_regex, events, |caps, events| {
+        if caps.name("malformed").is_some() {
+            // Malformed link: [text](url with spaces)
+            let link_text = caps.name("malformed_text").unwrap().as_str().to_string();
+            let url = caps.name("malformed_url").unwrap().as_str().to_string();
             
             // Generate proper link events
             events.push(Event::Start(Tag::Link { 
@@ -576,24 +566,10 @@ fn process_malformed_links_in_text(text: &str, events: &mut Vec<Event>) {
             }));
             events.push(Event::Text(link_text.into()));
             events.push(Event::End(TagEnd::Link));
-        }
-        
-        last_end = m.end();
-    }
-    
-    // Update remaining text
-    remaining = &text[last_end..];
-    last_end = 0;
-    
-    // Process reference-style links in remaining text
-    for m in reference_regex.find_iter(remaining) {
-        // Add text before the match
-        if m.start() > last_end {
-            events.push(Event::Text(remaining[last_end..m.start()].to_string().into()));
-        }
-        
-        if let Some(caps) = reference_regex.captures(&remaining[m.start()..m.end()]) {
-            let link_text = caps[1].to_string();
+            
+        } else if caps.name("reference").is_some() {
+            // Reference link: [text][]
+            let link_text = caps.name("reference_text").unwrap().as_str().to_string();
             
             // Determine URL based on pattern
             let url = if let Some(line_caps) = regex::Regex::new(r"^([^:]+\.[a-z]+):(\d+)$").unwrap().captures(&link_text) {
@@ -604,9 +580,8 @@ fn process_malformed_links_in_text(text: &str, events: &mut Vec<Event>) {
                 format!("dialectic:{}", link_text)
             } else {
                 // For other reference links, leave as-is for now
-                events.push(Event::Text(remaining[m.start()..m.end()].to_string().into()));
-                last_end = m.end();
-                continue;
+                events.push(Event::Text(format!("[{}][]", link_text).into()));
+                return;
             };
             
             // Generate proper link events
@@ -619,13 +594,35 @@ fn process_malformed_links_in_text(text: &str, events: &mut Vec<Event>) {
             events.push(Event::Text(link_text.into()));
             events.push(Event::End(TagEnd::Link));
         }
+    });
+}
+
+fn process_regex_matches<F>(
+    text: &str,
+    regex: &regex::Regex,
+    events: &mut Vec<Event>,
+    mut handle_match: F,
+) where
+    F: FnMut(&regex::Captures, &mut Vec<Event>),
+{
+    let mut last_end = 0;
+    
+    for m in regex.find_iter(text) {
+        // Add text before the match
+        if m.start() > last_end {
+            events.push(Event::Text(text[last_end..m.start()].to_string().into()));
+        }
+        
+        if let Some(caps) = regex.captures(&text[m.start()..m.end()]) {
+            handle_match(&caps, events);
+        }
         
         last_end = m.end();
     }
     
     // Add any remaining text
-    if last_end < remaining.len() {
-        events.push(Event::Text(remaining[last_end..].to_string().into()));
+    if last_end < text.len() {
+        events.push(Event::Text(text[last_end..].to_string().into()));
     }
 }
 
@@ -744,6 +741,21 @@ Also [main.rs][] and [utils.ts:42][].
                 "dialectic:src/auth.rs?regex=fn%7Bbar",
                 "dialectic:main.rs",
                 "dialectic:utils.ts#L42",
+            ]
+        "#]]);
+    }
+
+    #[test]
+    fn test_mixed_link_types_in_single_text() {
+        let markdown = r#"
+Check [foo.rs][], [foo](foo.rs?a b), [bar.rs][].
+"#;
+        
+        check_extracted_urls(markdown, expect![[r#"
+            [
+                "dialectic:foo.rs",
+                "dialectic:foo.rs?regex=a%20b",
+                "dialectic:bar.rs",
             ]
         "#]]);
     }
