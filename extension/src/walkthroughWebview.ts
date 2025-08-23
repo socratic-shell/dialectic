@@ -244,13 +244,14 @@ export class WalkthroughWebviewProvider implements vscode.WebviewViewProvider {
                             if (typeof item === 'object' && 'content' in item) {
                                 // ResolvedMarkdownElement with processed dialectic: URLs
                                 html += '<div class="content-item">' + renderMarkdown(item.content) + '</div>';
-                            } else if (item.action) {
+                            } else if (item.button) {
+                                // Direct action object with button property
                                 html += '<div class="content-item">';
                                 html += '<button class="action-button" onclick="handleAction(' + 
-                                       JSON.stringify(item.action.tell_agent || '') + ')">' + 
-                                       item.action.button + '</button>';
-                                if (item.action.description) {
-                                    html += '<div class="action-description">' + item.action.description + '</div>';
+                                       JSON.stringify(item.tell_agent || '') + ')">' + 
+                                       item.button + '</button>';
+                                if (item.description) {
+                                    html += '<div class="action-description">' + item.description + '</div>';
                                 }
                                 html += '</div>';
                             }
