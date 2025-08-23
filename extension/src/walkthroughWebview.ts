@@ -53,6 +53,18 @@ export class WalkthroughWebviewProvider implements vscode.WebviewViewProvider {
         return md;
     }
 
+    private async handleWebviewMessage(message: any): Promise<void> {
+        switch (message.command) {
+            case 'openFile':
+                console.log('Walkthrough: openFile command received:', message.dialecticUrl);
+                // TODO: Will implement file opening in later commit
+                break;
+            case 'ready':
+                console.log('Walkthrough webview ready');
+                break;
+        }
+    }
+
     public resolveWebviewView(
         webviewView: vscode.WebviewView,
         context: vscode.WebviewViewResolveContext,
@@ -65,6 +77,12 @@ export class WalkthroughWebviewProvider implements vscode.WebviewViewProvider {
             enableScripts: true,
             localResourceRoots: [this._extensionUri]
         };
+
+        // Handle messages from webview
+        webviewView.webview.onDidReceiveMessage(
+            message => this.handleWebviewMessage(message),
+            undefined
+        );
 
         console.log('Setting webview HTML');
         webviewView.webview.html = this._getHtmlForWebview(webviewView.webview);
@@ -189,6 +207,29 @@ export class WalkthroughWebviewProvider implements vscode.WebviewViewProvider {
                     const vscode = acquireVsCodeApi();
                     console.log('VSCode API acquired');
                     
+                    // Handle clicks on dialectic URLs
+                    document.addEventListener('click', function(event) {
+                        const target = event.target;
+                        if (!target) return;
+                        
+                        // Check if clicked element or parent has dialectic URL
+                        let element = target;
+                        while (element && element !== document) {
+                            const dialecticUrl = element.getAttribute('data-dialectic-url');
+                            if (dialecticUrl) {
+                                event.preventDefault();
+                                console.log('[Walkthrough] Dialectic URL clicked:', dialecticUrl);
+                                
+                                vscode.postMessage({
+                                    command: 'openFile',
+                                    dialecticUrl: dialecticUrl
+                                });
+                                return;
+                            }
+                            element = element.parentElement;
+                        }
+                    });
+                    
                     function renderMarkdown(text) {
                         return text; // Content is already rendered HTML
                     }
@@ -249,6 +290,11 @@ export class WalkthroughWebviewProvider implements vscode.WebviewViewProvider {
                         } else {
                             console.log('Ignoring message type:', message.type);
                         }
+                    });
+                    
+                    // Notify extension that webview is ready
+                    vscode.postMessage({
+                        command: 'ready'
                     });
                 </script>
             </body>
