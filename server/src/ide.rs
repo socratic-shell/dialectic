@@ -1,7 +1,7 @@
 use std::{future::Future, pin::Pin};
 
 use serde::{Deserialize, Deserializer, Serialize};
-use pulldown_cmark::{Parser, Event, Tag};
+use pulldown_cmark::Event;
 
 use crate::dialect::{DialectFunction, DialectInterpreter};
 
@@ -467,36 +467,124 @@ impl<'de> Deserialize<'de> for ResolvedMarkdownElement {
 }
 
 fn process_markdown_links(markdown: String) -> String {
-    use pulldown_cmark::{Parser, Event, Tag, CowStr};
+    use pulldown_cmark::{Parser, Event, Tag};
     
     let parser = Parser::new(&markdown);
-    let mut events = Vec::new();
+    let mut events: Vec<Event> = parser.collect();
     
-    for event in parser {
-        match event {
-            Event::Start(Tag::Link { link_type, dest_url, title, id }) => {
-                let converted_url = convert_url_to_dialectic(&dest_url);
-                events.push(Event::Start(Tag::Link { 
-                    link_type, 
-                    dest_url: converted_url.into(), 
-                    title, 
-                    id 
-                }));
-            }
-            Event::Text(ref _text) => {
-                // TODO: Process text for malformed links
-                events.push(event);
-            }
-            _ => {
-                events.push(event);
-            }
+    // Pass 1: Convert well-formed Link events
+    for event in &mut events {
+        if let Event::Start(Tag::Link { dest_url, .. }) = event {
+            let converted_url = convert_url_to_dialectic(dest_url);
+            *dest_url = converted_url.into();
         }
     }
+    
+    // Pass 2: Coalesce adjacent Text events
+    events = coalesce_text_events(events);
+    
+    // Pass 3: Process malformed links in Text events
+    events = process_malformed_links_in_events(events);
     
     // Convert events back to markdown
     let mut output = String::new();
     pulldown_cmark_to_cmark::cmark(events.into_iter(), &mut output).unwrap();
     output
+}
+
+fn coalesce_text_events(events: Vec<Event>) -> Vec<Event> {
+    use pulldown_cmark::Event;
+    
+    let mut result = Vec::new();
+    let mut accumulated_text = String::new();
+    
+    for event in events {
+        match event {
+            Event::Text(text) => {
+                accumulated_text.push_str(&text);
+            }
+            _ => {
+                if !accumulated_text.is_empty() {
+                    result.push(Event::Text(accumulated_text.clone().into()));
+                    accumulated_text.clear();
+                }
+                result.push(event);
+            }
+        }
+    }
+    
+    // Don't forget any remaining text
+    if !accumulated_text.is_empty() {
+        result.push(Event::Text(accumulated_text.into()));
+    }
+    
+    result
+}
+
+fn process_malformed_links_in_events(events: Vec<Event>) -> Vec<Event> {
+    use pulldown_cmark::Event;
+    
+    let mut result = Vec::new();
+    
+    for event in events {
+        match event {
+            Event::Text(text) => {
+                let processed_text = process_malformed_links_in_text(&text);
+                if processed_text != text.as_ref() {
+                    // Text was modified, create a new owned Text event
+                    result.push(Event::Text(processed_text.into()));
+                } else {
+                    result.push(Event::Text(text));
+                }
+            }
+            _ => {
+                result.push(event);
+            }
+        }
+    }
+    
+    result
+}
+
+fn process_malformed_links_in_text(text: &str) -> String {
+    let mut result = text.to_string();
+    
+    // Handle malformed links with problematic characters: spaces, {, [, (
+    // Pattern: [text](url with spaces or {[( characters)
+    result = regex::Regex::new(r"\[([^\]]+)\]\(([^)]*[ \{\[\(][^)]*)\)")
+        .unwrap()
+        .replace_all(&result, |caps: &regex::Captures| {
+            let link_text = &caps[1];
+            let url = &caps[2];
+            let converted_url = convert_url_to_dialectic(url);
+            format!("[{}]({})", link_text, converted_url)
+        })
+        .to_string();
+    
+    // Handle reference-style links: [foo.rs][] or [foo.rs:22][]
+    result = regex::Regex::new(r"\[([^\]]+)\]\[\]")
+        .unwrap()
+        .replace_all(&result, |caps: &regex::Captures| {
+            let link_text = &caps[1];
+            
+            // Handle [filename.ext:line][] format
+            if let Some(line_caps) = regex::Regex::new(r"^([^:]+\.[a-z]+):(\d+)$").unwrap().captures(link_text) {
+                let filename = &line_caps[1];
+                let line_num = &line_caps[2];
+                return format!("[{}](dialectic:{}#L{})", link_text, filename, line_num);
+            }
+            
+            // Handle [filename.ext][] format
+            if regex::Regex::new(r"^[^:]+\.[a-z]+$").unwrap().is_match(link_text) {
+                return format!("[{}](dialectic:{})", link_text, link_text);
+            }
+            
+            // For other reference links, leave unchanged for now
+            format!("[{}][]", link_text)
+        })
+        .to_string();
+    
+    result
 }
 
 fn convert_url_to_dialectic(url: &str) -> String {
@@ -516,11 +604,9 @@ fn convert_url_to_dialectic(url: &str) -> String {
         return format!("dialectic:{}?line={}", &captures[1], &captures[2]);
     }
     
-    // Handle bare filenames
-    if regex::Regex::new(r"^([^\s\[\]():]+)$").unwrap().is_match(url) {
-        if !url.starts_with("dialectic:") && !url.contains("://") {
-            return format!("dialectic:{}", url);
-        }
+    // Handle bare filenames (including those with spaces or special chars)
+    if !url.contains("://") && !url.starts_with("dialectic:") {
+        return format!("dialectic:{}", url);
     }
     
     // Return unchanged if no patterns match
@@ -570,13 +656,11 @@ Also see [the whole file](src/auth.ts) and [this function with spaces](src/auth.
         assert!(urls.contains(&"dialectic:src/auth.ts?line=42".to_string()));
         assert!(urls.contains(&"dialectic:src/auth.ts?line=42-50".to_string()));
         assert!(urls.contains(&"dialectic:src/auth.ts".to_string()));
-        // Note: The malformed link with spaces will be handled when we implement Text processing
-        // assert!(urls.contains(&"dialectic:src/auth.rs?regex=fn%20foo".to_string()));
+        assert!(urls.contains(&"dialectic:src/auth.rs?regex=fn%20foo".to_string()));
     }
 
     #[test]
-    #[ignore = "Demonstrates regex bug - will be fixed when we implement proper pulldown-cmark processing"]
-    fn test_regex_incorrectly_processes_code_blocks() {
+    fn test_pulldown_cmark_respects_code_blocks() {
         let markdown = r#"
 Here's a real link: [check this](src/real.ts?pattern)
 
@@ -591,10 +675,37 @@ And this inline code too: `[another fake](src/inline.ts)`
         
         let processed = process_markdown_links(markdown.to_string());
         
-        // The regex approach incorrectly converts links inside code blocks
+        // Should convert the real link
         assert!(processed.contains("dialectic:src/real.ts?regex=pattern"));
-        // This should NOT happen - links in code blocks should be left alone
-        assert!(processed.contains("dialectic:src/fake.ts?regex=pattern")); // This proves the bug
-        assert!(processed.contains("dialectic:src/inline.ts")); // This too
+        // Should NOT convert links in code blocks
+        assert!(processed.contains("[fake link](src/fake.ts?pattern)")); // Original unchanged
+        assert!(processed.contains("[another fake](src/inline.ts)")); // Original unchanged
+    }
+
+    #[test]
+    fn test_malformed_and_reference_links() {
+        let markdown = r#"
+Check [file with spaces](src/auth.rs?fn foo) and [file with bracket](src/auth.rs?fn{bar).
+Also [main.rs][] and [utils.ts:42][].
+"#;
+        
+        let processed = process_markdown_links(markdown.to_string());
+        
+        // Extract URLs using pulldown-cmark parser
+        let parser = Parser::new(&processed);
+        let mut urls = Vec::new();
+        
+        for event in parser {
+            if let Event::Start(Tag::Link { dest_url, .. }) = event {
+                urls.push(dest_url.to_string());
+            }
+        }
+        
+        // Verify the converted URLs
+        assert!(urls.contains(&"dialectic:src/auth.rs?regex=fn%20foo".to_string()));
+        assert!(urls.contains(&"dialectic:src/auth.rs?regex=fn%7Bbar".to_string())); // { encoded
+        // Reference style links should be converted to dialectic: URLs
+        assert!(urls.contains(&"dialectic:main.rs".to_string()));
+        assert!(urls.contains(&"dialectic:utils.ts#L42".to_string()));
     }
 }
