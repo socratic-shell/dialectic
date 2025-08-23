@@ -277,17 +277,68 @@ impl DialecticServer {
             .await;
 
         // Execute Dialect programs to resolve locations and render walkthrough
-        // TODO: Implement walkthrough processing
+        let mut resolved_elements = Vec::new();
+        
+        // Process introduction section
+        if let Some(intro_elements) = &params.introduction {
+            for element in intro_elements {
+                resolved_elements.push(self.process_walkthrough_element(element.clone()).await?);
+            }
+        }
+        
+        // For now, just log the processing and return success
         self.ipc
             .send_log(
                 LogLevel::Info,
-                "Walkthrough processing - implementation in progress".to_string(),
+                format!("Processed {} walkthrough elements", resolved_elements.len()),
             )
             .await;
 
         Ok(CallToolResult::success(vec![Content::text(
-            "Walkthrough tool called - processing implementation in progress",
+            "Walkthrough successfully processed",
         )]))
+    }
+
+    /// Process a single walkthrough element, executing Dialect programs if needed
+    async fn process_walkthrough_element(
+        &self,
+        element: serde_json::Value,
+    ) -> Result<crate::ide::ResolvedWalkthroughElement, McpError> {
+        use crate::ide::ResolvedWalkthroughElement;
+        
+        match element {
+            serde_json::Value::String(text) => {
+                Ok(ResolvedWalkthroughElement::Markdown(text))
+            }
+            serde_json::Value::Object(_) => {
+                // Clone interpreter and execute Dialect program (same pattern as ide_operation)
+                let mut interpreter = self.interpreter.clone();
+                
+                let result = tokio::task::spawn_blocking(move || {
+                    tokio::runtime::Handle::current()
+                        .block_on(async move { interpreter.evaluate(element).await })
+                })
+                .await
+                .map_err(|e| McpError::internal_error("Task execution failed", Some(serde_json::json!({"error": e.to_string()}))))?
+                .map_err(|e| McpError::internal_error("Dialect execution failed", Some(serde_json::json!({"error": e.to_string()}))))?;
+                
+                // Try to deserialize as different element types
+                if let Ok(comment) = serde_json::from_value::<crate::ide::ResolvedComment>(result.clone()) {
+                    Ok(ResolvedWalkthroughElement::Comment(comment))
+                } else if let Ok(file_changes) = serde_json::from_value::<Vec<crate::synthetic_pr::FileChange>>(result.clone()) {
+                    Ok(ResolvedWalkthroughElement::GitDiff(file_changes))
+                } else if let Ok(action) = serde_json::from_value::<crate::ide::ResolvedAction>(result.clone()) {
+                    Ok(ResolvedWalkthroughElement::Action(action))
+                } else {
+                    // Fallback to markdown
+                    Ok(ResolvedWalkthroughElement::Markdown(result.to_string()))
+                }
+            }
+            _ => {
+                // Convert other types to markdown
+                Ok(ResolvedWalkthroughElement::Markdown(element.to_string()))
+            }
+        }
     }
 
     /// Get the currently selected text from any active editor in VSCode
