@@ -299,7 +299,12 @@ class DaemonClient implements vscode.Disposable {
                 this.outputChannel.appendLine(`Walkthrough sections: ${Object.keys(walkthroughPayload).filter(k => k !== 'base_uri' && walkthroughPayload[k as keyof PresentWalkthroughPayload]).join(', ')}`);
                 
                 // Show walkthrough in webview
-                this.walkthroughProvider.showWalkthrough(walkthroughPayload);
+                this.walkthroughProvider.showWalkthrough({
+                    introduction: walkthroughPayload.introduction,
+                    highlights: walkthroughPayload.highlights,
+                    changes: walkthroughPayload.changes,
+                    actions: walkthroughPayload.actions
+                });
                 
                 // Send success response back through daemon
                 this.sendResponse(message.id, { success: true });

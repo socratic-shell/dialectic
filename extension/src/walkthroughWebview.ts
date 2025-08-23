@@ -1,5 +1,18 @@
 import * as vscode from 'vscode';
 
+type WalkthroughElement = 
+    | string  // Markdown content
+    | { comment: any }  // Simplified for now
+    | { gitdiff: any }  // Simplified for now  
+    | { action: { button: string; description?: string; tell_agent?: string } };
+
+interface WalkthroughData {
+    introduction?: WalkthroughElement[];
+    highlights?: WalkthroughElement[];
+    changes?: WalkthroughElement[];
+    actions?: WalkthroughElement[];
+}
+
 export class WalkthroughWebviewProvider implements vscode.WebviewViewProvider {
     public static readonly viewType = 'dialectic.walkthrough';
 
@@ -12,6 +25,7 @@ export class WalkthroughWebviewProvider implements vscode.WebviewViewProvider {
         context: vscode.WebviewViewResolveContext,
         _token: vscode.CancellationToken,
     ) {
+        console.log('WalkthroughWebviewProvider.resolveWebviewView called');
         this._view = webviewView;
 
         webviewView.webview.options = {
@@ -19,16 +33,23 @@ export class WalkthroughWebviewProvider implements vscode.WebviewViewProvider {
             localResourceRoots: [this._extensionUri]
         };
 
+        console.log('Setting webview HTML');
         webviewView.webview.html = this._getHtmlForWebview(webviewView.webview);
+        console.log('Webview HTML set, webview should be ready');
     }
 
-    public showWalkthrough(walkthrough: any) {
+    public showWalkthrough(walkthrough: WalkthroughData) {
+        console.log('WalkthroughWebviewProvider.showWalkthrough called with:', walkthrough);
         if (this._view) {
+            console.log('Webview exists, showing and posting message');
             this._view.show?.(true);
             this._view.webview.postMessage({
                 type: 'walkthrough',
                 data: walkthrough
             });
+            console.log('Message posted to webview');
+        } else {
+            console.log('ERROR: No webview available');
         }
     }
 
@@ -108,18 +129,12 @@ export class WalkthroughWebviewProvider implements vscode.WebviewViewProvider {
                     <div class="empty-state">No walkthrough loaded</div>
                 </div>
                 <script>
+                    console.log('Walkthrough webview JavaScript loaded');
                     const vscode = acquireVsCodeApi();
+                    console.log('VSCode API acquired');
                     
                     function renderMarkdown(text) {
-                        return text
-                            .replace(/^# (.*$)/gm, '<h1>$1</h1>')
-                            .replace(/^## (.*$)/gm, '<h2>$1</h2>')
-                            .replace(/^### (.*$)/gm, '<h3>$1</h3>')
-                            .replace(/\*\*(.*?)\*\*/g, '<strong>$1</strong>')
-                            .replace(/\*(.*?)\*/g, '<em>$1</em>')
-                            .replace(/\`(.*?)\`/g, '<code>$1</code>')
-                            .replace(/^- (.*$)/gm, '<li>$1</li>')
-                            .replace(/(<li>.*<\/li>)/s, '<ul>$1</ul>');
+                        return text; // Just return plain text for now
                     }
                     
                     function renderSection(title, items) {
@@ -133,8 +148,8 @@ export class WalkthroughWebviewProvider implements vscode.WebviewViewProvider {
                                 html += '<div class="content-item">' + renderMarkdown(item) + '</div>';
                             } else if (item.action) {
                                 html += '<div class="content-item">';
-                                html += '<button class="action-button" onclick="handleAction(\'' + 
-                                       (item.action.tell_agent || '') + '\')">' + 
+                                html += '<button class="action-button" onclick="handleAction(' + 
+                                       JSON.stringify(item.action.tell_agent || '') + ')">' + 
                                        item.action.button + '</button>';
                                 if (item.action.description) {
                                     html += '<div class="action-description">' + item.action.description + '</div>';
@@ -157,8 +172,10 @@ export class WalkthroughWebviewProvider implements vscode.WebviewViewProvider {
                     }
                     
                     window.addEventListener('message', event => {
+                        console.log('Webview received message:', event.data);
                         const message = event.data;
                         if (message.type === 'walkthrough') {
+                            console.log('Processing walkthrough message with data:', message.data);
                             const data = message.data;
                             let html = '';
                             
@@ -167,7 +184,13 @@ export class WalkthroughWebviewProvider implements vscode.WebviewViewProvider {
                             html += renderSection('Changes', data.changes);
                             html += renderSection('Actions', data.actions);
                             
-                            document.getElementById('content').innerHTML = html || '<div class="empty-state">Empty walkthrough</div>';
+                            console.log('Generated HTML:', html);
+                            const finalHtml = html || '<div class="empty-state">Empty walkthrough</div>';
+                            console.log('Setting innerHTML to:', finalHtml);
+                            document.getElementById('content').innerHTML = finalHtml;
+                            console.log('Content updated');
+                        } else {
+                            console.log('Ignoring message type:', message.type);
                         }
                     });
                 </script>
