@@ -729,3 +729,39 @@ async fn test_comment_function_with_symbol_def() {
     "#]]
     .assert_debug_eq(&result);
 }
+
+#[tokio::test]
+async fn test_action_function() {
+    use expect_test::expect;
+    
+    let mock_client = MockIpcClient::new();
+    let mut interpreter = DialectInterpreter::new(mock_client);
+    interpreter.add_function::<FindDefinitions>();
+    interpreter.add_function::<FindReferences>();
+    interpreter.add_function::<crate::ide::Search>();
+    interpreter.add_function::<crate::ide::GitDiff>();
+    interpreter.add_function::<crate::ide::Comment>();
+    interpreter.add_function::<crate::ide::Action>();
+    
+    // Test action with tell_agent
+    let program = serde_json::json!({
+        "action": {
+            "description": "Generate authentication boilerplate code",
+            "button": "Generate Auth",
+            "tell_agent": "Create a complete authentication system with login, logout, and middleware"
+        }
+    });
+    
+    let result = interpreter.evaluate(program).await;
+    
+    expect![[r#"
+        Ok(
+            Object {
+                "button": String("Generate Auth"),
+                "description": String("Generate authentication boilerplate code"),
+                "tell_agent": String("Create a complete authentication system with login, logout, and middleware"),
+            },
+        )
+    "#]]
+    .assert_debug_eq(&result);
+}

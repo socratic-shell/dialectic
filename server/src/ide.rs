@@ -372,3 +372,45 @@ fn process_file(
     }
     Vec::new()
 }
+
+/// Create an interactive action button for walkthroughs.
+///
+/// Examples:
+/// - `{"action": {"description": "Click to run tests", "button": "Run Tests"}}`
+/// - `{"action": {"description": "Generate boilerplate", "button": "Generate", "tell_agent": "Generate user authentication boilerplate"}}`
+#[derive(Deserialize)]
+pub struct Action {
+    /// Description shown to user
+    pub description: String,
+    
+    /// Button text
+    pub button: String,
+    
+    /// Optional text to send to agent when clicked
+    pub tell_agent: Option<String>,
+}
+
+#[derive(Serialize)]
+pub struct ResolvedAction {
+    pub description: String,
+    pub button: String,
+    pub tell_agent: Option<String>,
+}
+
+impl<U: IpcClient> DialectFunction<U> for Action {
+    type Output = ResolvedAction;
+
+    const DEFAULT_FIELD_NAME: Option<&'static str> = None;
+
+    async fn execute(
+        self,
+        _interpreter: &mut DialectInterpreter<U>,
+    ) -> anyhow::Result<Self::Output> {
+        // Action is already resolved, just pass through
+        Ok(ResolvedAction {
+            description: self.description,
+            button: self.button,
+            tell_agent: self.tell_agent,
+        })
+    }
+}
