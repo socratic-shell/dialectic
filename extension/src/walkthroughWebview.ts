@@ -1,4 +1,6 @@
 import * as vscode from 'vscode';
+import * as crypto from 'crypto';
+import * as MarkdownIt from 'markdown-it';
 
 type WalkthroughElement = 
     | { content: string }  // ResolvedMarkdownElement with processed dialectic: URLs
@@ -17,8 +19,39 @@ export class WalkthroughWebviewProvider implements vscode.WebviewViewProvider {
     public static readonly viewType = 'dialectic.walkthrough';
 
     private _view?: vscode.WebviewView;
+    private md: MarkdownIt;
 
-    constructor(private readonly _extensionUri: vscode.Uri) {}
+    constructor(private readonly _extensionUri: vscode.Uri) {
+        this.md = this.setupMarkdownRenderer();
+    }
+
+    private setupMarkdownRenderer(): MarkdownIt {
+        const md = new MarkdownIt({
+            html: true,
+            linkify: true,
+            typographer: true
+        });
+
+        // Custom renderer rule for file reference links
+        const defaultRender = md.renderer.rules.link_open || function(tokens: any, idx: any, options: any, env: any, self: any) {
+            return self.renderToken(tokens, idx, options);
+        };
+
+        md.renderer.rules.link_open = (tokens: any, idx: any, options: any, env: any, self: any) => {
+            const token = tokens[idx];
+            const href = token.attrGet('href');
+            
+            if (href && href.startsWith('dialectic:')) {
+                token.attrSet('href', 'javascript:void(0)');
+                token.attrSet('data-dialectic-url', href);
+                token.attrSet('class', 'file-ref');
+            }
+            
+            return defaultRender(tokens, idx, options, env, self);
+        };
+
+        return md;
+    }
 
     public resolveWebviewView(
         webviewView: vscode.WebviewView,
@@ -43,14 +76,37 @@ export class WalkthroughWebviewProvider implements vscode.WebviewViewProvider {
         if (this._view) {
             console.log('Webview exists, showing and posting message');
             this._view.show?.(true);
+            
+            // Pre-render markdown content
+            const processedWalkthrough = this.processWalkthroughMarkdown(walkthrough);
+            
             this._view.webview.postMessage({
                 type: 'walkthrough',
-                data: walkthrough
+                data: processedWalkthrough
             });
             console.log('Message posted to webview');
         } else {
             console.log('ERROR: No webview available');
         }
+    }
+
+    private processWalkthroughMarkdown(walkthrough: WalkthroughData): WalkthroughData {
+        const processSection = (items?: WalkthroughElement[]) => {
+            if (!items) return items;
+            return items.map(item => {
+                if (typeof item === 'object' && 'content' in item) {
+                    return { content: this.md.render(item.content) };
+                }
+                return item;
+            });
+        };
+
+        return {
+            introduction: processSection(walkthrough.introduction),
+            highlights: processSection(walkthrough.highlights),
+            changes: processSection(walkthrough.changes),
+            actions: processSection(walkthrough.actions)
+        };
     }
 
     private _getHtmlForWebview(webview: vscode.Webview) {
@@ -134,7 +190,7 @@ export class WalkthroughWebviewProvider implements vscode.WebviewViewProvider {
                     console.log('VSCode API acquired');
                     
                     function renderMarkdown(text) {
-                        return text; // Just return plain text for now
+                        return text; // Content is already rendered HTML
                     }
                     
                     function renderSection(title, items) {
