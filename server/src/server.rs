@@ -276,17 +276,17 @@ impl DialecticServer {
             )
             .await;
 
-        // TODO: Execute Dialect programs to resolve locations and render walkthrough
-        // For now, just return success to establish the interface
+        // Execute Dialect programs to resolve locations and render walkthrough
+        // TODO: Implement walkthrough processing
         self.ipc
             .send_log(
                 LogLevel::Info,
-                "Walkthrough tool called - implementation pending".to_string(),
+                "Walkthrough processing - implementation in progress".to_string(),
             )
             .await;
 
         Ok(CallToolResult::success(vec![Content::text(
-            "Walkthrough tool interface established - implementation pending",
+            "Walkthrough tool called - processing implementation in progress",
         )]))
     }
 

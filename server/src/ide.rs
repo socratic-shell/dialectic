@@ -297,7 +297,7 @@ pub enum ResolvedLocation {
 }
 
 /// The fully normalized struct that we send over IPC.
-#[derive(Serialize)]
+#[derive(Serialize, Deserialize)]
 pub struct ResolvedComment {
     pub locations: Vec<FileRange>,
     pub icon: Option<String>,
@@ -403,7 +403,7 @@ pub struct Action {
     pub tell_agent: Option<String>,
 }
 
-#[derive(Serialize)]
+#[derive(Serialize, Deserialize)]
 pub struct ResolvedAction {
     pub button: String,
     pub tell_agent: Option<String>,
@@ -436,7 +436,7 @@ pub struct ResolvedWalkthrough {
     pub actions: Option<Vec<ResolvedWalkthroughElement>>,
 }
 
-#[derive(Serialize)]
+#[derive(Serialize, Deserialize)]
 #[serde(untagged)]
 pub enum ResolvedWalkthroughElement {
     /// Plain markdown text
