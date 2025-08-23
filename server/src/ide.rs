@@ -414,7 +414,7 @@ impl<U: IpcClient> DialectFunction<U> for Action {
 
 #[derive(Serialize)]
 pub struct ResolvedWalkthrough {
-    pub introduction: Option<Vec<String>>,
+    pub introduction: Option<Vec<ResolvedWalkthroughElement>>,
     pub highlights: Option<Vec<ResolvedWalkthroughElement>>,
     pub changes: Option<Vec<ResolvedWalkthroughElement>>,
     pub actions: Option<Vec<ResolvedWalkthroughElement>>,
