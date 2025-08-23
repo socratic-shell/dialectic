@@ -1,7 +1,6 @@
 use std::{future::Future, pin::Pin};
 
 use serde::{Deserialize, Deserializer, Serialize};
-use pulldown_cmark::{Parser, Event, Tag};
 
 use crate::dialect::{DialectFunction, DialectInterpreter};
 
@@ -467,50 +466,77 @@ impl<'de> Deserialize<'de> for ResolvedMarkdownElement {
 }
 
 fn process_markdown_links(markdown: String) -> String {
-    // For now, just do simple regex-based URL conversion with proper encoding
-    // TODO: Implement proper markdown parsing with pulldown-cmark
-    let mut result = markdown;
+    // Find all code blocks (both fenced and inline) to avoid processing them
+    let code_block_regex = regex::Regex::new(r"(?s)```[^`]*```|`[^`]*`").unwrap();
+    let mut protected_ranges = Vec::new();
     
-    // Handle path?regex format for search
-    result = regex::Regex::new(r"\[([^\]]+)\]\(([^\s\[\]()]+)\?([^\[\]()]+)\)")
-        .unwrap()
-        .replace_all(&result, |caps: &regex::Captures| {
-            let encoded_query = urlencoding::encode(&caps[3]);
-            format!("[{}](dialectic:{}?regex={})", &caps[1], &caps[2], encoded_query)
-        })
-        .to_string();
+    for m in code_block_regex.find_iter(&markdown) {
+        protected_ranges.push((m.start(), m.end()));
+    }
+    
+    // Apply all link conversions in a single pass
+    let link_regex = regex::Regex::new(r"\[([^\]]+)\]\(([^)]+)\)").unwrap();
+    let mut result = String::new();
+    let mut last_end = 0;
+    
+    for m in link_regex.find_iter(&markdown) {
+        // Check if this match is in a protected range
+        let in_protected = protected_ranges.iter().any(|(start, end)| {
+            m.start() >= *start && m.end() <= *end
+        });
+        
+        // Add text before the match
+        result.push_str(&markdown[last_end..m.start()]);
+        
+        if in_protected {
+            // Keep original link
+            result.push_str(&markdown[m.start()..m.end()]);
+        } else {
+            // Apply conversion
+            if let Some(caps) = link_regex.captures(&markdown[m.start()..m.end()]) {
+                let link_text = &caps[1];
+                let url = &caps[2];
+                let converted_url = convert_simple_url_to_dialectic(url);
+                result.push_str(&format!("[{}]({})", link_text, converted_url));
+            } else {
+                result.push_str(&markdown[m.start()..m.end()]);
+            }
+        }
+        
+        last_end = m.end();
+    }
+    
+    // Add remaining text
+    result.push_str(&markdown[last_end..]);
+    result
+}
+
+fn convert_simple_url_to_dialectic(url: &str) -> String {
+    // Handle path?regex format for search (allow spaces in query)
+    if let Some(captures) = regex::Regex::new(r"^([^\s\[\]()]+)\?(.+)$").unwrap().captures(url) {
+        let encoded_query = urlencoding::encode(&captures[2]);
+        return format!("dialectic:{}?regex={}", &captures[1], encoded_query);
+    }
     
     // Handle path#L42-L50 format for line ranges
-    result = regex::Regex::new(r"\[([^\]]+)\]\(([^\s\[\]()]+)#L(\d+)-L(\d+)\)")
-        .unwrap()
-        .replace_all(&result, |caps: &regex::Captures| {
-            format!("[{}](dialectic:{}?line={}-{})", &caps[1], &caps[2], &caps[3], &caps[4])
-        })
-        .to_string();
+    if let Some(captures) = regex::Regex::new(r"^([^\s\[\]()]+)#L(\d+)-L(\d+)$").unwrap().captures(url) {
+        return format!("dialectic:{}?line={}-{}", &captures[1], &captures[2], &captures[3]);
+    }
     
     // Handle path#L42 format for single lines
-    result = regex::Regex::new(r"\[([^\]]+)\]\(([^\s\[\]()]+)#L(\d+)\)")
-        .unwrap()
-        .replace_all(&result, |caps: &regex::Captures| {
-            format!("[{}](dialectic:{}?line={})", &caps[1], &caps[2], &caps[3])
-        })
-        .to_string();
+    if let Some(captures) = regex::Regex::new(r"^([^\s\[\]()]+)#L(\d+)$").unwrap().captures(url) {
+        return format!("dialectic:{}?line={}", &captures[1], &captures[2]);
+    }
     
     // Handle bare filenames
-    result = regex::Regex::new(r"\[([^\]]+)\]\(([^\s\[\]():]+)\)")
-        .unwrap()
-        .replace_all(&result, |caps: &regex::Captures| {
-            // Only convert if it doesn't already start with dialectic: or contain ://
-            let url = &caps[2];
-            if url.starts_with("dialectic:") || url.contains("://") {
-                format!("[{}]({})", &caps[1], url)
-            } else {
-                format!("[{}](dialectic:{})", &caps[1], url)
-            }
-        })
-        .to_string();
+    if regex::Regex::new(r"^([^\s\[\]():]+)$").unwrap().is_match(url) {
+        if !url.starts_with("dialectic:") && !url.contains("://") {
+            return format!("dialectic:{}", url);
+        }
+    }
     
-    result
+    // Return unchanged if no patterns match
+    url.to_string()
 }
 
 
@@ -533,6 +559,8 @@ mod url_conversion_tests {
 
     #[test]
     fn test_markdown_url_conversion() {
+        use pulldown_cmark::{Parser, Event, Tag};
+        
         let markdown = r#"
 Check out [this function](src/auth.ts?validateToken) and 
 [this line](src/auth.ts#L42) or [this range](src/auth.ts#L42-L50).
@@ -560,8 +588,7 @@ Also see [the whole file](src/auth.ts) and [this function with spaces](src/auth.
     }
 
     #[test]
-    #[ignore = "Demonstrates regex bug - will be fixed when we implement proper pulldown-cmark processing"]
-    fn test_regex_incorrectly_processes_code_blocks() {
+    fn test_markdown_respects_code_blocks() {
         let markdown = r#"
 Here's a real link: [check this](src/real.ts?pattern)
 
@@ -576,10 +603,10 @@ And this inline code too: `[another fake](src/inline.ts)`
         
         let processed = process_markdown_links(markdown.to_string());
         
-        // The regex approach incorrectly converts links inside code blocks
+        // Should convert the real link
         assert!(processed.contains("dialectic:src/real.ts?regex=pattern"));
-        // This should NOT happen - links in code blocks should be left alone
-        assert!(processed.contains("dialectic:src/fake.ts?regex=pattern")); // This proves the bug
-        assert!(processed.contains("dialectic:src/inline.ts")); // This too
+        // Should NOT convert links in code blocks
+        assert!(processed.contains("[fake link](src/fake.ts?pattern)")); // Original unchanged
+        assert!(processed.contains("[another fake](src/inline.ts)")); // Original unchanged
     }
 }
