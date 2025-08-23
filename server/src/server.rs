@@ -277,26 +277,46 @@ impl DialecticServer {
             .await;
 
         // Execute Dialect programs to resolve locations and render walkthrough
-        let mut resolved_elements = Vec::new();
+        let resolved = crate::ide::ResolvedWalkthrough {
+            introduction: if let Some(elements) = &params.introduction {
+                Some(self.process_walkthrough_elements(elements).await?)
+            } else { None },
+            highlights: if let Some(elements) = &params.highlights {
+                Some(self.process_walkthrough_elements(elements).await?)
+            } else { None },
+            changes: if let Some(elements) = &params.changes {
+                Some(self.process_walkthrough_elements(elements).await?)
+            } else { None },
+            actions: if let Some(elements) = &params.actions {
+                Some(self.process_walkthrough_elements(elements).await?)
+            } else { None },
+        };
         
-        // Process introduction section
-        if let Some(intro_elements) = &params.introduction {
-            for element in intro_elements {
-                resolved_elements.push(self.process_walkthrough_element(element.clone()).await?);
-            }
-        }
-        
-        // For now, just log the processing and return success
+        // Log the processing result
         self.ipc
             .send_log(
                 LogLevel::Info,
-                format!("Processed {} walkthrough elements", resolved_elements.len()),
+                format!("Processed walkthrough with {} sections", 
+                    [&resolved.introduction, &resolved.highlights, &resolved.changes, &resolved.actions]
+                        .iter().filter(|s| s.is_some()).count()),
             )
             .await;
 
         Ok(CallToolResult::success(vec![Content::text(
             "Walkthrough successfully processed",
         )]))
+    }
+
+    /// Process a list of walkthrough elements
+    async fn process_walkthrough_elements(
+        &self,
+        elements: &[serde_json::Value],
+    ) -> Result<Vec<crate::ide::ResolvedWalkthroughElement>, McpError> {
+        let mut resolved_elements = Vec::new();
+        for element in elements {
+            resolved_elements.push(self.process_walkthrough_element(element.clone()).await?);
+        }
+        Ok(resolved_elements)
     }
 
     /// Process a single walkthrough element, executing Dialect programs if needed
