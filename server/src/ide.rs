@@ -1,6 +1,7 @@
 use std::{future::Future, pin::Pin};
 
 use serde::{Deserialize, Deserializer, Serialize};
+use pulldown_cmark::{Parser, Event, Tag};
 
 use crate::dialect::{DialectFunction, DialectInterpreter};
 
@@ -437,6 +438,16 @@ pub struct ResolvedWalkthrough {
     pub base_uri: String,
 }
 
+/// Markdown content with processed file references converted to dialectic: URLs.
+/// 
+/// This type has a custom `Deserialize` implementation that automatically processes
+/// markdown during deserialization, converting file references like:
+/// - `[text](src/file.ts?pattern)` → `[text](dialectic:src/file.ts?regex=pattern)`
+/// - `[text](src/file.ts#L42)` → `[text](dialectic:src/file.ts?line=42)`
+/// - `[text](src/file.ts)` → `[text](dialectic:src/file.ts)`
+/// 
+/// This ensures the extension receives properly formatted dialectic: URLs without
+/// needing client-side conversion logic.
 #[derive(Serialize, Debug)]
 pub struct ResolvedMarkdownElement {
     pub content: String,
@@ -456,7 +467,7 @@ impl<'de> Deserialize<'de> for ResolvedMarkdownElement {
 }
 
 fn process_markdown_links(markdown: String) -> String {
-    // For now, just do simple regex-based URL conversion
+    // For now, just do simple regex-based URL conversion with proper encoding
     // TODO: Implement proper markdown parsing with pulldown-cmark
     let mut result = markdown;
     
@@ -464,7 +475,8 @@ fn process_markdown_links(markdown: String) -> String {
     result = regex::Regex::new(r"\[([^\]]+)\]\(([^\s\[\]()]+)\?([^\[\]()]+)\)")
         .unwrap()
         .replace_all(&result, |caps: &regex::Captures| {
-            format!("[{}](dialectic:{}?regex={})", &caps[1], &caps[2], &caps[3])
+            let encoded_query = urlencoding::encode(&caps[3]);
+            format!("[{}](dialectic:{}?regex={})", &caps[1], &caps[2], encoded_query)
         })
         .to_string();
     
@@ -524,14 +536,50 @@ mod url_conversion_tests {
         let markdown = r#"
 Check out [this function](src/auth.ts?validateToken) and 
 [this line](src/auth.ts#L42) or [this range](src/auth.ts#L42-L50).
-Also see [the whole file](src/auth.ts).
+Also see [the whole file](src/auth.ts) and [this function with spaces](src/auth.rs?fn foo).
 "#;
         
         let processed = process_markdown_links(markdown.to_string());
         
-        assert!(processed.contains("dialectic:src/auth.ts?regex=validateToken"));
-        assert!(processed.contains("dialectic:src/auth.ts?line=42"));
-        assert!(processed.contains("dialectic:src/auth.ts?line=42-50"));
-        assert!(processed.contains("dialectic:src/auth.ts"));
+        // Extract URLs using pulldown-cmark parser
+        let parser = Parser::new(&processed);
+        let mut urls = Vec::new();
+        
+        for event in parser {
+            if let Event::Start(Tag::Link { dest_url, .. }) = event {
+                urls.push(dest_url.to_string());
+            }
+        }
+        
+        // Verify the converted URLs
+        assert!(urls.contains(&"dialectic:src/auth.ts?regex=validateToken".to_string()));
+        assert!(urls.contains(&"dialectic:src/auth.ts?line=42".to_string()));
+        assert!(urls.contains(&"dialectic:src/auth.ts?line=42-50".to_string()));
+        assert!(urls.contains(&"dialectic:src/auth.ts".to_string()));
+        assert!(urls.contains(&"dialectic:src/auth.rs?regex=fn%20foo".to_string()));
+    }
+
+    #[test]
+    #[ignore = "Demonstrates regex bug - will be fixed when we implement proper pulldown-cmark processing"]
+    fn test_regex_incorrectly_processes_code_blocks() {
+        let markdown = r#"
+Here's a real link: [check this](src/real.ts?pattern)
+
+But this should be ignored:
+```
+// This is just example code, not a real link
+[fake link](src/fake.ts?pattern)
+```
+
+And this inline code too: `[another fake](src/inline.ts)`
+"#;
+        
+        let processed = process_markdown_links(markdown.to_string());
+        
+        // The regex approach incorrectly converts links inside code blocks
+        assert!(processed.contains("dialectic:src/real.ts?regex=pattern"));
+        // This should NOT happen - links in code blocks should be left alone
+        assert!(processed.contains("dialectic:src/fake.ts?regex=pattern")); // This proves the bug
+        assert!(processed.contains("dialectic:src/inline.ts")); // This too
     }
 }
