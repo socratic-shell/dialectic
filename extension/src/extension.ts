@@ -12,8 +12,8 @@ import { SyntheticPRProvider } from './syntheticPRProvider';
 // 💡: Types for IPC communication with MCP server
 interface IPCMessage {
     shellPid: number;
-    type: 'present_review' | 'log' | 'get_selection' | 'response' | 'marco' | 'polo' | 'goodbye' | 'resolve_symbol_by_name' | 'find_all_references' | 'create_synthetic_pr' | 'update_synthetic_pr' | string; // string allows unknown types
-    payload: PresentReviewPayload | LogPayload | GetSelectionPayload | PoloPayload | GoodbyePayload | ResolveSymbolPayload | FindReferencesPayload | ResponsePayload | SyntheticPRPayload | unknown; // unknown allows any payload
+    type: 'present_review' | 'present_walkthrough' | 'log' | 'get_selection' | 'response' | 'marco' | 'polo' | 'goodbye' | 'resolve_symbol_by_name' | 'find_all_references' | 'create_synthetic_pr' | 'update_synthetic_pr' | string; // string allows unknown types
+    payload: PresentReviewPayload | PresentWalkthroughPayload | LogPayload | GetSelectionPayload | PoloPayload | GoodbyePayload | ResolveSymbolPayload | FindReferencesPayload | ResponsePayload | SyntheticPRPayload | unknown; // unknown allows any payload
     id: string;
 }
 
@@ -63,6 +63,43 @@ interface SyntheticPRPayload {
     files_changed: FileChange[];
     comment_threads: CommentThread[];
     status: string;
+}
+
+interface PresentWalkthroughPayload {
+    introduction?: WalkthroughElement[];
+    highlights?: WalkthroughElement[];
+    changes?: WalkthroughElement[];
+    actions?: WalkthroughElement[];
+    base_uri: string;
+}
+
+type WalkthroughElement = 
+    | string  // Markdown content
+    | { comment: ResolvedComment }
+    | { gitdiff: FileChange[] }
+    | { action: ResolvedAction };
+
+interface ResolvedComment {
+    locations: FileRange[];
+    icon?: string;
+    content: WalkthroughElement[];
+}
+
+interface ResolvedAction {
+    button: string;
+    tell_agent?: string;
+}
+
+interface FileLocation {
+    line: number;
+    column: number;
+}
+
+interface FileRange {
+    path: string;
+    start: FileLocation;
+    end: FileLocation;
+    content?: string;
 }
 
 interface FileChange {
@@ -247,6 +284,25 @@ class DaemonClient implements vscode.Disposable {
                 this.sendResponse(message.id, { success: true });
             } catch (error) {
                 this.outputChannel.appendLine(`Error handling present_review: ${error}`);
+                this.sendResponse(message.id, {
+                    success: false,
+                    error: error instanceof Error ? error.message : String(error)
+                });
+            }
+        } else if (message.type === 'present_walkthrough') {
+            try {
+                const walkthroughPayload = message.payload as PresentWalkthroughPayload;
+                
+                // For now, just log the received walkthrough data
+                this.outputChannel.appendLine(`Received walkthrough with base_uri: ${walkthroughPayload.base_uri}`);
+                this.outputChannel.appendLine(`Walkthrough sections: ${Object.keys(walkthroughPayload).filter(k => k !== 'base_uri' && walkthroughPayload[k as keyof PresentWalkthroughPayload]).join(', ')}`);
+                
+                // TODO: Implement walkthrough webview rendering
+                
+                // Send success response back through daemon
+                this.sendResponse(message.id, { success: true });
+            } catch (error) {
+                this.outputChannel.appendLine(`Error handling present_walkthrough: ${error}`);
                 this.sendResponse(message.id, {
                     success: false,
                     error: error instanceof Error ? error.message : String(error)
