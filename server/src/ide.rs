@@ -424,7 +424,7 @@ pub struct ResolvedWalkthrough {
 #[serde(untagged)]
 pub enum ResolvedWalkthroughElement {
     /// Plain markdown text
-    Text(String),
+    Markdown(String),
     /// Comment placed at specific locations
     Comment(ResolvedComment),
     /// Git diff display
