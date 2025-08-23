@@ -673,16 +673,10 @@ pub enum ResolvedWalkthroughElement {
 mod url_conversion_tests {
     use super::*;
     use pulldown_cmark::{Parser, Event, Tag};
+    use expect_test::{expect, Expect};
 
-    #[test]
-    fn test_markdown_url_conversion() {
-        let markdown = r#"
-Check out [this function](src/auth.ts?validateToken) and 
-[this line](src/auth.ts#L42) or [this range](src/auth.ts#L42-L50).
-Also see [the whole file](src/auth.ts) and [this function with spaces](src/auth.rs?fn foo).
-"#;
-        
-        let processed = process_markdown_links(markdown.to_string());
+    fn check_extracted_urls(input: &str, expected: Expect) {
+        let processed = process_markdown_links(input.to_string());
         
         // Extract URLs using pulldown-cmark parser
         let parser = Parser::new(&processed);
@@ -694,12 +688,26 @@ Also see [the whole file](src/auth.ts) and [this function with spaces](src/auth.
             }
         }
         
-        // Verify the converted URLs
-        assert!(urls.contains(&"dialectic:src/auth.ts?regex=validateToken".to_string()));
-        assert!(urls.contains(&"dialectic:src/auth.ts?line=42".to_string()));
-        assert!(urls.contains(&"dialectic:src/auth.ts?line=42-50".to_string()));
-        assert!(urls.contains(&"dialectic:src/auth.ts".to_string()));
-        assert!(urls.contains(&"dialectic:src/auth.rs?regex=fn%20foo".to_string()));
+        expected.assert_debug_eq(&urls);
+    }
+
+    #[test]
+    fn test_markdown_url_conversion() {
+        let markdown = r#"
+Check out [this function](src/auth.ts?validateToken) and 
+[this line](src/auth.ts#L42) or [this range](src/auth.ts#L42-L50).
+Also see [the whole file](src/auth.ts) and [this function with spaces](src/auth.rs?fn foo).
+"#;
+        
+        check_extracted_urls(markdown, expect![[r#"
+            [
+                "dialectic:src/auth.ts?regex=validateToken",
+                "dialectic:src/auth.ts?line=42",
+                "dialectic:src/auth.ts?line=42-50",
+                "dialectic:src/auth.ts",
+                "dialectic:src/auth.rs?regex=fn%20foo",
+            ]
+        "#]]);
     }
 
     #[test]
@@ -716,13 +724,11 @@ But this should be ignored:
 And this inline code too: `[another fake](src/inline.ts)`
 "#;
         
-        let processed = process_markdown_links(markdown.to_string());
-        
-        // Should convert the real link
-        assert!(processed.contains("dialectic:src/real.ts?regex=pattern"));
-        // Should NOT convert links in code blocks
-        assert!(processed.contains("[fake link](src/fake.ts?pattern)")); // Original unchanged
-        assert!(processed.contains("[another fake](src/inline.ts)")); // Original unchanged
+        check_extracted_urls(markdown, expect![[r#"
+            [
+                "dialectic:src/real.ts?regex=pattern",
+            ]
+        "#]]);
     }
 
     #[test]
@@ -732,23 +738,13 @@ Check [file with spaces](src/auth.rs?fn foo) and [file with bracket](src/auth.rs
 Also [main.rs][] and [utils.ts:42][].
 "#;
         
-        let processed = process_markdown_links(markdown.to_string());
-        
-        // Extract URLs using pulldown-cmark parser
-        let parser = Parser::new(&processed);
-        let mut urls = Vec::new();
-        
-        for event in parser {
-            if let Event::Start(Tag::Link { dest_url, .. }) = event {
-                urls.push(dest_url.to_string());
-            }
-        }
-        
-        // Verify the converted URLs
-        assert!(urls.contains(&"dialectic:src/auth.rs?regex=fn%20foo".to_string()));
-        assert!(urls.contains(&"dialectic:src/auth.rs?regex=fn%7Bbar".to_string())); // { encoded
-        // Reference style links should be converted to dialectic: URLs
-        assert!(urls.contains(&"dialectic:main.rs".to_string()));
-        assert!(urls.contains(&"dialectic:utils.ts#L42".to_string()));
+        check_extracted_urls(markdown, expect![[r#"
+            [
+                "dialectic:src/auth.rs?regex=fn%20foo",
+                "dialectic:src/auth.rs?regex=fn%7Bbar",
+                "dialectic:main.rs",
+                "dialectic:utils.ts#L42",
+            ]
+        "#]]);
     }
 }
