@@ -1,6 +1,6 @@
 use std::{future::Future, pin::Pin};
 
-use serde::{Deserialize, Serialize};
+use serde::{Deserialize, Deserializer, Serialize};
 
 use crate::dialect::{DialectFunction, DialectInterpreter};
 
@@ -330,12 +330,12 @@ impl<U: IpcClient> DialectFunction<U> for Comment {
         for content_item in self.content {
             match content_item {
                 serde_json::Value::String(text) => {
-                    resolved_content.push(ResolvedWalkthroughElement::Markdown(text));
+                    resolved_content.push(ResolvedWalkthroughElement::Markdown(ResolvedMarkdownElement { content: text }));
                 }
                 _ => {
                     // For now, convert other types to string and treat as markdown
                     // TODO: Execute Dialect programs here
-                    resolved_content.push(ResolvedWalkthroughElement::Markdown(content_item.to_string()));
+                    resolved_content.push(ResolvedWalkthroughElement::Markdown(ResolvedMarkdownElement { content: content_item.to_string() }));
                 }
             }
         }
@@ -437,15 +437,101 @@ pub struct ResolvedWalkthrough {
     pub base_uri: String,
 }
 
+#[derive(Serialize, Debug)]
+pub struct ResolvedMarkdownElement {
+    pub content: String,
+}
+
+impl<'de> Deserialize<'de> for ResolvedMarkdownElement {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: Deserializer<'de>,
+    {
+        let raw_markdown = String::deserialize(deserializer)?;
+        let processed_content = process_markdown_links(raw_markdown);
+        Ok(ResolvedMarkdownElement {
+            content: processed_content,
+        })
+    }
+}
+
+fn process_markdown_links(markdown: String) -> String {
+    // For now, just do simple regex-based URL conversion
+    // TODO: Implement proper markdown parsing with pulldown-cmark
+    let mut result = markdown;
+    
+    // Handle path?regex format for search
+    result = regex::Regex::new(r"\[([^\]]+)\]\(([^\s\[\]()]+)\?([^\[\]()]+)\)")
+        .unwrap()
+        .replace_all(&result, |caps: &regex::Captures| {
+            format!("[{}](dialectic:{}?regex={})", &caps[1], &caps[2], &caps[3])
+        })
+        .to_string();
+    
+    // Handle path#L42-L50 format for line ranges
+    result = regex::Regex::new(r"\[([^\]]+)\]\(([^\s\[\]()]+)#L(\d+)-L(\d+)\)")
+        .unwrap()
+        .replace_all(&result, |caps: &regex::Captures| {
+            format!("[{}](dialectic:{}?line={}-{})", &caps[1], &caps[2], &caps[3], &caps[4])
+        })
+        .to_string();
+    
+    // Handle path#L42 format for single lines
+    result = regex::Regex::new(r"\[([^\]]+)\]\(([^\s\[\]()]+)#L(\d+)\)")
+        .unwrap()
+        .replace_all(&result, |caps: &regex::Captures| {
+            format!("[{}](dialectic:{}?line={})", &caps[1], &caps[2], &caps[3])
+        })
+        .to_string();
+    
+    // Handle bare filenames
+    result = regex::Regex::new(r"\[([^\]]+)\]\(([^\s\[\]():]+)\)")
+        .unwrap()
+        .replace_all(&result, |caps: &regex::Captures| {
+            // Only convert if it doesn't already start with dialectic: or contain ://
+            let url = &caps[2];
+            if url.starts_with("dialectic:") || url.contains("://") {
+                format!("[{}]({})", &caps[1], url)
+            } else {
+                format!("[{}](dialectic:{})", &caps[1], url)
+            }
+        })
+        .to_string();
+    
+    result
+}
+
+
+
 #[derive(Serialize, Deserialize, Debug)]
 #[serde(untagged)]
 pub enum ResolvedWalkthroughElement {
-    /// Plain markdown text
-    Markdown(String),
+    /// Plain markdown text with processed links
+    Markdown(ResolvedMarkdownElement),
     /// Comment placed at specific locations
     Comment(ResolvedComment),
     /// Git diff display
     GitDiff(Vec<crate::synthetic_pr::FileChange>),
     /// Action button
     Action(ResolvedAction),
+}
+#[cfg(test)]
+mod url_conversion_tests {
+    use super::*;
+
+    #[test]
+    fn test_markdown_url_conversion() {
+        let markdown = r#"
+Check out [this function](src/auth.ts?validateToken) and 
+[this line](src/auth.ts#L42) or [this range](src/auth.ts#L42-L50).
+Also see [the whole file](src/auth.ts).
+"#;
+        
+        let processed = process_markdown_links(markdown.to_string());
+        
+        assert!(processed.contains("dialectic:src/auth.ts?regex=validateToken"));
+        assert!(processed.contains("dialectic:src/auth.ts?line=42"));
+        assert!(processed.contains("dialectic:src/auth.ts?line=42-50"));
+        assert!(processed.contains("dialectic:src/auth.ts"));
+    }
 }

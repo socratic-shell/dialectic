@@ -330,7 +330,7 @@ impl DialecticServer {
         
         match element {
             serde_json::Value::String(text) => {
-                Ok(ResolvedWalkthroughElement::Markdown(text))
+                Ok(ResolvedWalkthroughElement::Markdown(crate::ide::ResolvedMarkdownElement { content: text }))
             }
             serde_json::Value::Object(_) => {
                 // Clone interpreter and execute Dialect program (same pattern as ide_operation)
@@ -350,7 +350,7 @@ impl DialecticServer {
             }
             _ => {
                 // Convert other types to markdown
-                Ok(ResolvedWalkthroughElement::Markdown(element.to_string()))
+                Ok(ResolvedWalkthroughElement::Markdown(crate::ide::ResolvedMarkdownElement { content: element.to_string() }))
             }
         }
     }

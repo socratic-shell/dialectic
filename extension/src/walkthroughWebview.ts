@@ -1,7 +1,7 @@
 import * as vscode from 'vscode';
 
 type WalkthroughElement = 
-    | string  // Markdown content
+    | { content: string }  // ResolvedMarkdownElement with processed dialectic: URLs
     | { comment: any }  // Simplified for now
     | { gitdiff: any }  // Simplified for now  
     | { action: { button: string; description?: string; tell_agent?: string } };
@@ -144,8 +144,9 @@ export class WalkthroughWebviewProvider implements vscode.WebviewViewProvider {
                         html += '<div class="section-title">' + title + '</div>';
                         
                         items.forEach(item => {
-                            if (typeof item === 'string') {
-                                html += '<div class="content-item">' + renderMarkdown(item) + '</div>';
+                            if (typeof item === 'object' && 'content' in item) {
+                                // ResolvedMarkdownElement with processed dialectic: URLs
+                                html += '<div class="content-item">' + renderMarkdown(item.content) + '</div>';
                             } else if (item.action) {
                                 html += '<div class="content-item">';
                                 html += '<button class="action-button" onclick="handleAction(' + 

@@ -75,7 +75,7 @@ interface PresentWalkthroughPayload {
 }
 
 type WalkthroughElement = 
-    | string  // Markdown content
+    | { content: string }  // ResolvedMarkdownElement with processed dialectic: URLs
     | { comment: ResolvedComment }
     | { gitdiff: FileChange[] }
     | { action: ResolvedAction };
