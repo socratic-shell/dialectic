@@ -322,17 +322,9 @@ impl DialecticServer {
                 .map_err(|e| McpError::internal_error("Task execution failed", Some(serde_json::json!({"error": e.to_string()}))))?
                 .map_err(|e| McpError::internal_error("Dialect execution failed", Some(serde_json::json!({"error": e.to_string()}))))?;
                 
-                // Try to deserialize as different element types
-                if let Ok(comment) = serde_json::from_value::<crate::ide::ResolvedComment>(result.clone()) {
-                    Ok(ResolvedWalkthroughElement::Comment(comment))
-                } else if let Ok(file_changes) = serde_json::from_value::<Vec<crate::synthetic_pr::FileChange>>(result.clone()) {
-                    Ok(ResolvedWalkthroughElement::GitDiff(file_changes))
-                } else if let Ok(action) = serde_json::from_value::<crate::ide::ResolvedAction>(result.clone()) {
-                    Ok(ResolvedWalkthroughElement::Action(action))
-                } else {
-                    // Fallback to markdown
-                    Ok(ResolvedWalkthroughElement::Markdown(result.to_string()))
-                }
+                // Deserialize directly using serde(untagged)
+                serde_json::from_value(result)
+                    .map_err(|e| McpError::internal_error("Failed to deserialize result", Some(serde_json::json!({"error": e.to_string()}))))
             }
             _ => {
                 // Convert other types to markdown
