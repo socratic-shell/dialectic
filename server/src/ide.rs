@@ -376,13 +376,10 @@ fn process_file(
 /// Create an interactive action button for walkthroughs.
 ///
 /// Examples:
-/// - `{"action": {"description": "Click to run tests", "button": "Run Tests"}}`
-/// - `{"action": {"description": "Generate boilerplate", "button": "Generate", "tell_agent": "Generate user authentication boilerplate"}}`
+/// - `{"action": {"button": "Run Tests"}}`
+/// - `{"action": {"button": "Generate", "tell_agent": "Generate user authentication boilerplate"}}`
 #[derive(Deserialize)]
 pub struct Action {
-    /// Description shown to user
-    pub description: String,
-    
     /// Button text
     pub button: String,
     
@@ -392,7 +389,6 @@ pub struct Action {
 
 #[derive(Serialize)]
 pub struct ResolvedAction {
-    pub description: String,
     pub button: String,
     pub tell_agent: Option<String>,
 }
@@ -408,9 +404,31 @@ impl<U: IpcClient> DialectFunction<U> for Action {
     ) -> anyhow::Result<Self::Output> {
         // Action is already resolved, just pass through
         Ok(ResolvedAction {
-            description: self.description,
             button: self.button,
             tell_agent: self.tell_agent,
         })
     }
+}
+
+/// Resolved walkthrough types for IPC communication with VSCode extension
+
+#[derive(Serialize)]
+pub struct ResolvedWalkthrough {
+    pub introduction: Option<Vec<String>>,
+    pub highlights: Option<Vec<ResolvedWalkthroughElement>>,
+    pub changes: Option<Vec<ResolvedWalkthroughElement>>,
+    pub actions: Option<Vec<ResolvedWalkthroughElement>>,
+}
+
+#[derive(Serialize)]
+#[serde(untagged)]
+pub enum ResolvedWalkthroughElement {
+    /// Plain markdown text
+    Text(String),
+    /// Comment placed at specific locations
+    Comment(ResolvedComment),
+    /// Git diff display
+    GitDiff(Vec<crate::synthetic_pr::FileChange>),
+    /// Action button
+    Action(ResolvedAction),
 }

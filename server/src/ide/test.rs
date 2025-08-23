@@ -746,7 +746,6 @@ async fn test_action_function() {
     // Test action with tell_agent
     let program = serde_json::json!({
         "action": {
-            "description": "Generate authentication boilerplate code",
             "button": "Generate Auth",
             "tell_agent": "Create a complete authentication system with login, logout, and middleware"
         }
@@ -758,7 +757,6 @@ async fn test_action_function() {
         Ok(
             Object {
                 "button": String("Generate Auth"),
-                "description": String("Generate authentication boilerplate code"),
                 "tell_agent": String("Create a complete authentication system with login, logout, and middleware"),
             },
         )
