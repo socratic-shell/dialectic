@@ -5,6 +5,7 @@ import * as fs from 'fs';
 import * as crypto from 'crypto';
 import { ReviewWebviewProvider } from './reviewWebview';
 import { SyntheticPRProvider } from './syntheticPRProvider';
+import { WalkthroughWebviewProvider } from './walkthroughWebview';
 
 // TEST TEST TEST 
 
@@ -192,7 +193,8 @@ class DaemonClient implements vscode.Disposable {
         private context: vscode.ExtensionContext,
         private reviewProvider: ReviewWebviewProvider,
         private outputChannel: vscode.OutputChannel,
-        private syntheticPRProvider: SyntheticPRProvider
+        private syntheticPRProvider: SyntheticPRProvider,
+        private walkthroughProvider: WalkthroughWebviewProvider
     ) { }
 
     start(): void {
@@ -293,11 +295,11 @@ class DaemonClient implements vscode.Disposable {
             try {
                 const walkthroughPayload = message.payload as PresentWalkthroughPayload;
                 
-                // For now, just log the received walkthrough data
                 this.outputChannel.appendLine(`Received walkthrough with base_uri: ${walkthroughPayload.base_uri}`);
                 this.outputChannel.appendLine(`Walkthrough sections: ${Object.keys(walkthroughPayload).filter(k => k !== 'base_uri' && walkthroughPayload[k as keyof PresentWalkthroughPayload]).join(', ')}`);
                 
-                // TODO: Implement walkthrough webview rendering
+                // Show walkthrough in webview
+                this.walkthroughProvider.showWalkthrough(walkthroughPayload);
                 
                 // Send success response back through daemon
                 this.sendResponse(message.id, { success: true });
@@ -849,10 +851,16 @@ export function activate(context: vscode.ExtensionContext) {
     // Create synthetic PR provider for AI-generated pull requests
     const syntheticPRProvider = new SyntheticPRProvider(context);
 
+    // Create walkthrough webview provider
+    const walkthroughProvider = new WalkthroughWebviewProvider(context.extensionUri);
+    context.subscriptions.push(
+        vscode.window.registerWebviewViewProvider(WalkthroughWebviewProvider.viewType, walkthroughProvider)
+    );
+
     console.log('Webview provider created successfully');
 
     // 💡: Set up daemon client connection for message bus communication
-    const daemonClient = new DaemonClient(context, reviewProvider, outputChannel, syntheticPRProvider);
+    const daemonClient = new DaemonClient(context, reviewProvider, outputChannel, syntheticPRProvider, walkthroughProvider);
     daemonClient.start();
 
     // Set up comment callback to send comments as feedback

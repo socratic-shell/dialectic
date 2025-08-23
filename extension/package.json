@@ -73,6 +73,11 @@
         {
           "id": "dialectic.syntheticPR",
           "name": "Code Review"
+        },
+        {
+          "id": "dialectic.walkthrough",
+          "name": "Walkthrough",
+          "type": "webview"
         }
       ]
     },
