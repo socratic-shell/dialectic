@@ -284,7 +284,7 @@ pub struct Comment {
     /// Optional content.
     ///
     /// FIXME: These should be content elements.
-    pub content: Vec<String>,
+    pub content: Vec<serde_json::Value>, // Will be resolved to ResolvedWalkthroughElement
 }
 
 /// We accept either symbols or file ranges.
@@ -301,7 +301,7 @@ pub enum ResolvedLocation {
 pub struct ResolvedComment {
     pub locations: Vec<FileRange>,
     pub icon: Option<String>,
-    pub content: Vec<String>,
+    pub content: Vec<ResolvedWalkthroughElement>,
 }
 
 impl<U: IpcClient> DialectFunction<U> for Comment {
@@ -311,7 +311,7 @@ impl<U: IpcClient> DialectFunction<U> for Comment {
 
     async fn execute(
         self,
-        _interpreter: &mut DialectInterpreter<U>,
+        interpreter: &mut DialectInterpreter<U>,
     ) -> anyhow::Result<Self::Output> {
         // Normalize different location types to a Vec<FileRange>
         let locations = match self.location {
@@ -324,10 +324,26 @@ impl<U: IpcClient> DialectFunction<U> for Comment {
             return Err(anyhow::anyhow!("Location resolved to empty search results"));
         }
 
+        // Process content elements - for now, convert strings to Markdown elements
+        // TODO: Execute Dialect programs in content elements
+        let mut resolved_content = Vec::new();
+        for content_item in self.content {
+            match content_item {
+                serde_json::Value::String(text) => {
+                    resolved_content.push(ResolvedWalkthroughElement::Markdown(text));
+                }
+                _ => {
+                    // For now, convert other types to string and treat as markdown
+                    // TODO: Execute Dialect programs here
+                    resolved_content.push(ResolvedWalkthroughElement::Markdown(content_item.to_string()));
+                }
+            }
+        }
+
         Ok(ResolvedComment {
             locations,
             icon: self.icon,
-            content: self.content,
+            content: resolved_content,
         })
     }
 }
