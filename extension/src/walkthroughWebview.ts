@@ -67,10 +67,16 @@ export class WalkthroughWebviewProvider implements vscode.WebviewViewProvider {
     }
 
     private async handleWebviewMessage(message: any): Promise<void> {
-        switch (message.command) {
+        switch (message.command || message.type) {
             case 'openFile':
                 console.log('Walkthrough: openFile command received:', message.dialecticUrl);
                 await openDialecticUrl(message.dialecticUrl, this.outputChannel, this.baseUri);
+                break;
+            case 'action':
+                console.log('Walkthrough: action received:', message.message);
+                this.outputChannel.appendLine(`Action button clicked: ${message.message}`);
+                // TODO: Send message to MCP server/AI assistant
+                vscode.window.showInformationMessage(`Action: ${message.message}`);
                 break;
             case 'ready':
                 console.log('Walkthrough webview ready');
@@ -264,6 +270,16 @@ export class WalkthroughWebviewProvider implements vscode.WebviewViewProvider {
                             if (typeof item === 'object' && 'content' in item) {
                                 // ResolvedMarkdownElement with processed dialectic: URLs
                                 html += '<div class="content-item">' + renderMarkdown(item.content) + '</div>';
+                            } else if (item.Action && item.Action.button) {
+                                // Action wrapper object
+                                html += '<div class="content-item">';
+                                html += '<button class="action-button" data-tell-agent="' + 
+                                       (item.Action.tell_agent || '').replace(/"/g, '&quot;') + '">' + 
+                                       item.Action.button + '</button>';
+                                if (item.Action.description) {
+                                    html += '<div class="action-description">' + item.Action.description + '</div>';
+                                }
+                                html += '</div>';
                             } else if (item.button) {
                                 // Direct action object with button property
                                 html += '<div class="content-item">';
