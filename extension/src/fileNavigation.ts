@@ -123,6 +123,30 @@ export async function openDialecticUrl(dialecticUrl: string, outputChannel: vsco
             preview: false // Ensure final navigation creates a permanent tab
         });
 
+        // Apply highlight decoration using the appropriate ranges
+        const lineHighlightDecoration = vscode.window.createTextEditorDecorationType({
+            backgroundColor: new vscode.ThemeColor('editor.findMatchHighlightBackground'),
+            border: '1px solid',
+            borderColor: new vscode.ThemeColor('editor.findMatchBorder')
+        });
+
+        const bestSearchResult = parsed.regex ? 
+            (await searchInFile(fileUri, { regexPattern: parsed.regex, lineConstraint: parsed.line }))
+                .find(r => r.line === targetLine && r.column === targetColumn) : undefined;
+
+        const decorationRanges = createDecorationRanges(document, parsed.line, targetLine, targetColumn, bestSearchResult);
+        if (decorationRanges.length > 0) {
+            editor.setDecorations(lineHighlightDecoration, decorationRanges);
+            
+            // Remove highlight after 3 seconds
+            setTimeout(() => {
+                if (vscode.window.activeTextEditor === editor) {
+                    editor.setDecorations(lineHighlightDecoration, []);
+                }
+                lineHighlightDecoration.dispose();
+            }, 3000);
+        }
+
         outputChannel.appendLine(`Navigated to line ${targetLine}, column ${targetColumn}`);
 
     } catch (error) {
@@ -133,7 +157,7 @@ export async function openDialecticUrl(dialecticUrl: string, outputChannel: vsco
 
 /**
  * Show disambiguation dialog for multiple search results
- * Simplified version without live preview for shared module
+ * Full implementation with live preview and highlighting
  */
 async function showSearchDisambiguation(
     results: import('./searchEngine').SearchResult[], 
@@ -143,14 +167,145 @@ async function showSearchDisambiguation(
     // Create QuickPick items with context
     const items = results.map((result, index) => ({
         label: `Line ${result.line}: ${result.text.trim()}`,
-        description: `Match ${index + 1} of ${results.length}`,
+        description: `$(search) Match ${index + 1} of ${results.length}`,
         detail: `Column ${result.column}`,
         result: result
     }));
 
-    const selected = await vscode.window.showQuickPick(items, {
-        placeHolder: `Multiple matches for "${searchTerm}" - select one:`
+    const quickPick = vscode.window.createQuickPick();
+    quickPick.title = `Multiple matches for "${searchTerm}"`;
+    quickPick.placeholder = 'Select the match you want to navigate to (preview updates as you navigate)';
+    quickPick.items = items;
+    quickPick.canSelectMany = false;
+
+    // Create line highlight decoration type
+    const lineHighlightDecoration = vscode.window.createTextEditorDecorationType({
+        backgroundColor: new vscode.ThemeColor('editor.findMatchHighlightBackground'),
+        border: '1px solid',
+        borderColor: new vscode.ThemeColor('editor.findMatchBorder')
     });
 
-    return selected?.result;
+    return new Promise((resolve) => {
+        let currentActiveItem: any = null;
+        let isResolved = false;
+
+        // Show live preview as user navigates through options
+        quickPick.onDidChangeActive((items) => {
+            if (items.length > 0) {
+                currentActiveItem = items[0]; // Track the currently active item
+                const selectedResult = (items[0] as any).result;
+                
+                // Show preview by revealing the location without committing to it
+                vscode.window.showTextDocument(document, {
+                    selection: new vscode.Range(
+                        selectedResult.line - 1, 
+                        selectedResult.matchStart,
+                        selectedResult.line - 1, 
+                        selectedResult.matchEnd
+                    ),
+                    preview: true, // This keeps it as a preview tab
+                    preserveFocus: true, // Keep focus on the QuickPick
+                    viewColumn: vscode.ViewColumn.One // Ensure it opens in main editor area
+                }).then((editor) => {
+                    // Add line decorations to preview just like final navigation
+                    const decorationRanges = createDecorationRanges(
+                        document, 
+                        undefined, // No line constraint for search results
+                        selectedResult.line, 
+                        selectedResult.column, 
+                        selectedResult
+                    );
+                    if (decorationRanges.length > 0) {
+                        editor.setDecorations(lineHighlightDecoration, decorationRanges);
+                        
+                        // Remove preview highlight after 2 seconds (shorter than final)
+                        setTimeout(() => {
+                            if (editor && !editor.document.isClosed) {
+                                editor.setDecorations(lineHighlightDecoration, []);
+                            }
+                        }, 2000);
+                    }
+                }, (error: any) => {
+                    console.log(`Preview failed: ${error}`);
+                });
+            }
+        });
+
+        quickPick.onDidAccept(() => {
+            if (isResolved) {
+                return;
+            }
+
+            // Use the currently active item instead of selectedItems
+            const selected = currentActiveItem || quickPick.selectedItems[0];
+            
+            if (selected && (selected as any).result) {
+                const result = (selected as any).result;
+                isResolved = true;
+                quickPick.dispose();
+                lineHighlightDecoration.dispose();
+                resolve(result);
+                return;
+            }
+
+            // Fallback case
+            isResolved = true;
+            quickPick.dispose();
+            lineHighlightDecoration.dispose();
+            resolve(undefined);
+        });
+
+        quickPick.onDidHide(() => {
+            if (!isResolved) {
+                isResolved = true;
+                quickPick.dispose();
+                lineHighlightDecoration.dispose();
+                resolve(undefined);
+            }
+        });
+
+        quickPick.show();
+    });
+}
+
+/**
+ * Create decoration ranges based on line specification or search result
+ */
+function createDecorationRanges(
+    document: vscode.TextDocument, 
+    lineSpec?: import('./dialecticUrl').LineSpec, 
+    targetLine?: number, 
+    targetColumn?: number,
+    searchResult?: import('./searchEngine').SearchResult
+): vscode.Range[] {
+    // If we have a search result, highlight the exact match
+    if (searchResult) {
+        const line = Math.max(0, searchResult.line - 1); // Convert to 0-based
+        const startCol = searchResult.matchStart;
+        const endCol = searchResult.matchEnd;
+        return [new vscode.Range(line, startCol, line, endCol)];
+    }
+    
+    if (lineSpec) {
+        const ranges: vscode.Range[] = [];
+        const startLine = Math.max(0, lineSpec.startLine - 1);
+        const endLine = lineSpec.endLine ? Math.max(0, lineSpec.endLine - 1) : startLine;
+        
+        for (let line = startLine; line <= Math.min(endLine, document.lineCount - 1); line++) {
+            const lineText = document.lineAt(line);
+            ranges.push(new vscode.Range(line, 0, line, lineText.text.length));
+        }
+        return ranges;
+    }
+    
+    // Single line highlight
+    if (targetLine) {
+        const line = Math.max(0, targetLine - 1);
+        if (line < document.lineCount) {
+            const lineText = document.lineAt(line);
+            return [new vscode.Range(line, 0, line, lineText.text.length)];
+        }
+    }
+    
+    return [];
 }
