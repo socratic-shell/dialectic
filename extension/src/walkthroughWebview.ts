@@ -25,7 +25,8 @@ export class WalkthroughWebviewProvider implements vscode.WebviewViewProvider {
 
     constructor(
         private readonly _extensionUri: vscode.Uri,
-        private readonly outputChannel: vscode.OutputChannel
+        private readonly outputChannel: vscode.OutputChannel,
+        private daemonClient?: any // Will be set after daemon client is created
     ) {
         this.md = this.setupMarkdownRenderer();
     }
@@ -75,12 +76,93 @@ export class WalkthroughWebviewProvider implements vscode.WebviewViewProvider {
             case 'action':
                 console.log('Walkthrough: action received:', message.message);
                 this.outputChannel.appendLine(`Action button clicked: ${message.message}`);
-                // TODO: Send message to MCP server/AI assistant
-                vscode.window.showInformationMessage(`Action: ${message.message}`);
+                
+                // Send message to active AI terminal
+                await this.sendToActiveShell(message.message);
                 break;
             case 'ready':
                 console.log('Walkthrough webview ready');
                 break;
+        }
+    }
+
+    /**
+     * Set the daemon client after it's created
+     */
+    setDaemonClient(daemonClient: any): void {
+        this.daemonClient = daemonClient;
+    }
+
+    /**
+     * Send a message to the active AI terminal (shared with Ask Socratic Shell)
+     */
+    private async sendToActiveShell(message: string): Promise<void> {
+        if (!this.daemonClient) {
+            vscode.window.showErrorMessage('Daemon client not available. Please ensure Dialectic is properly connected.');
+            return;
+        }
+
+        const terminals = vscode.window.terminals;
+        if (terminals.length === 0) {
+            vscode.window.showWarningMessage('No terminals found. Please open a terminal with an active AI assistant.');
+            return;
+        }
+
+        // Get active terminals with MCP servers from registry
+        const activeTerminals = this.daemonClient.getActiveTerminals();
+        this.outputChannel.appendLine(`Active MCP server terminals: [${Array.from(activeTerminals).join(', ')}]`);
+
+        if (activeTerminals.size === 0) {
+            vscode.window.showWarningMessage('No terminals with active MCP servers found. Please ensure you have a terminal with an active AI assistant (like Q chat or Claude CLI) running.');
+            return;
+        }
+
+        // Filter terminals to only those with active MCP servers
+        const terminalChecks = await Promise.all(
+            terminals.map(async (terminal) => {
+                const shellPID = await terminal.processId;
+                const isAiEnabled = shellPID && activeTerminals.has(shellPID);
+                return { terminal, isAiEnabled };
+            })
+        );
+
+        const aiEnabledTerminals = terminalChecks
+            .filter(check => check.isAiEnabled)
+            .map(check => check.terminal);
+
+        if (aiEnabledTerminals.length === 0) {
+            vscode.window.showWarningMessage('No AI-enabled terminals found. Please ensure you have a terminal with an active MCP server running.');
+            return;
+        }
+
+        // Simple case - exactly one AI-enabled terminal
+        if (aiEnabledTerminals.length === 1) {
+            const terminal = aiEnabledTerminals[0];
+            terminal.sendText(message, false); // false = don't execute, just insert text
+            terminal.show(); // Bring terminal into focus
+            this.outputChannel.appendLine(`Message sent to terminal: ${terminal.name}`);
+            vscode.window.showInformationMessage(`Message sent to ${terminal.name}`);
+            return;
+        }
+
+        // Multiple terminals - show picker (simplified version)
+        const selectedTerminal = await vscode.window.showQuickPick(
+            aiEnabledTerminals.map(terminal => ({
+                label: terminal.name,
+                description: 'Terminal with active AI assistant',
+                terminal: terminal
+            })),
+            {
+                placeHolder: 'Select terminal for AI message',
+                title: 'Multiple AI-enabled terminals found'
+            }
+        );
+
+        if (selectedTerminal) {
+            selectedTerminal.terminal.sendText(message, false);
+            selectedTerminal.terminal.show();
+            this.outputChannel.appendLine(`Message sent to terminal: ${selectedTerminal.terminal.name}`);
+            vscode.window.showInformationMessage(`Message sent to ${selectedTerminal.terminal.name}`);
         }
     }
 

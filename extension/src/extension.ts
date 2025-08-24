@@ -871,6 +871,9 @@ export function activate(context: vscode.ExtensionContext) {
 
     // 💡: Set up daemon client connection for message bus communication
     const daemonClient = new DaemonClient(context, reviewProvider, outputChannel, syntheticPRProvider, walkthroughProvider);
+    
+    // Set daemon client on walkthrough provider for terminal access
+    walkthroughProvider.setDaemonClient(daemonClient);
     daemonClient.start();
 
     // Set up comment callback to send comments as feedback
