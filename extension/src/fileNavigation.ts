@@ -144,6 +144,10 @@ export async function openDialecticUrl(dialecticUrl: string, outputChannel: vsco
             preview: false // Ensure final navigation creates a permanent tab
         });
 
+        // Explicitly set the cursor position after opening
+        editor.selection = new vscode.Selection(line, column, line, column);
+        editor.revealRange(new vscode.Range(line, column, line, column), vscode.TextEditorRevealType.InCenter);
+
         // Apply highlight decoration using the appropriate ranges
         const lineHighlightDecoration = vscode.window.createTextEditorDecorationType({
             backgroundColor: new vscode.ThemeColor('editor.findMatchHighlightBackground'),
