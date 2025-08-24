@@ -6,6 +6,7 @@ import * as crypto from 'crypto';
 import * as MarkdownIt from 'markdown-it';
 import { parseDialecticUrl, DialecticUrl } from './dialecticUrl';
 import { searchInFile, getBestSearchResult, formatSearchResults, needsDisambiguation } from './searchEngine';
+import { openDialecticUrl } from './fileNavigation';
 
 export class ReviewWebviewProvider {
     private panel: vscode.WebviewPanel | undefined;
@@ -152,7 +153,7 @@ export class ReviewWebviewProvider {
     private async handleWebviewMessage(message: any): Promise<void> {
         switch (message.command) {
             case 'openFile':
-                await this.openDialecticUrl(message.dialecticUrl);
+                await openDialecticUrl(message.dialecticUrl, this.outputChannel, this.baseUri);
                 break;
             case 'copyReview':
                 await vscode.env.clipboard.writeText(this.reviewContent);
@@ -161,146 +162,6 @@ export class ReviewWebviewProvider {
             case 'ready':
                 this.outputChannel.appendLine('Webview ready');
                 break;
-        }
-    }
-
-    /**
-     * Open a file using dialectic URL format with search and line support
-     */
-    private async openDialecticUrl(dialecticUrlString: string): Promise<void> {
-        try {
-            // 💡: Parse the dialectic URL to extract components
-            const dialecticUrl = parseDialecticUrl(dialecticUrlString);
-            if (!dialecticUrl) {
-                vscode.window.showErrorMessage(`Invalid dialectic URL: ${dialecticUrlString}`);
-                return;
-            }
-
-            this.outputChannel.appendLine(`Opening dialectic URL: ${dialecticUrlString}`);
-            this.outputChannel.appendLine(`Parsed: path=${dialecticUrl.path}, regex=${dialecticUrl.regex}, line=${JSON.stringify(dialecticUrl.line)}`);
-
-            // 💡: Find the file using existing file resolution logic
-            const fileUri = await this.resolveFileUri(dialecticUrl.path);
-            if (!fileUri) {
-                const baseInfo = this.baseUri ? ` (base: ${this.baseUri.fsPath})` : '';
-                vscode.window.showErrorMessage(`File not found: ${dialecticUrl.path}${baseInfo}`);
-                return;
-            }
-
-            // 💡: Check if the resolved path is a directory
-            const stat = await vscode.workspace.fs.stat(fileUri);
-            if (stat.type === vscode.FileType.Directory) {
-                this.outputChannel.appendLine(`Revealing directory in Explorer: ${fileUri.fsPath}`);
-                
-                // 💡: Reveal the directory in the Explorer sidebar
-                await vscode.commands.executeCommand('revealInExplorer', fileUri);
-                return;
-            }
-
-            // 💡: Open the document first (it's a file)
-            const document = await vscode.workspace.openTextDocument(fileUri);
-
-            let targetLine = 1;
-            let targetColumn = 1;
-
-            // 💡: Handle regex if specified
-            let bestSearchResult: import('./searchEngine').SearchResult | undefined;
-            if (dialecticUrl.regex) {
-                try {
-                    const searchResults = await searchInFile(fileUri, {
-                        regexPattern: dialecticUrl.regex,
-                        lineConstraint: dialecticUrl.line
-                    });
-
-                    this.outputChannel.appendLine(`Regex search results:\n${formatSearchResults(searchResults)}`);
-
-                    if (searchResults.length === 0) {
-                        vscode.window.showWarningMessage(`Regex pattern "${dialecticUrl.regex}" not found in ${dialecticUrl.path}`);
-                        // 💡: Fall back to line parameter if regex fails
-                        if (dialecticUrl.line) {
-                            targetLine = dialecticUrl.line.startLine;
-                            targetColumn = dialecticUrl.line.startColumn || 1;
-                        }
-                    } else if (needsDisambiguation(searchResults)) {
-                        // 💡: Multiple matches - show disambiguation dialog
-                        try {
-                            const selectedResult = await this.showSearchDisambiguation(searchResults, dialecticUrl.regex, document);
-                            
-                            if (selectedResult) {
-                                bestSearchResult = selectedResult;
-                                targetLine = selectedResult.line;
-                                targetColumn = selectedResult.column;
-                            } else {
-                                // 💡: User cancelled - fall back to best result
-                                const bestResult = getBestSearchResult(searchResults);
-                                if (bestResult) {
-                                    bestSearchResult = bestResult;
-                                    targetLine = bestResult.line;
-                                    targetColumn = bestResult.column;
-                                }
-                            }
-                        } catch (error) {
-                            this.outputChannel.appendLine(`Disambiguation error: ${error}`);
-                            // 💡: Fall back to best result on error
-                            const bestResult = getBestSearchResult(searchResults);
-                            if (bestResult) {
-                                bestSearchResult = bestResult;
-                                targetLine = bestResult.line;
-                                targetColumn = bestResult.column;
-                            }
-                        }
-                    } else {
-                        // 💡: Single clear result or clear winner after prioritization
-                        const bestResult = getBestSearchResult(searchResults);
-                        if (bestResult) {
-                            bestSearchResult = bestResult;
-                            targetLine = bestResult.line;
-                            targetColumn = bestResult.column;
-                            this.outputChannel.appendLine(`Using best result: line ${targetLine}, column ${targetColumn}`);
-                        }
-                    }
-                } catch (error) {
-                    this.outputChannel.appendLine(`Regex search failed: ${error}`);
-                    vscode.window.showErrorMessage(`Regex search failed: ${error}`);
-                    // 💡: Fall back to line parameter if regex fails
-                    if (dialecticUrl.line) {
-                        targetLine = dialecticUrl.line.startLine;
-                        targetColumn = dialecticUrl.line.startColumn || 1;
-                    }
-                }
-            } else if (dialecticUrl.line) {
-                // 💡: No regex, just use line parameter
-                targetLine = dialecticUrl.line.startLine;
-                targetColumn = dialecticUrl.line.startColumn || 1;
-            }
-
-            // 💡: Convert to 0-based for VSCode API and create selection
-            const line = Math.max(0, targetLine - 1);
-            const column = Math.max(0, targetColumn - 1);
-            const selection = new vscode.Range(line, column, line, column);
-
-            const editor = await vscode.window.showTextDocument(document, {
-                selection,
-                viewColumn: vscode.ViewColumn.One,
-                preview: false // Ensure final navigation creates a permanent tab
-            });
-            
-            // 💡: Apply highlight decoration using the appropriate ranges
-            const decorationRanges = this.createDecorationRanges(document, dialecticUrl.line, targetLine, targetColumn, bestSearchResult);
-            if (decorationRanges.length > 0) {
-                editor.setDecorations(this.lineHighlightDecoration, decorationRanges);
-                
-                // 💡: Remove highlight after 3 seconds
-                setTimeout(() => {
-                    if (vscode.window.activeTextEditor === editor) {
-                        editor.setDecorations(this.lineHighlightDecoration, []);
-                    }
-                }, 3000);
-            }
-
-        } catch (error) {
-            this.outputChannel.appendLine(`Failed to open dialectic URL: ${error}`);
-            vscode.window.showErrorMessage(`Failed to open ${dialecticUrlString} - ${error}`);
         }
     }
 
