@@ -58,6 +58,14 @@ export class WalkthroughWebviewProvider implements vscode.WebviewViewProvider {
         return md;
     }
 
+    private sanitizeHtml(html: string): string {
+        // Basic HTML sanitization for VSCode webview context
+        // Remove potentially dangerous content while preserving markdown-generated HTML
+        return html.replace(/<script\b[^<]*(?:(?!<\/script>)<[^<]*)*<\/script>/gi, '')
+                  .replace(/javascript:/gi, '')
+                  .replace(/on\w+="[^"]*"/gi, '');
+    }
+
     private async handleWebviewMessage(message: any): Promise<void> {
         switch (message.command) {
             case 'openFile':
@@ -122,7 +130,7 @@ export class WalkthroughWebviewProvider implements vscode.WebviewViewProvider {
             if (!items) return items;
             return items.map(item => {
                 if (typeof item === 'object' && 'content' in item) {
-                    return { content: this.md.render(item.content) };
+                    return { content: this.sanitizeHtml(this.md.render(item.content)) };
                 }
                 return item;
             });
@@ -137,11 +145,14 @@ export class WalkthroughWebviewProvider implements vscode.WebviewViewProvider {
     }
 
     private _getHtmlForWebview(webview: vscode.Webview) {
+        const nonce = crypto.randomBytes(16).toString('base64');
+        
         return `<!DOCTYPE html>
             <html lang="en">
             <head>
                 <meta charset="UTF-8">
                 <meta name="viewport" content="width=device-width, initial-scale=1.0">
+                <meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src 'unsafe-inline'; script-src 'nonce-${nonce}';">
                 <title>Walkthrough</title>
                 <style>
                     body {
@@ -211,7 +222,7 @@ export class WalkthroughWebviewProvider implements vscode.WebviewViewProvider {
                 <div id="content">
                     <div class="empty-state">No walkthrough loaded</div>
                 </div>
-                <script>
+                <script nonce="${nonce}">
                     console.log('Walkthrough webview JavaScript loaded');
                     const vscode = acquireVsCodeApi();
                     console.log('VSCode API acquired');
