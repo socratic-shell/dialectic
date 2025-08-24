@@ -1,6 +1,7 @@
 import * as vscode from 'vscode';
 import * as crypto from 'crypto';
 import * as MarkdownIt from 'markdown-it';
+import { openDialecticUrl } from './fileNavigation';
 
 type WalkthroughElement = 
     | { content: string }  // ResolvedMarkdownElement with processed dialectic: URLs
@@ -20,8 +21,12 @@ export class WalkthroughWebviewProvider implements vscode.WebviewViewProvider {
 
     private _view?: vscode.WebviewView;
     private md: MarkdownIt;
+    private baseUri?: vscode.Uri;
 
-    constructor(private readonly _extensionUri: vscode.Uri) {
+    constructor(
+        private readonly _extensionUri: vscode.Uri,
+        private readonly outputChannel: vscode.OutputChannel
+    ) {
         this.md = this.setupMarkdownRenderer();
     }
 
@@ -57,7 +62,7 @@ export class WalkthroughWebviewProvider implements vscode.WebviewViewProvider {
         switch (message.command) {
             case 'openFile':
                 console.log('Walkthrough: openFile command received:', message.dialecticUrl);
-                // TODO: Will implement file opening in later commit
+                await openDialecticUrl(message.dialecticUrl, this.outputChannel, this.baseUri);
                 break;
             case 'ready':
                 console.log('Walkthrough webview ready');
@@ -106,6 +111,10 @@ export class WalkthroughWebviewProvider implements vscode.WebviewViewProvider {
         } else {
             console.log('ERROR: No webview available');
         }
+    }
+
+    public setBaseUri(baseUri: string) {
+        this.baseUri = vscode.Uri.file(baseUri);
     }
 
     private processWalkthroughMarkdown(walkthrough: WalkthroughData): WalkthroughData {

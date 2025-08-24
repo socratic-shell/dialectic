@@ -298,6 +298,11 @@ class DaemonClient implements vscode.Disposable {
                 this.outputChannel.appendLine(`Received walkthrough with base_uri: ${walkthroughPayload.base_uri}`);
                 this.outputChannel.appendLine(`Walkthrough sections: ${Object.keys(walkthroughPayload).filter(k => k !== 'base_uri' && walkthroughPayload[k as keyof PresentWalkthroughPayload]).join(', ')}`);
                 
+                // Set base URI for file resolution
+                if (walkthroughPayload.base_uri) {
+                    this.walkthroughProvider.setBaseUri(walkthroughPayload.base_uri);
+                }
+                
                 // Show walkthrough in webview
                 this.walkthroughProvider.showWalkthrough({
                     introduction: walkthroughPayload.introduction,
@@ -857,7 +862,7 @@ export function activate(context: vscode.ExtensionContext) {
     const syntheticPRProvider = new SyntheticPRProvider(context);
 
     // Create walkthrough webview provider
-    const walkthroughProvider = new WalkthroughWebviewProvider(context.extensionUri);
+    const walkthroughProvider = new WalkthroughWebviewProvider(context.extensionUri, outputChannel);
     context.subscriptions.push(
         vscode.window.registerWebviewViewProvider(WalkthroughWebviewProvider.viewType, walkthroughProvider)
     );
