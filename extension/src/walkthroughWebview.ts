@@ -267,8 +267,8 @@ export class WalkthroughWebviewProvider implements vscode.WebviewViewProvider {
                             } else if (item.button) {
                                 // Direct action object with button property
                                 html += '<div class="content-item">';
-                                html += '<button class="action-button" onclick="handleAction(' + 
-                                       JSON.stringify(item.tell_agent || '') + ')">' + 
+                                html += '<button class="action-button" data-tell-agent="' + 
+                                       (item.tell_agent || '').replace(/"/g, '&quot;') + '">' + 
                                        item.button + '</button>';
                                 if (item.description) {
                                     html += '<div class="action-description">' + item.description + '</div>';
@@ -289,6 +289,15 @@ export class WalkthroughWebviewProvider implements vscode.WebviewViewProvider {
                             });
                         }
                     }
+
+                    // Add event listener for action button clicks (CSP-compliant)
+                    document.addEventListener('click', (event) => {
+                        if (event.target.tagName === 'BUTTON' && 
+                            event.target.classList.contains('action-button') && 
+                            event.target.dataset.tellAgent) {
+                            handleAction(event.target.dataset.tellAgent);
+                        }
+                    });
                     
                     window.addEventListener('message', event => {
                         console.log('Webview received message:', event.data);
