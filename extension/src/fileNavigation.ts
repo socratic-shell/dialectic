@@ -2,6 +2,9 @@ import * as vscode from 'vscode';
 import { parseDialecticUrl, DialecticUrl } from './dialecticUrl';
 import { searchInFile, getBestSearchResult, formatSearchResults, needsDisambiguation } from './searchEngine';
 
+// Global choice memory - remembers previous disambiguation choices
+const choiceMemory = new Map<string, import('./searchEngine').SearchResult>();
+
 /**
  * Open a file location specified by a dialectic URL
  * Full implementation with regex search support extracted from reviewWebview
@@ -64,28 +67,46 @@ export async function openDialecticUrl(dialecticUrl: string, outputChannel: vsco
                         targetColumn = parsed.line.startColumn || 1;
                     }
                 } else if (needsDisambiguation(searchResults)) {
-                    // Multiple matches - show disambiguation dialog
-                    try {
-                        const selectedResult = await showSearchDisambiguation(searchResults, parsed.regex, document);
+                    // Multiple matches - check choice memory first
+                    const memoryKey = `${parsed.path}:${parsed.regex}`;
+                    const rememberedChoice = choiceMemory.get(memoryKey);
+                    
+                    if (rememberedChoice) {
+                        // Check if remembered choice is still valid in current results
+                        const stillValid = searchResults.find(r => 
+                            r.line === rememberedChoice.line && 
+                            r.column === rememberedChoice.column &&
+                            r.text === rememberedChoice.text
+                        );
                         
+                        if (stillValid) {
+                            // Show disambiguation with "same as last time" option
+                            const selectedResult = await showSearchDisambiguationWithMemory(
+                                searchResults, parsed.regex, document, rememberedChoice
+                            );
+                            
+                            if (selectedResult) {
+                                targetLine = selectedResult.line;
+                                targetColumn = selectedResult.column;
+                                // Update memory with new choice (might be same or different)
+                                choiceMemory.set(memoryKey, selectedResult);
+                            }
+                        } else {
+                            // Remembered choice no longer valid, show normal disambiguation
+                            const selectedResult = await showSearchDisambiguation(searchResults, parsed.regex, document);
+                            if (selectedResult) {
+                                targetLine = selectedResult.line;
+                                targetColumn = selectedResult.column;
+                                choiceMemory.set(memoryKey, selectedResult);
+                            }
+                        }
+                    } else {
+                        // No previous choice, show normal disambiguation
+                        const selectedResult = await showSearchDisambiguation(searchResults, parsed.regex, document);
                         if (selectedResult) {
                             targetLine = selectedResult.line;
                             targetColumn = selectedResult.column;
-                        } else {
-                            // User cancelled - fall back to best result
-                            const bestResult = getBestSearchResult(searchResults);
-                            if (bestResult) {
-                                targetLine = bestResult.line;
-                                targetColumn = bestResult.column;
-                            }
-                        }
-                    } catch (error) {
-                        outputChannel.appendLine(`Disambiguation error: ${error}`);
-                        // Fall back to best result on error
-                        const bestResult = getBestSearchResult(searchResults);
-                        if (bestResult) {
-                            targetLine = bestResult.line;
-                            targetColumn = bestResult.column;
+                            choiceMemory.set(memoryKey, selectedResult);
                         }
                     }
                 } else {
@@ -153,6 +174,125 @@ export async function openDialecticUrl(dialecticUrl: string, outputChannel: vsco
         outputChannel.appendLine(`Failed to open dialectic URL: ${error}`);
         vscode.window.showErrorMessage(`Failed to open ${dialecticUrl} - ${error}`);
     }
+}
+
+/**
+ * Show disambiguation dialog with "same as last time" option
+ */
+async function showSearchDisambiguationWithMemory(
+    results: import('./searchEngine').SearchResult[], 
+    searchTerm: string, 
+    document: vscode.TextDocument,
+    rememberedChoice: import('./searchEngine').SearchResult
+): Promise<import('./searchEngine').SearchResult | undefined> {
+    // Create "same as last time" option
+    const sameAsLastItem = {
+        label: `$(history) Same as last time: Line ${rememberedChoice.line}`,
+        description: `${rememberedChoice.text.trim()}`,
+        detail: `Column ${rememberedChoice.column} (press Enter to use this)`,
+        result: rememberedChoice,
+        isSameAsLast: true
+    };
+
+    // Create other options
+    const otherItems = results
+        .filter(r => !(r.line === rememberedChoice.line && r.column === rememberedChoice.column))
+        .map((result, index) => ({
+            label: `Line ${result.line}: ${result.text.trim()}`,
+            description: `$(search) Match ${index + 1} of ${results.length}`,
+            detail: `Column ${result.column}`,
+            result: result,
+            isSameAsLast: false
+        }));
+
+    const allItems = [sameAsLastItem, ...otherItems];
+
+    const quickPick = vscode.window.createQuickPick();
+    quickPick.title = `Multiple matches for "${searchTerm}"`;
+    quickPick.placeholder = 'Select match (first option repeats your last choice)';
+    quickPick.items = allItems;
+    quickPick.canSelectMany = false;
+    
+    // Pre-select the "same as last time" option
+    if (allItems.length > 0) {
+        quickPick.activeItems = [allItems[0]];
+    }
+
+    // Create line highlight decoration type
+    const lineHighlightDecoration = vscode.window.createTextEditorDecorationType({
+        backgroundColor: new vscode.ThemeColor('editor.findMatchHighlightBackground'),
+        border: '1px solid',
+        borderColor: new vscode.ThemeColor('editor.findMatchBorder')
+    });
+
+    return new Promise((resolve) => {
+        let currentActiveItem: any = null;
+        let isResolved = false;
+
+        // Show live preview as user navigates through options
+        quickPick.onDidChangeActive((items) => {
+            if (items.length > 0) {
+                currentActiveItem = items[0];
+                const selectedResult = (items[0] as any).result;
+                
+                // Show preview
+                vscode.window.showTextDocument(document, {
+                    selection: new vscode.Range(
+                        selectedResult.line - 1, 
+                        selectedResult.matchStart,
+                        selectedResult.line - 1, 
+                        selectedResult.matchEnd
+                    ),
+                    preview: true,
+                    preserveFocus: true,
+                    viewColumn: vscode.ViewColumn.One
+                }).then((editor) => {
+                    const decorationRanges = createDecorationRanges(
+                        document, undefined, selectedResult.line, selectedResult.column, selectedResult
+                    );
+                    if (decorationRanges.length > 0) {
+                        editor.setDecorations(lineHighlightDecoration, decorationRanges);
+                        setTimeout(() => {
+                            if (editor && !editor.document.isClosed) {
+                                editor.setDecorations(lineHighlightDecoration, []);
+                            }
+                        }, 2000);
+                    }
+                });
+            }
+        });
+
+        quickPick.onDidAccept(() => {
+            if (isResolved) return;
+
+            const selected = currentActiveItem || quickPick.selectedItems[0];
+            
+            if (selected && (selected as any).result) {
+                const result = (selected as any).result;
+                isResolved = true;
+                quickPick.dispose();
+                lineHighlightDecoration.dispose();
+                resolve(result);
+                return;
+            }
+
+            isResolved = true;
+            quickPick.dispose();
+            lineHighlightDecoration.dispose();
+            resolve(undefined);
+        });
+
+        quickPick.onDidHide(() => {
+            if (!isResolved) {
+                isResolved = true;
+                quickPick.dispose();
+                lineHighlightDecoration.dispose();
+                resolve(undefined);
+            }
+        });
+
+        quickPick.show();
+    });
 }
 
 /**
@@ -266,6 +406,13 @@ async function showSearchDisambiguation(
 
         quickPick.show();
     });
+}
+
+/**
+ * Clear choice memory (call when review is cleared)
+ */
+export function clearChoiceMemory(): void {
+    choiceMemory.clear();
 }
 
 /**
