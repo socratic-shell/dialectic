@@ -1,5 +1,6 @@
 import * as vscode from 'vscode';
 import * as crypto from 'crypto';
+import * as path from 'path';
 import * as MarkdownIt from 'markdown-it';
 import { openDialecticUrl } from './fileNavigation';
 
@@ -134,6 +135,10 @@ export class WalkthroughWebviewProvider implements vscode.WebviewViewProvider {
                 console.log('Walkthrough: showDiff command received:', message.filePath);
                 await this.showFileDiff(message.filePath);
                 break;
+            case 'showComment':
+                console.log('Walkthrough: showComment command received:', message.comment);
+                await this.showComment(message.comment);
+                break;
             case 'ready':
                 console.log('Walkthrough webview ready');
                 break;
@@ -141,8 +146,80 @@ export class WalkthroughWebviewProvider implements vscode.WebviewViewProvider {
     }
 
     /**
-     * Show GitHub-style diff for a file from walkthrough gitdiff data
+     * Show comment using VSCode CommentController with context-aware file opening
      */
+    private async showComment(comment: any): Promise<void> {
+        console.log(`[WALKTHROUGH COMMENT] Starting showComment:`, comment);
+        
+        if (!comment.locations || comment.locations.length === 0) {
+            vscode.window.showErrorMessage('Comment has no locations');
+            return;
+        }
+
+        // Check if any files in the comment appear in gitdiff sections
+        const filesInDiff = this.getFilesInCurrentGitDiff();
+        
+        for (const location of comment.locations) {
+            const filePath = location.path;
+            const line = location.start.line - 1; // Convert to 0-based
+            
+            // Context-aware file opening
+            if (filesInDiff.has(filePath)) {
+                console.log(`[WALKTHROUGH COMMENT] File ${filePath} appears in gitdiff, opening diff view`);
+                await this.showFileDiff(filePath);
+            } else {
+                console.log(`[WALKTHROUGH COMMENT] File ${filePath} not in gitdiff, opening regular file`);
+                const baseUriPath = typeof this.baseUri === 'string' ? this.baseUri : this.baseUri?.fsPath || '';
+                const uri = vscode.Uri.file(path.join(baseUriPath, filePath));
+                const document = await vscode.workspace.openTextDocument(uri);
+                const editor = await vscode.window.showTextDocument(document);
+                
+                // Navigate to the specific line
+                const position = new vscode.Position(line, location.start.column || 0);
+                editor.selection = new vscode.Selection(position, position);
+                editor.revealRange(new vscode.Range(position, position));
+            }
+            
+            // Create comment thread using simplified CommentController
+            await this.createCommentThread(filePath, location, comment);
+        }
+    }
+
+    /**
+     * Get set of files that appear in gitdiff sections of current walkthrough
+     */
+    private getFilesInCurrentGitDiff(): Set<string> {
+        const filesInDiff = new Set<string>();
+        
+        if (!this.currentWalkthrough) return filesInDiff;
+        
+        const allSections = [
+            ...(this.currentWalkthrough.introduction || []),
+            ...(this.currentWalkthrough.highlights || []),
+            ...(this.currentWalkthrough.changes || []),
+            ...(this.currentWalkthrough.actions || [])
+        ];
+        
+        for (const item of allSections) {
+            if (typeof item === 'object' && 'files' in item) {
+                // This is a GitDiffElement
+                item.files.forEach((fileChange: FileChange) => {
+                    filesInDiff.add(fileChange.path);
+                });
+            }
+        }
+        
+        return filesInDiff;
+    }
+
+    /**
+     * Create comment thread using simplified CommentController
+     */
+    private async createCommentThread(filePath: string, location: any, comment: any): Promise<void> {
+        // TODO: Implement simplified CommentController for walkthrough comments
+        // This will create comment threads with reply buttons that trigger "Ask Socratic Shell"
+        console.log(`[WALKTHROUGH COMMENT] Creating comment thread for ${filePath}:${location.start.line}`);
+    }
     private async showFileDiff(filePath: string): Promise<void> {
         console.log(`[WALKTHROUGH DIFF] Starting showFileDiff for: ${filePath}`);
         
@@ -540,6 +617,38 @@ export class WalkthroughWebviewProvider implements vscode.WebviewViewProvider {
                         color: var(--vscode-descriptionForeground);
                         font-size: 0.85em;
                     }
+                    .comment-item {
+                        display: flex;
+                        align-items: flex-start;
+                        padding: 8px;
+                        border: 1px solid var(--vscode-panel-border);
+                        border-radius: 4px;
+                        cursor: pointer;
+                        background-color: var(--vscode-editor-background);
+                    }
+                    .comment-item:hover {
+                        background-color: var(--vscode-list-hoverBackground);
+                    }
+                    .comment-icon {
+                        margin-right: 8px;
+                        font-size: 16px;
+                    }
+                    .comment-content {
+                        flex: 1;
+                    }
+                    .comment-locations {
+                        font-weight: 500;
+                        color: var(--vscode-textLink-foreground);
+                        margin-bottom: 4px;
+                    }
+                    .comment-location {
+                        font-family: var(--vscode-editor-font-family);
+                        font-size: 0.9em;
+                    }
+                    .comment-text {
+                        color: var(--vscode-foreground);
+                        font-size: 0.9em;
+                    }
                 </style>
             </head>
             <body>
@@ -588,6 +697,24 @@ export class WalkthroughWebviewProvider implements vscode.WebviewViewProvider {
                             if (typeof item === 'object' && 'content' in item) {
                                 // ResolvedMarkdownElement with processed dialectic: URLs
                                 html += '<div class="content-item">' + renderMarkdown(item.content) + '</div>';
+                            } else if (typeof item === 'object' && 'comment' in item) {
+                                // Comment element - render as clickable item that creates VSCode comments
+                                html += '<div class="content-item">';
+                                html += '<div class="comment-item" data-comment="' + encodeURIComponent(JSON.stringify(item.comment)) + '">';
+                                html += '<div class="comment-icon">💬</div>';
+                                html += '<div class="comment-content">';
+                                html += '<div class="comment-locations">';
+                                item.comment.locations.forEach((location: any, index: number) => {
+                                    if (index > 0) html += ', ';
+                                    html += '<span class="comment-location">' + location.path + ':' + location.start.line + '</span>';
+                                });
+                                html += '</div>';
+                                if (item.comment.content && item.comment.content.length > 0) {
+                                    html += '<div class="comment-text">' + item.comment.content.join(' ') + '</div>';
+                                }
+                                html += '</div>';
+                                html += '</div>';
+                                html += '</div>';
                             } else if (typeof item === 'object' && 'files' in item) {
                                 // GitDiffElement named field - {"files": FileChange[]}
                                 html += '<div class="content-item">';
@@ -649,6 +776,13 @@ export class WalkthroughWebviewProvider implements vscode.WebviewViewProvider {
                             vscode.postMessage({
                                 type: 'showDiff',
                                 filePath: event.target.dataset.filePath
+                            });
+                        } else if (event.target.closest('.comment-item')) {
+                            const commentItem = event.target.closest('.comment-item');
+                            const commentData = JSON.parse(decodeURIComponent(commentItem.dataset.comment));
+                            vscode.postMessage({
+                                type: 'showComment',
+                                comment: commentData
                             });
                         }
                     });
