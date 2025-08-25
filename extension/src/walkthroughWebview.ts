@@ -527,22 +527,18 @@ export class WalkthroughWebviewProvider implements vscode.WebviewViewProvider {
                         flex: 1;
                         font-weight: 500;
                     }
+                    .clickable-file {
+                        cursor: pointer;
+                        color: var(--vscode-textLink-foreground);
+                        text-decoration: underline;
+                    }
+                    .clickable-file:hover {
+                        color: var(--vscode-textLink-activeForeground);
+                    }
                     .file-stats {
                         margin: 0 12px;
                         color: var(--vscode-descriptionForeground);
                         font-size: 0.85em;
-                    }
-                    .diff-button {
-                        background-color: var(--vscode-button-background);
-                        color: var(--vscode-button-foreground);
-                        border: none;
-                        padding: 4px 8px;
-                        border-radius: 2px;
-                        cursor: pointer;
-                        font-size: 0.8em;
-                    }
-                    .diff-button:hover {
-                        background-color: var(--vscode-button-hoverBackground);
                     }
                 </style>
             </head>
@@ -599,9 +595,8 @@ export class WalkthroughWebviewProvider implements vscode.WebviewViewProvider {
                                 item.forEach(fileChange => {
                                     html += '<div class="file-diff">';
                                     html += '<div class="file-header">';
-                                    html += '<span class="file-path">' + fileChange.path + '</span>';
+                                    html += '<span class="file-path clickable-file" data-file-path="' + fileChange.path + '">' + fileChange.path + '</span>';
                                     html += '<span class="file-stats">+' + fileChange.additions + ' -' + fileChange.deletions + '</span>';
-                                    html += '<button class="diff-button" data-file-path="' + fileChange.path + '">View Diff</button>';
                                     html += '</div>';
                                     html += '</div>';
                                 });
@@ -649,8 +644,7 @@ export class WalkthroughWebviewProvider implements vscode.WebviewViewProvider {
                             event.target.classList.contains('action-button') && 
                             event.target.dataset.tellAgent) {
                             handleAction(event.target.dataset.tellAgent);
-                        } else if (event.target.tagName === 'BUTTON' && 
-                                   event.target.classList.contains('diff-button') && 
+                        } else if (event.target.classList.contains('clickable-file') && 
                                    event.target.dataset.filePath) {
                             vscode.postMessage({
                                 type: 'showDiff',
