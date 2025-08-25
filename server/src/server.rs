@@ -330,7 +330,9 @@ impl DialecticServer {
         
         match element {
             serde_json::Value::String(text) => {
-                Ok(ResolvedWalkthroughElement::Markdown(crate::ide::ResolvedMarkdownElement { content: text }))
+                // Process dialectic links manually since we're not going through deserializer
+                let processed_content = crate::ide::process_markdown_links(text);
+                Ok(ResolvedWalkthroughElement::Markdown(crate::ide::ResolvedMarkdownElement { content: processed_content }))
             }
             serde_json::Value::Object(_) => {
                 // Clone interpreter and execute Dialect program (same pattern as ide_operation)

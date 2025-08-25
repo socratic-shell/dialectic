@@ -480,7 +480,7 @@ impl<'de> Deserialize<'de> for ResolvedMarkdownElement {
     }
 }
 
-fn process_markdown_links(markdown: String) -> String {
+pub fn process_markdown_links(markdown: String) -> String {
     use pulldown_cmark::{Parser, Event, Tag};
     
     let parser = Parser::new(&markdown);
