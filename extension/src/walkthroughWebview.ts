@@ -50,7 +50,7 @@ class WalkthroughDiffContentProvider implements vscode.TextDocumentContentProvid
     }
 }
 
-type WalkthroughElement = 
+type WalkthroughElement =
     | { content: string }  // ResolvedMarkdownElement with processed dialectic: URLs
     | { comment: any }  // Simplified for now
     | { files: FileChange[] }  // GitDiffElement - named field serializes as {"files": [...]}
@@ -81,7 +81,7 @@ export class WalkthroughWebviewProvider implements vscode.WebviewViewProvider {
     ) {
         this.md = this.setupMarkdownRenderer();
         this.diffContentProvider = new WalkthroughDiffContentProvider();
-        
+
         // Register diff content provider if context is available
         if (this.context) {
             this.context.subscriptions.push(
@@ -98,20 +98,20 @@ export class WalkthroughWebviewProvider implements vscode.WebviewViewProvider {
         });
 
         // Custom renderer rule for file reference links
-        const defaultRender = md.renderer.rules.link_open || function(tokens: any, idx: any, options: any, env: any, self: any) {
+        const defaultRender = md.renderer.rules.link_open || function (tokens: any, idx: any, options: any, env: any, self: any) {
             return self.renderToken(tokens, idx, options);
         };
 
         md.renderer.rules.link_open = (tokens: any, idx: any, options: any, env: any, self: any) => {
             const token = tokens[idx];
             const href = token.attrGet('href');
-            
+
             if (href && href.startsWith('dialectic:')) {
                 token.attrSet('href', 'javascript:void(0)');
                 token.attrSet('data-dialectic-url', href);
                 token.attrSet('class', 'file-ref');
             }
-            
+
             return defaultRender(tokens, idx, options, env, self);
         };
 
@@ -122,8 +122,8 @@ export class WalkthroughWebviewProvider implements vscode.WebviewViewProvider {
         // Basic HTML sanitization for VSCode webview context
         // Remove potentially dangerous content while preserving markdown-generated HTML
         return html.replace(/<script\b[^<]*(?:(?!<\/script>)<[^<]*)*<\/script>/gi, '')
-                  .replace(/javascript:/gi, '')
-                  .replace(/on\w+="[^"]*"/gi, '');
+            .replace(/javascript:/gi, '')
+            .replace(/on\w+="[^"]*"/gi, '');
     }
 
     private async handleWebviewMessage(message: any): Promise<void> {
@@ -135,7 +135,7 @@ export class WalkthroughWebviewProvider implements vscode.WebviewViewProvider {
             case 'action':
                 console.log('Walkthrough: action received:', message.message);
                 this.outputChannel.appendLine(`Action button clicked: ${message.message}`);
-                
+
                 // Send message to active AI terminal
                 await this.sendToActiveShell(message.message);
                 break;
@@ -158,7 +158,7 @@ export class WalkthroughWebviewProvider implements vscode.WebviewViewProvider {
      */
     private async showComment(comment: any): Promise<void> {
         console.log(`[WALKTHROUGH COMMENT] Starting showComment:`, comment);
-        
+
         if (!comment.locations || comment.locations.length === 0) {
             vscode.window.showErrorMessage('Comment has no locations');
             return;
@@ -166,11 +166,11 @@ export class WalkthroughWebviewProvider implements vscode.WebviewViewProvider {
 
         // Check if any files in the comment appear in gitdiff sections
         const filesInDiff = this.getFilesInCurrentGitDiff();
-        
+
         for (const location of comment.locations) {
             const filePath = location.path;
             const line = location.start.line - 1; // Convert to 0-based
-            
+
             // Context-aware file opening
             if (filesInDiff.has(filePath)) {
                 console.log(`[WALKTHROUGH COMMENT] File ${filePath} appears in gitdiff, opening diff view`);
@@ -181,13 +181,13 @@ export class WalkthroughWebviewProvider implements vscode.WebviewViewProvider {
                 const uri = vscode.Uri.file(path.join(baseUriPath, filePath));
                 const document = await vscode.workspace.openTextDocument(uri);
                 const editor = await vscode.window.showTextDocument(document);
-                
+
                 // Navigate to the specific line
                 const position = new vscode.Position(line, location.start.column || 0);
                 editor.selection = new vscode.Selection(position, position);
                 editor.revealRange(new vscode.Range(position, position));
             }
-            
+
             // Create comment thread using simplified CommentController
             await this.createCommentThread(filePath, location, comment);
         }
@@ -198,16 +198,16 @@ export class WalkthroughWebviewProvider implements vscode.WebviewViewProvider {
      */
     private getFilesInCurrentGitDiff(): Set<string> {
         const filesInDiff = new Set<string>();
-        
+
         if (!this.currentWalkthrough) return filesInDiff;
-        
+
         const allSections = [
             ...(this.currentWalkthrough.introduction || []),
             ...(this.currentWalkthrough.highlights || []),
             ...(this.currentWalkthrough.changes || []),
             ...(this.currentWalkthrough.actions || [])
         ];
-        
+
         for (const item of allSections) {
             if (typeof item === 'object' && 'files' in item) {
                 // This is a GitDiffElement
@@ -216,7 +216,7 @@ export class WalkthroughWebviewProvider implements vscode.WebviewViewProvider {
                 });
             }
         }
-        
+
         return filesInDiff;
     }
 
@@ -278,7 +278,7 @@ export class WalkthroughWebviewProvider implements vscode.WebviewViewProvider {
     }
     private async showFileDiff(filePath: string): Promise<void> {
         console.log(`[WALKTHROUGH DIFF] Starting showFileDiff for: ${filePath}`);
-        
+
         if (!this.currentWalkthrough) {
             console.log('[WALKTHROUGH DIFF] ERROR: No current walkthrough data');
             vscode.window.showErrorMessage('No walkthrough data available');
@@ -287,7 +287,7 @@ export class WalkthroughWebviewProvider implements vscode.WebviewViewProvider {
 
         // Find the file change in the walkthrough data
         let fileChange: FileChange | undefined;
-        
+
         // Search through all sections for gitdiff elements
         const allSections = [
             ...(this.currentWalkthrough.introduction || []),
@@ -295,7 +295,7 @@ export class WalkthroughWebviewProvider implements vscode.WebviewViewProvider {
             ...(this.currentWalkthrough.changes || []),
             ...(this.currentWalkthrough.actions || [])
         ];
-        
+
         for (const item of allSections) {
             if (typeof item === 'object' && 'files' in item) {
                 // This is a GitDiffElement named field - {"files": FileChange[]}
@@ -303,13 +303,13 @@ export class WalkthroughWebviewProvider implements vscode.WebviewViewProvider {
                 if (fileChange) break;
             }
         }
-        
+
         if (!fileChange) {
             console.log(`[WALKTHROUGH DIFF] ERROR: File not found in walkthrough: ${filePath}`);
             vscode.window.showErrorMessage(`File not found in walkthrough: ${filePath}`);
             return;
         }
-        
+
         console.log(`[WALKTHROUGH DIFF] Found file change: ${fileChange.status}, ${fileChange.additions}+/${fileChange.deletions}-, ${fileChange.hunks.length} hunks`);
 
         try {
@@ -319,10 +319,10 @@ export class WalkthroughWebviewProvider implements vscode.WebviewViewProvider {
                 vscode.window.showErrorMessage('No workspace folder found');
                 return;
             }
-            
+
             const absolutePath = vscode.Uri.joinPath(workspaceFolder.uri, filePath);
             console.log(`[WALKTHROUGH DIFF] Resolved absolute path: ${absolutePath.toString()}`);
-            
+
             // Get "after" content from current file
             const currentDocument = await vscode.workspace.openTextDocument(absolutePath);
             const modifiedContent = currentDocument.getText();
@@ -344,9 +344,9 @@ export class WalkthroughWebviewProvider implements vscode.WebviewViewProvider {
 
             // Show diff using VSCode's native diff viewer with automatic highlighting
             console.log('[WALKTHROUGH DIFF] Calling vscode.diff command...');
-            await vscode.commands.executeCommand('vscode.diff', 
-                originalUri, 
-                modifiedUri, 
+            await vscode.commands.executeCommand('vscode.diff',
+                originalUri,
+                modifiedUri,
                 `${filePath} (Walkthrough Diff)`
             );
             console.log('[WALKTHROUGH DIFF] vscode.diff command completed successfully');
@@ -365,9 +365,9 @@ export class WalkthroughWebviewProvider implements vscode.WebviewViewProvider {
         try {
             const modifiedLines = modifiedContent.split('\n');
             const originalLines: string[] = [];
-            
+
             let modifiedIndex = 0;
-            
+
             for (const hunk of fileChange.hunks) {
                 // Add lines before this hunk (unchanged context)
                 const contextStart = hunk.new_start - 1; // Convert to 0-based
@@ -375,7 +375,7 @@ export class WalkthroughWebviewProvider implements vscode.WebviewViewProvider {
                     originalLines.push(modifiedLines[modifiedIndex]);
                     modifiedIndex++;
                 }
-                
+
                 // Process hunk lines
                 for (const line of hunk.lines) {
                     switch (line.line_type) {
@@ -397,13 +397,13 @@ export class WalkthroughWebviewProvider implements vscode.WebviewViewProvider {
                     }
                 }
             }
-            
+
             // Add any remaining lines after all hunks
             while (modifiedIndex < modifiedLines.length) {
                 originalLines.push(modifiedLines[modifiedIndex]);
                 modifiedIndex++;
             }
-            
+
             return originalLines.join('\n');
         } catch (error) {
             console.error('[WALKTHROUGH DIFF] Failed to generate original content:', error);
@@ -518,20 +518,20 @@ export class WalkthroughWebviewProvider implements vscode.WebviewViewProvider {
 
     public showWalkthrough(walkthrough: WalkthroughData) {
         console.log('WalkthroughWebviewProvider.showWalkthrough called with:', walkthrough);
-        
+
         // Store walkthrough data for diff functionality
         this.currentWalkthrough = walkthrough;
-        
+
         // Clear placement memory for new walkthrough
         this.clearPlacementMemory();
-        
+
         if (this._view) {
             console.log('Webview exists, showing and posting message');
             this._view.show?.(true);
-            
+
             // Pre-render markdown content
             const processedWalkthrough = this.processWalkthroughMarkdown(walkthrough);
-            
+
             this._view.webview.postMessage({
                 type: 'walkthrough',
                 data: processedWalkthrough
@@ -570,8 +570,8 @@ export class WalkthroughWebviewProvider implements vscode.WebviewViewProvider {
 
     private _getHtmlForWebview(webview: vscode.Webview) {
         const nonce = crypto.randomBytes(16).toString('base64');
-        
-        return `<!DOCTYPE html>
+
+        let html = `<!DOCTYPE html>
             <html lang="en">
             <head>
                 <meta charset="UTF-8">
@@ -763,7 +763,7 @@ export class WalkthroughWebviewProvider implements vscode.WebviewViewProvider {
                                 html += '<div class="comment-icon">💬</div>';
                                 html += '<div class="comment-content">';
                                 html += '<div class="comment-locations">';
-                                item.comment.locations.forEach((location: any, index: number) => {
+                                item.comment.locations.forEach((location, index) => {
                                     if (index > 0) html += ', ';
                                     html += '<span class="comment-location">' + location.path + ':' + location.start.line + '</span>';
                                 });
@@ -847,11 +847,19 @@ export class WalkthroughWebviewProvider implements vscode.WebviewViewProvider {
                     });
                     
                     window.addEventListener('message', event => {
-                        console.log('Webview received message:', event.data);
+                        console.log('[WEBVIEW] Received message:', event.data);
                         const message = event.data;
                         if (message.type === 'walkthrough') {
-                            console.log('Processing walkthrough message with data:', message.data);
+                            console.log('[WALKTHROUGH] Processing message with data:', message.data);
                             const data = message.data;
+                            
+                            console.log('[SECTIONS] Walkthrough sections:', {
+                                introduction: data.introduction?.length || 0,
+                                highlights: data.highlights?.length || 0, 
+                                changes: data.changes?.length || 0,
+                                actions: data.actions?.length || 0
+                            });
+                            
                             let html = '';
                             
                             html += renderSection('Introduction', data.introduction);
@@ -859,13 +867,19 @@ export class WalkthroughWebviewProvider implements vscode.WebviewViewProvider {
                             html += renderSection('Changes', data.changes);
                             html += renderSection('Actions', data.actions);
                             
-                            console.log('Generated HTML:', html);
+                            console.log('[HTML] Generated HTML length:', html.length);
                             const finalHtml = html || '<div class="empty-state">Empty walkthrough</div>';
-                            console.log('Setting innerHTML to:', finalHtml);
-                            document.getElementById('content').innerHTML = finalHtml;
-                            console.log('Content updated');
+                            console.log('[UPDATE] Setting innerHTML to content element');
+                            
+                            const contentElement = document.getElementById('content');
+                            if (contentElement) {
+                                contentElement.innerHTML = finalHtml;
+                                console.log('[SUCCESS] Content updated successfully');
+                            } else {
+                                console.error('[ERROR] Content element not found!');
+                            }
                         } else {
-                            console.log('Ignoring message type:', message.type);
+                            console.log('[IGNORE] Ignoring message type:', message.type);
                         }
                     });
                     
@@ -876,5 +890,12 @@ export class WalkthroughWebviewProvider implements vscode.WebviewViewProvider {
                 </script>
             </body>
             </html>`;
+
+        this.outputChannel.appendLine(`-----------------------------------------`);
+        this.outputChannel.appendLine(`WEBVIEW HTML FOLLOWS:`);
+        this.outputChannel.appendLine(html);
+        this.outputChannel.appendLine(`-----------------------------------------`);
+
+        return html;
     }
 }
