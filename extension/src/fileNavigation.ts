@@ -132,160 +132,45 @@ export async function openDialecticUrl(
     baseUri?: vscode.Uri,
     placementMemory?: Map<string, PlacementState>
 ): Promise<void> {
-    try {
-        // Parse the dialectic URL to extract components
-        const parsed = parseDialecticUrl(dialecticUrl);
-        if (!parsed) {
-            vscode.window.showErrorMessage(`Invalid dialectic URL: ${dialecticUrl}`);
-            return;
-        }
+    // Resolve the placement
+    const resolved = await resolveDialecticUrlPlacement(dialecticUrl, outputChannel, baseUri, placementMemory);
+    if (!resolved) {
+        return; // Resolution failed or was cancelled
+    }
 
-        outputChannel.appendLine(`Opening dialectic URL: ${dialecticUrl}`);
-        outputChannel.appendLine(`Parsed: path=${parsed.path}, regex=${parsed.regex}, line=${JSON.stringify(parsed.line)}`);
+    const { range, document } = resolved;
 
-        // Resolve file path - simplified version for shared module
-        let fileUri: vscode.Uri;
-        if (baseUri && !parsed.path.startsWith('/')) {
-            fileUri = vscode.Uri.joinPath(baseUri, parsed.path);
-        } else {
-            fileUri = vscode.Uri.file(parsed.path);
-        }
+    // Navigate to the resolved location
+    const editor = await vscode.window.showTextDocument(document, {
+        selection: range,
+        viewColumn: vscode.ViewColumn.One
+    });
 
-        // Check if file exists
-        try {
-            const stat = await vscode.workspace.fs.stat(fileUri);
-            if (stat.type === vscode.FileType.Directory) {
-                outputChannel.appendLine(`Revealing directory in Explorer: ${fileUri.fsPath}`);
-                await vscode.commands.executeCommand('revealInExplorer', fileUri);
-                return;
-            }
-        } catch (error) {
-            const baseInfo = baseUri ? ` (base: ${baseUri.fsPath})` : '';
-            vscode.window.showErrorMessage(`File not found: ${parsed.path}${baseInfo}`);
-            return;
-        }
+    // Add line decorations for better visibility
+    const decorationRanges = createDecorationRanges(
+        document, 
+        undefined, // No line constraint for dialectic URLs
+        range.start.line + 1, // Convert back to 1-based for createDecorationRanges
+        range.start.character + 1, 
+        undefined // No search result highlighting needed
+    );
 
-        // Open the document
-        const document = await vscode.workspace.openTextDocument(fileUri);
-
-        let targetLine = 1;
-        let targetColumn = 1;
-
-        // Handle regex if specified
-        if (parsed.regex) {
-            try {
-                const searchResults = await searchInFile(fileUri, {
-                    regexPattern: parsed.regex,
-                    lineConstraint: parsed.line
-                });
-
-                outputChannel.appendLine(`Regex search results:\n${formatSearchResults(searchResults)}`);
-
-                if (searchResults.length === 0) {
-                    vscode.window.showWarningMessage(`Regex pattern "${parsed.regex}" not found in ${parsed.path}`);
-                    // Fall back to line parameter if regex fails
-                    if (parsed.line) {
-                        targetLine = parsed.line.startLine;
-                        targetColumn = parsed.line.startColumn || 1;
-                    }
-                } else {
-                    // Check if we have a stored placement
-                    const linkKey = `link:${dialecticUrl}`;
-                    const placementState = placementMemory?.get(linkKey);
-                    
-                    if (placementState?.isPlaced && placementState.chosenLocation) {
-                        // Use stored placement
-                        const storedChoice = placementState.chosenLocation;
-                        targetLine = storedChoice.line;
-                        targetColumn = storedChoice.column;
-                    } else if (searchResults.length === 1) {
-                        // Auto-place single results (pre-disambiguated)
-                        const singleResult = searchResults[0];
-                        targetLine = singleResult.line;
-                        targetColumn = singleResult.column;
-                        
-                        // Store the auto-placement
-                        placementMemory?.set(linkKey, {
-                            isPlaced: true,
-                            chosenLocation: singleResult,
-                            wasAmbiguous: false
-                        });
-                    } else {
-                        // Multiple results - show disambiguation
-                        const selectedResult = await showSearchDisambiguation(searchResults, parsed.regex, document);
-                        if (selectedResult) {
-                            targetLine = selectedResult.line;
-                            targetColumn = selectedResult.column;
-                            
-                            // Store the choice
-                            placementMemory?.set(linkKey, {
-                                isPlaced: true,
-                                chosenLocation: selectedResult,
-                                wasAmbiguous: true
-                            });
-                        }
-                    }
-                }
-            } catch (error) {
-                outputChannel.appendLine(`Regex search failed: ${error}`);
-                vscode.window.showErrorMessage(`Regex search failed: ${error}`);
-                // Fall back to line parameter if regex fails
-                if (parsed.line) {
-                    targetLine = parsed.line.startLine;
-                    targetColumn = parsed.line.startColumn || 1;
-                }
-            }
-        } else if (parsed.line) {
-            // No regex, just use line parameter
-            targetLine = parsed.line.startLine;
-            targetColumn = parsed.line.startColumn || 1;
-        }
-
-        // Convert to 0-based for VSCode API and create selection
-        const line = Math.max(0, targetLine - 1);
-        const column = Math.max(0, targetColumn - 1);
-        const selection = new vscode.Range(line, column, line, column);
-
-        const editor = await vscode.window.showTextDocument(document, {
-            selection,
-            viewColumn: vscode.ViewColumn.One,
-            preview: false // Ensure final navigation creates a permanent tab
-        });
-
-        // Explicitly set the cursor position after opening
-        editor.selection = new vscode.Selection(line, column, line, column);
-        editor.revealRange(new vscode.Range(line, column, line, column), vscode.TextEditorRevealType.InCenter);
-
-        // Apply highlight decoration using the appropriate ranges
+    if (decorationRanges.length > 0) {
         const lineHighlightDecoration = vscode.window.createTextEditorDecorationType({
             backgroundColor: new vscode.ThemeColor('editor.findMatchHighlightBackground'),
             border: '1px solid',
             borderColor: new vscode.ThemeColor('editor.findMatchBorder')
         });
 
-        const bestSearchResult = parsed.regex ? 
-            (await searchInFile(fileUri, { regexPattern: parsed.regex, lineConstraint: parsed.line }))
-                .find(r => r.line === targetLine && r.column === targetColumn) : undefined;
+        editor.setDecorations(lineHighlightDecoration, decorationRanges);
 
-        const decorationRanges = createDecorationRanges(document, parsed.line, targetLine, targetColumn, bestSearchResult);
-        if (decorationRanges.length > 0) {
-            editor.setDecorations(lineHighlightDecoration, decorationRanges);
-            
-            // Remove highlight after 3 seconds
-            setTimeout(() => {
-                if (vscode.window.activeTextEditor === editor) {
-                    editor.setDecorations(lineHighlightDecoration, []);
-                }
-                lineHighlightDecoration.dispose();
-            }, 3000);
-        }
-
-        outputChannel.appendLine(`Navigated to line ${targetLine}, column ${targetColumn}`);
-
-    } catch (error) {
-        outputChannel.appendLine(`Failed to open dialectic URL: ${error}`);
-        vscode.window.showErrorMessage(`Failed to open ${dialecticUrl} - ${error}`);
+        // Clear decorations after a delay
+        setTimeout(() => {
+            lineHighlightDecoration.dispose();
+        }, 3000);
     }
+
+    outputChannel.appendLine(`Successfully navigated to ${document.fileName}:${range.start.line + 1}:${range.start.character + 1}`);
 }
 
 /**
