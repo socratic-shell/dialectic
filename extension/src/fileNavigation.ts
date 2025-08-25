@@ -1,4 +1,5 @@
 import * as vscode from 'vscode';
+import * as path from 'path';
 import { parseDialecticUrl, DialecticUrl } from './dialecticUrl';
 import { searchInFile, getBestSearchResult, formatSearchResults, needsDisambiguation } from './searchEngine';
 
@@ -7,6 +8,115 @@ interface PlacementState {
     isPlaced: boolean;
     chosenLocation: any; // FileRange, SearchResult, or other location type
     wasAmbiguous: boolean; // Whether this item had multiple possible locations
+}
+
+/**
+ * Resolve a dialectic URL to a precise location, using placement memory and user disambiguation
+ * Returns the resolved location without navigating to it
+ */
+export async function resolveDialecticUrlPlacement(
+    dialecticUrl: string,
+    outputChannel: vscode.OutputChannel,
+    baseUri?: vscode.Uri,
+    placementMemory?: Map<string, PlacementState>
+): Promise<{ line: number; column: number; document: vscode.TextDocument } | null> {
+    try {
+        // Parse the dialectic URL to extract components
+        const parsed = parseDialecticUrl(dialecticUrl);
+        if (!parsed) {
+            vscode.window.showErrorMessage(`Invalid dialectic URL: ${dialecticUrl}`);
+            return null;
+        }
+
+        outputChannel.appendLine(`Resolving dialectic URL: ${dialecticUrl}`);
+        outputChannel.appendLine(`Parsed components: ${JSON.stringify(parsed, null, 2)}`);
+
+        // Resolve the file path
+        let resolvedPath = parsed.path;
+        if (baseUri && !path.isAbsolute(parsed.path)) {
+            resolvedPath = path.resolve(baseUri.fsPath, parsed.path);
+        }
+
+        outputChannel.appendLine(`Resolved file path: ${resolvedPath}`);
+
+        // Open the document
+        const fileUri = vscode.Uri.file(resolvedPath);
+        const document = await vscode.workspace.openTextDocument(fileUri);
+        let targetLine = 1;
+        let targetColumn = 1;
+
+        // Handle regex search if present
+        if (parsed.regex) {
+            try {
+                const searchResults = await searchInFile(fileUri, { regexPattern: parsed.regex });
+                outputChannel.appendLine(`Search results: ${formatSearchResults(searchResults)}`);
+
+                if (searchResults.length === 0) {
+                    vscode.window.showWarningMessage(`Regex pattern "${parsed.regex}" not found in ${parsed.path}`);
+                    // Fall back to line parameter if regex fails
+                    if (parsed.line) {
+                        targetLine = parsed.line.startLine;
+                        targetColumn = parsed.line.startColumn || 1;
+                    }
+                } else {
+                    // Check if we have a stored placement
+                    const linkKey = `link:${dialecticUrl}`;
+                    const placementState = placementMemory?.get(linkKey);
+                    
+                    if (placementState?.isPlaced && placementState.chosenLocation) {
+                        // Use stored placement
+                        const storedChoice = placementState.chosenLocation;
+                        targetLine = storedChoice.line;
+                        targetColumn = storedChoice.column;
+                    } else if (searchResults.length === 1) {
+                        // Auto-place single results (pre-disambiguated)
+                        const singleResult = searchResults[0];
+                        targetLine = singleResult.line;
+                        targetColumn = singleResult.column;
+                        
+                        // Store the auto-placement
+                        placementMemory?.set(linkKey, {
+                            isPlaced: true,
+                            chosenLocation: singleResult,
+                            wasAmbiguous: false
+                        });
+                    } else {
+                        // Multiple results - show disambiguation
+                        const selectedResult = await showSearchDisambiguation(searchResults, parsed.regex, document);
+                        if (selectedResult) {
+                            targetLine = selectedResult.line;
+                            targetColumn = selectedResult.column;
+                            
+                            // Store the choice
+                            placementMemory?.set(linkKey, {
+                                isPlaced: true,
+                                chosenLocation: selectedResult,
+                                wasAmbiguous: true
+                            });
+                        } else {
+                            // User cancelled disambiguation
+                            return null;
+                        }
+                    }
+                }
+            } catch (error) {
+                outputChannel.appendLine(`Error during regex search: ${error}`);
+                vscode.window.showErrorMessage(`Error searching for pattern "${parsed.regex}": ${error}`);
+                return null;
+            }
+        } else if (parsed.line) {
+            // Direct line navigation
+            targetLine = parsed.line.startLine;
+            targetColumn = parsed.line.startColumn || 1;
+        }
+
+        return { line: targetLine, column: targetColumn, document };
+
+    } catch (error) {
+        outputChannel.appendLine(`Error resolving dialectic URL: ${error}`);
+        vscode.window.showErrorMessage(`Failed to resolve dialectic URL: ${error}`);
+        return null;
+    }
 }
 
 /**
