@@ -6,6 +6,7 @@ import * as crypto from 'crypto';
 import { ReviewWebviewProvider } from './reviewWebview';
 import { SyntheticPRProvider } from './syntheticPRProvider';
 import { WalkthroughWebviewProvider } from './walkthroughWebview';
+import { DialecticCommentController } from './commentController';
 
 // TEST TEST TEST 
 
@@ -861,8 +862,12 @@ export function activate(context: vscode.ExtensionContext) {
     // Create synthetic PR provider for AI-generated pull requests
     const syntheticPRProvider = new SyntheticPRProvider(context);
 
+    // Create comment controller for dialectic link comments
+    const commentController = new DialecticCommentController();
+    context.subscriptions.push(commentController);
+
     // Create walkthrough webview provider
-    const walkthroughProvider = new WalkthroughWebviewProvider(context.extensionUri, outputChannel, undefined, context);
+    const walkthroughProvider = new WalkthroughWebviewProvider(context.extensionUri, outputChannel, undefined, context, commentController);
     context.subscriptions.push(
         vscode.window.registerWebviewViewProvider(WalkthroughWebviewProvider.viewType, walkthroughProvider)
     );

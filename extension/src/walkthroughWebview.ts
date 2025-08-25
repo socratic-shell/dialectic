@@ -2,7 +2,8 @@ import * as vscode from 'vscode';
 import * as crypto from 'crypto';
 import * as path from 'path';
 import * as MarkdownIt from 'markdown-it';
-import { openDialecticUrl } from './fileNavigation';
+import { openDialecticUrl, createCommentAtDialecticLink } from './fileNavigation';
+import { DialecticCommentController } from './commentController';
 
 // Placement state for unified link and comment management
 interface PlacementState {
@@ -77,7 +78,8 @@ export class WalkthroughWebviewProvider implements vscode.WebviewViewProvider {
         private readonly _extensionUri: vscode.Uri,
         private readonly outputChannel: vscode.OutputChannel,
         private daemonClient?: any, // Will be set after daemon client is created
-        private context?: vscode.ExtensionContext
+        private context?: vscode.ExtensionContext,
+        private commentController?: DialecticCommentController
     ) {
         this.md = this.setupMarkdownRenderer();
         this.diffContentProvider = new WalkthroughDiffContentProvider();
@@ -183,6 +185,10 @@ export class WalkthroughWebviewProvider implements vscode.WebviewViewProvider {
             case 'relocateLink':
                 console.log('Walkthrough: relocateLink command received:', message.dialecticUrl);
                 await this.relocateLink(message.dialecticUrl);
+                break;
+            case 'createComment':
+                console.log('Walkthrough: createComment command received:', message.dialecticUrl);
+                await this.createComment(message.dialecticUrl, message.initialComment);
                 break;
             case 'action':
                 console.log('Walkthrough: action received:', message.message);
@@ -632,6 +638,22 @@ export class WalkthroughWebviewProvider implements vscode.WebviewViewProvider {
         this.updateLinkPlacementUI(dialecticUrl);
     }
 
+    private async createComment(dialecticUrl: string, initialComment?: string): Promise<void> {
+        if (!this.commentController) {
+            vscode.window.showErrorMessage('Comment controller not available');
+            return;
+        }
+
+        await createCommentAtDialecticLink(
+            dialecticUrl,
+            this.commentController,
+            this.outputChannel,
+            this.baseUri,
+            this.placementMemory,
+            initialComment
+        );
+    }
+
     private updateLinkPlacementUI(dialecticUrl: string): void {
         if (!this._view) return;
         
@@ -819,6 +841,20 @@ export class WalkthroughWebviewProvider implements vscode.WebviewViewProvider {
                     .placement-icon:hover {
                         opacity: 1;
                     }
+                    
+                    .comment-button {
+                        background: none;
+                        border: none;
+                        cursor: pointer;
+                        padding: 0;
+                        font-size: 0.9em;
+                        opacity: 0.8;
+                        margin-left: 2px;
+                    }
+                    
+                    .comment-button:hover {
+                        opacity: 1;
+                    }
                 </style>
             </head>
             <body>
@@ -834,6 +870,19 @@ export class WalkthroughWebviewProvider implements vscode.WebviewViewProvider {
                     document.addEventListener('click', function(event) {
                         const target = event.target;
                         if (!target) return;
+                        
+                        // Handle comment button clicks
+                        if (target.classList.contains('comment-button')) {
+                            event.preventDefault();
+                            const dialecticUrl = target.getAttribute('data-dialectic-url');
+                            console.log('[Walkthrough] Comment button clicked:', dialecticUrl);
+                            
+                            vscode.postMessage({
+                                command: 'createComment',
+                                dialecticUrl: dialecticUrl
+                            });
+                            return;
+                        }
                         
                         // Handle placement icon clicks
                         if (target.classList.contains('placement-icon')) {
@@ -900,9 +949,17 @@ export class WalkthroughWebviewProvider implements vscode.WebviewViewProvider {
                             icon.setAttribute('title', 'Place this link');
                             icon.textContent = '🔍'; // Default to search icon
                             
-                            // Insert icon after the link
+                            // Create comment button
+                            const commentBtn = document.createElement('button');
+                            commentBtn.className = 'comment-button';
+                            commentBtn.setAttribute('data-dialectic-url', dialecticUrl);
+                            commentBtn.setAttribute('title', 'Add comment to this link');
+                            commentBtn.textContent = '💬';
+                            
+                            // Insert icon and comment button after the link
                             link.parentNode.insertBefore(icon, link.nextSibling);
-                            console.log('[ICONS] Added icon for link', index);
+                            link.parentNode.insertBefore(commentBtn, icon.nextSibling);
+                            console.log('[ICONS] Added icon and comment button for link', index);
                         });
                     }
 
