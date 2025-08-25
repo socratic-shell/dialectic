@@ -2,8 +2,6 @@ import * as vscode from 'vscode';
 import { parseDialecticUrl, DialecticUrl } from './dialecticUrl';
 import { searchInFile, getBestSearchResult, formatSearchResults, needsDisambiguation } from './searchEngine';
 
-// Choice memory is now managed by WalkthroughWebviewProvider and threaded down as parameter
-
 /**
  * Open a file location specified by a dialectic URL
  * Full implementation with regex search support extracted from reviewWebview
