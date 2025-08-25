@@ -75,78 +75,42 @@ export async function openDialecticUrl(
                         targetLine = parsed.line.startLine;
                         targetColumn = parsed.line.startColumn || 1;
                     }
-                } else if (needsDisambiguation(searchResults)) {
-                    // Multiple matches - check placement memory first
+                } else {
+                    // Check if we have a stored placement
                     const linkKey = `link:${dialecticUrl}`;
                     const placementState = placementMemory?.get(linkKey);
                     
                     if (placementState?.isPlaced && placementState.chosenLocation) {
-                        // Use previously placed location
-                        const rememberedChoice = placementState.chosenLocation;
-                        // Check if remembered choice is still valid in current results
-                        const stillValid = searchResults.find(r => 
-                            r.line === rememberedChoice.line && 
-                            r.column === rememberedChoice.column &&
-                            r.text === rememberedChoice.text
-                        );
+                        // Use stored placement
+                        const storedChoice = placementState.chosenLocation;
+                        targetLine = storedChoice.line;
+                        targetColumn = storedChoice.column;
+                    } else if (searchResults.length === 1) {
+                        // Auto-place single results (pre-disambiguated)
+                        const singleResult = searchResults[0];
+                        targetLine = singleResult.line;
+                        targetColumn = singleResult.column;
                         
-                        if (stillValid) {
-                            // Show disambiguation with "same as last time" option
-                            const selectedResult = await showSearchDisambiguationWithMemory(
-                                searchResults, parsed.regex, document, rememberedChoice
-                            );
-                            
-                            if (selectedResult) {
-                                targetLine = selectedResult.line;
-                                targetColumn = selectedResult.column;
-                                // Update placement memory with new choice
-                                placementMemory?.set(linkKey, {
-                                    isPlaced: true,
-                                    chosenLocation: selectedResult,
-                                    wasAmbiguous: true
-                                });
-                            }
-                        } else {
-                            // Remembered choice no longer valid, show normal disambiguation
-                            const selectedResult = await showSearchDisambiguation(searchResults, parsed.regex, document);
-                            if (selectedResult) {
-                                targetLine = selectedResult.line;
-                                targetColumn = selectedResult.column;
-                                placementMemory?.set(linkKey, {
-                                    isPlaced: true,
-                                    chosenLocation: selectedResult,
-                                    wasAmbiguous: true
-                                });
-                            }
-                        }
+                        // Store the auto-placement
+                        placementMemory?.set(linkKey, {
+                            isPlaced: true,
+                            chosenLocation: singleResult,
+                            wasAmbiguous: false
+                        });
                     } else {
-                        // No previous choice, show normal disambiguation
+                        // Multiple results - show disambiguation
                         const selectedResult = await showSearchDisambiguation(searchResults, parsed.regex, document);
                         if (selectedResult) {
                             targetLine = selectedResult.line;
                             targetColumn = selectedResult.column;
+                            
+                            // Store the choice
                             placementMemory?.set(linkKey, {
                                 isPlaced: true,
                                 chosenLocation: selectedResult,
                                 wasAmbiguous: true
                             });
                         }
-                    }
-                } else {
-                    // Single clear result or clear winner after prioritization
-                    const bestResult = getBestSearchResult(searchResults);
-                    if (bestResult) {
-                        targetLine = bestResult.line;
-                        targetColumn = bestResult.column;
-                        outputChannel.appendLine(`Using best result: line ${targetLine}, column ${targetColumn}`);
-                        
-                        // Auto-place unambiguous links
-                        const linkKey = `link:${dialecticUrl}`;
-                        placementMemory?.set(linkKey, {
-                            isPlaced: true,
-                            chosenLocation: bestResult,
-                            wasAmbiguous: false
-                        });
                     }
                 }
             } catch (error) {
