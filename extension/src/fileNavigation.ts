@@ -1,6 +1,5 @@
 import * as vscode from 'vscode';
 import * as path from 'path';
-import { DialecticCommentController } from './commentController';
 import { parseDialecticUrl, DialecticUrl } from './dialecticUrl';
 import { searchInFile, getBestSearchResult, formatSearchResults, needsDisambiguation } from './searchEngine';
 
@@ -127,60 +126,6 @@ export async function resolveDialecticUrlPlacement(
  * Open a file location specified by a dialectic URL
  * Full implementation with regex search support extracted from reviewWebview
  */
-/**
- * Create a comment thread at a dialectic link location
- */
-export async function createCommentAtDialecticLink(
-    dialecticUrl: string,
-    commentController: DialecticCommentController,
-    outputChannel: vscode.OutputChannel,
-    baseUri?: vscode.Uri,
-    placementMemory?: Map<string, PlacementState>,
-    initialComment?: string
-): Promise<vscode.CommentThread | undefined> {
-    try {
-        outputChannel.appendLine(`[CommentCreation] Creating comment for: ${dialecticUrl}`);
-        
-        // First resolve the placement to get the exact location
-        const placementResult = await resolveDialecticUrlPlacement(
-            dialecticUrl,
-            outputChannel,
-            baseUri,
-            placementMemory
-        );
-
-        if (!placementResult) {
-            outputChannel.appendLine(`[CommentCreation] Cannot create comment - link not resolved: ${dialecticUrl}`);
-            vscode.window.showWarningMessage('Could not resolve dialectic link location. Please try placing it first.');
-            return undefined;
-        }
-
-        const uri = placementResult.document.uri;
-        const range = placementResult.range;
-        
-        // Create the comment thread
-        const commentThread = await commentController.createCommentForDialecticLink(
-            dialecticUrl,
-            uri,
-            range,
-            initialComment
-        );
-
-        outputChannel.appendLine(`[CommentCreation] Created comment thread at ${uri.fsPath}:${range.start.line}`);
-        
-        // Show success message
-        vscode.window.showInformationMessage(
-            `Comment created for dialectic link at ${path.basename(uri.fsPath)}:${range.start.line + 1}`
-        );
-
-        return commentThread;
-    } catch (error) {
-        outputChannel.appendLine(`[CommentCreation] Error creating comment: ${error}`);
-        vscode.window.showErrorMessage(`Failed to create comment: ${error}`);
-        return undefined;
-    }
-}
-
 export async function openDialecticUrl(
     dialecticUrl: string, 
     outputChannel: vscode.OutputChannel, 
