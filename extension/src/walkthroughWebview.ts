@@ -3,10 +3,49 @@ import * as crypto from 'crypto';
 import * as MarkdownIt from 'markdown-it';
 import { openDialecticUrl } from './fileNavigation';
 
+// Reuse types from synthetic PR system
+interface FileChange {
+    path: string;
+    status: string;
+    additions: number;
+    deletions: number;
+    hunks: DiffHunk[];
+}
+
+interface DiffHunk {
+    old_start: number;
+    old_lines: number;
+    new_start: number;
+    new_lines: number;
+    lines: DiffLine[];
+}
+
+interface DiffLine {
+    line_type: 'Context' | 'Added' | 'Removed';
+    old_line_number?: number;
+    new_line_number?: number;
+    content: string;
+}
+
+/**
+ * Content provider for walkthrough diff content
+ */
+class WalkthroughDiffContentProvider implements vscode.TextDocumentContentProvider {
+    private contentMap = new Map<string, string>();
+
+    setContent(uri: vscode.Uri, content: string): void {
+        this.contentMap.set(uri.toString(), content);
+    }
+
+    provideTextDocumentContent(uri: vscode.Uri): string | undefined {
+        return this.contentMap.get(uri.toString());
+    }
+}
+
 type WalkthroughElement = 
     | { content: string }  // ResolvedMarkdownElement with processed dialectic: URLs
     | { comment: any }  // Simplified for now
-    | { gitdiff: any }  // Simplified for now  
+    | FileChange[]  // GitDiff - untagged serialization means it's just the array directly
     | { action: { button: string; description?: string; tell_agent?: string } };
 
 interface WalkthroughData {
@@ -22,13 +61,24 @@ export class WalkthroughWebviewProvider implements vscode.WebviewViewProvider {
     private _view?: vscode.WebviewView;
     private md: MarkdownIt;
     private baseUri?: vscode.Uri;
+    private diffContentProvider: WalkthroughDiffContentProvider;
+    private currentWalkthrough?: WalkthroughData;
 
     constructor(
         private readonly _extensionUri: vscode.Uri,
         private readonly outputChannel: vscode.OutputChannel,
-        private daemonClient?: any // Will be set after daemon client is created
+        private daemonClient?: any, // Will be set after daemon client is created
+        private context?: vscode.ExtensionContext
     ) {
         this.md = this.setupMarkdownRenderer();
+        this.diffContentProvider = new WalkthroughDiffContentProvider();
+        
+        // Register diff content provider if context is available
+        if (this.context) {
+            this.context.subscriptions.push(
+                vscode.workspace.registerTextDocumentContentProvider('walkthrough-diff', this.diffContentProvider)
+            );
+        }
     }
 
     private setupMarkdownRenderer(): MarkdownIt {
@@ -80,9 +130,152 @@ export class WalkthroughWebviewProvider implements vscode.WebviewViewProvider {
                 // Send message to active AI terminal
                 await this.sendToActiveShell(message.message);
                 break;
+            case 'showDiff':
+                console.log('Walkthrough: showDiff command received:', message.filePath);
+                await this.showFileDiff(message.filePath);
+                break;
             case 'ready':
                 console.log('Walkthrough webview ready');
                 break;
+        }
+    }
+
+    /**
+     * Show GitHub-style diff for a file from walkthrough gitdiff data
+     */
+    private async showFileDiff(filePath: string): Promise<void> {
+        console.log(`[WALKTHROUGH DIFF] Starting showFileDiff for: ${filePath}`);
+        
+        if (!this.currentWalkthrough) {
+            console.log('[WALKTHROUGH DIFF] ERROR: No current walkthrough data');
+            vscode.window.showErrorMessage('No walkthrough data available');
+            return;
+        }
+
+        // Find the file change in the walkthrough data
+        let fileChange: FileChange | undefined;
+        
+        // Search through all sections for gitdiff elements
+        const allSections = [
+            ...(this.currentWalkthrough.introduction || []),
+            ...(this.currentWalkthrough.highlights || []),
+            ...(this.currentWalkthrough.changes || []),
+            ...(this.currentWalkthrough.actions || [])
+        ];
+        
+        for (const item of allSections) {
+            if (Array.isArray(item)) {
+                // This is a FileChange array (gitdiff) - untagged serialization
+                fileChange = item.find((fc: FileChange) => fc.path === filePath);
+                if (fileChange) break;
+            }
+        }
+        
+        if (!fileChange) {
+            console.log(`[WALKTHROUGH DIFF] ERROR: File not found in walkthrough: ${filePath}`);
+            vscode.window.showErrorMessage(`File not found in walkthrough: ${filePath}`);
+            return;
+        }
+        
+        console.log(`[WALKTHROUGH DIFF] Found file change: ${fileChange.status}, ${fileChange.additions}+/${fileChange.deletions}-, ${fileChange.hunks.length} hunks`);
+
+        try {
+            // Get workspace folder
+            const workspaceFolder = vscode.workspace.workspaceFolders?.[0];
+            if (!workspaceFolder) {
+                vscode.window.showErrorMessage('No workspace folder found');
+                return;
+            }
+            
+            const absolutePath = vscode.Uri.joinPath(workspaceFolder.uri, filePath);
+            console.log(`[WALKTHROUGH DIFF] Resolved absolute path: ${absolutePath.toString()}`);
+            
+            // Get "after" content from current file
+            const currentDocument = await vscode.workspace.openTextDocument(absolutePath);
+            const modifiedContent = currentDocument.getText();
+            console.log(`[WALKTHROUGH DIFF] Current file content length: ${modifiedContent.length} chars`);
+
+            // Generate "before" content by reverse-applying hunks
+            const originalContent = await this.generateOriginalContent(fileChange, modifiedContent);
+            console.log(`[WALKTHROUGH DIFF] Generated original content length: ${originalContent.length} chars`);
+
+            // Create URIs for diff content provider
+            const originalUri = vscode.Uri.parse(`walkthrough-diff:${filePath}?original`);
+            const modifiedUri = absolutePath; // Use actual file for "after" state
+            console.log(`[WALKTHROUGH DIFF] Original URI: ${originalUri.toString()}`);
+            console.log(`[WALKTHROUGH DIFF] Modified URI: ${modifiedUri.toString()}`);
+
+            // Store original content in provider
+            this.diffContentProvider.setContent(originalUri, originalContent);
+            console.log('[WALKTHROUGH DIFF] Stored original content in provider');
+
+            // Show diff using VSCode's native diff viewer with automatic highlighting
+            console.log('[WALKTHROUGH DIFF] Calling vscode.diff command...');
+            await vscode.commands.executeCommand('vscode.diff', 
+                originalUri, 
+                modifiedUri, 
+                `${filePath} (Walkthrough Diff)`
+            );
+            console.log('[WALKTHROUGH DIFF] vscode.diff command completed successfully');
+
+        } catch (error) {
+            console.error('[WALKTHROUGH DIFF] Failed to show file diff:', error);
+            vscode.window.showErrorMessage(`Failed to show diff for ${filePath}`);
+        }
+    }
+
+    /**
+     * Generate original file content by reverse-applying diff hunks
+     * Adapted from synthetic PR provider
+     */
+    private async generateOriginalContent(fileChange: FileChange, modifiedContent: string): Promise<string> {
+        try {
+            const modifiedLines = modifiedContent.split('\n');
+            const originalLines: string[] = [];
+            
+            let modifiedIndex = 0;
+            
+            for (const hunk of fileChange.hunks) {
+                // Add lines before this hunk (unchanged context)
+                const contextStart = hunk.new_start - 1; // Convert to 0-based
+                while (modifiedIndex < contextStart && modifiedIndex < modifiedLines.length) {
+                    originalLines.push(modifiedLines[modifiedIndex]);
+                    modifiedIndex++;
+                }
+                
+                // Process hunk lines
+                for (const line of hunk.lines) {
+                    switch (line.line_type) {
+                        case 'Context':
+                            // Context lines appear in both versions
+                            originalLines.push(line.content);
+                            modifiedIndex++;
+                            break;
+                        case 'Removed':
+                            // Removed lines were in original but not in modified
+                            originalLines.push(line.content);
+                            // Don't increment modifiedIndex
+                            break;
+                        case 'Added':
+                            // Added lines are in modified but not in original
+                            // Skip in original, but advance modified index
+                            modifiedIndex++;
+                            break;
+                    }
+                }
+            }
+            
+            // Add any remaining lines after all hunks
+            while (modifiedIndex < modifiedLines.length) {
+                originalLines.push(modifiedLines[modifiedIndex]);
+                modifiedIndex++;
+            }
+            
+            return originalLines.join('\n');
+        } catch (error) {
+            console.error('[WALKTHROUGH DIFF] Failed to generate original content:', error);
+            // Fallback to empty content for minimal diff display
+            return '';
         }
     }
 
@@ -192,6 +385,10 @@ export class WalkthroughWebviewProvider implements vscode.WebviewViewProvider {
 
     public showWalkthrough(walkthrough: WalkthroughData) {
         console.log('WalkthroughWebviewProvider.showWalkthrough called with:', walkthrough);
+        
+        // Store walkthrough data for diff functionality
+        this.currentWalkthrough = walkthrough;
+        
         if (this._view) {
             console.log('Webview exists, showing and posting message');
             this._view.show?.(true);
@@ -219,6 +416,9 @@ export class WalkthroughWebviewProvider implements vscode.WebviewViewProvider {
             return items.map(item => {
                 if (typeof item === 'object' && 'content' in item) {
                     return { content: this.sanitizeHtml(this.md.render(item.content)) };
+                } else if (Array.isArray(item)) {
+                    // Handle gitdiff arrays (FileChange[]) - untagged serialization
+                    return item; // Keep as-is, will be handled in rendering
                 }
                 return item;
             });
@@ -304,6 +504,46 @@ export class WalkthroughWebviewProvider implements vscode.WebviewViewProvider {
                         font-style: italic;
                         padding: 32px 16px;
                     }
+                    .gitdiff-container {
+                        border: 1px solid var(--vscode-panel-border);
+                        border-radius: 4px;
+                        margin: 8px 0;
+                    }
+                    .file-diff {
+                        border-bottom: 1px solid var(--vscode-panel-border);
+                    }
+                    .file-diff:last-child {
+                        border-bottom: none;
+                    }
+                    .file-header {
+                        display: flex;
+                        align-items: center;
+                        padding: 8px 12px;
+                        background-color: var(--vscode-editor-background);
+                        font-family: var(--vscode-editor-font-family);
+                        font-size: 0.9em;
+                    }
+                    .file-path {
+                        flex: 1;
+                        font-weight: 500;
+                    }
+                    .file-stats {
+                        margin: 0 12px;
+                        color: var(--vscode-descriptionForeground);
+                        font-size: 0.85em;
+                    }
+                    .diff-button {
+                        background-color: var(--vscode-button-background);
+                        color: var(--vscode-button-foreground);
+                        border: none;
+                        padding: 4px 8px;
+                        border-radius: 2px;
+                        cursor: pointer;
+                        font-size: 0.8em;
+                    }
+                    .diff-button:hover {
+                        background-color: var(--vscode-button-hoverBackground);
+                    }
                 </style>
             </head>
             <body>
@@ -352,6 +592,21 @@ export class WalkthroughWebviewProvider implements vscode.WebviewViewProvider {
                             if (typeof item === 'object' && 'content' in item) {
                                 // ResolvedMarkdownElement with processed dialectic: URLs
                                 html += '<div class="content-item">' + renderMarkdown(item.content) + '</div>';
+                            } else if (Array.isArray(item)) {
+                                // Git diff FileChange array (untagged serialization)
+                                html += '<div class="content-item">';
+                                html += '<div class="gitdiff-container">';
+                                item.forEach(fileChange => {
+                                    html += '<div class="file-diff">';
+                                    html += '<div class="file-header">';
+                                    html += '<span class="file-path">' + fileChange.path + '</span>';
+                                    html += '<span class="file-stats">+' + fileChange.additions + ' -' + fileChange.deletions + '</span>';
+                                    html += '<button class="diff-button" data-file-path="' + fileChange.path + '">View Diff</button>';
+                                    html += '</div>';
+                                    html += '</div>';
+                                });
+                                html += '</div>';
+                                html += '</div>';
                             } else if (item.Action && item.Action.button) {
                                 // Action wrapper object
                                 html += '<div class="content-item">';
@@ -394,6 +649,13 @@ export class WalkthroughWebviewProvider implements vscode.WebviewViewProvider {
                             event.target.classList.contains('action-button') && 
                             event.target.dataset.tellAgent) {
                             handleAction(event.target.dataset.tellAgent);
+                        } else if (event.target.tagName === 'BUTTON' && 
+                                   event.target.classList.contains('diff-button') && 
+                                   event.target.dataset.filePath) {
+                            vscode.postMessage({
+                                type: 'showDiff',
+                                filePath: event.target.dataset.filePath
+                            });
                         }
                     });
                     

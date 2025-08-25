@@ -77,7 +77,7 @@ interface PresentWalkthroughPayload {
 type WalkthroughElement = 
     | { content: string }  // ResolvedMarkdownElement with processed dialectic: URLs
     | { comment: ResolvedComment }
-    | { gitdiff: FileChange[] }
+    | FileChange[]  // GitDiff - untagged serialization means it's just the array directly
     | { action: ResolvedAction };
 
 interface ResolvedComment {
@@ -120,7 +120,7 @@ interface DiffHunk {
 }
 
 interface DiffLine {
-    line_type: 'context' | 'addition' | 'deletion';
+    line_type: 'Context' | 'Added' | 'Removed';
     old_line_number?: number;
     new_line_number?: number;
     content: string;
@@ -862,7 +862,7 @@ export function activate(context: vscode.ExtensionContext) {
     const syntheticPRProvider = new SyntheticPRProvider(context);
 
     // Create walkthrough webview provider
-    const walkthroughProvider = new WalkthroughWebviewProvider(context.extensionUri, outputChannel);
+    const walkthroughProvider = new WalkthroughWebviewProvider(context.extensionUri, outputChannel, undefined, context);
     context.subscriptions.push(
         vscode.window.registerWebviewViewProvider(WalkthroughWebviewProvider.viewType, walkthroughProvider)
     );
