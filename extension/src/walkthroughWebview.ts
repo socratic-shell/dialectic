@@ -107,12 +107,58 @@ export class WalkthroughWebviewProvider implements vscode.WebviewViewProvider {
             const href = token.attrGet('href');
 
             if (href && href.startsWith('dialectic:')) {
+                const linkKey = `link:${href}`;
+                const placementState = this.placementMemory?.get(linkKey);
+                
                 token.attrSet('href', 'javascript:void(0)');
                 token.attrSet('data-dialectic-url', href);
                 token.attrSet('class', 'file-ref');
+                
+                if (placementState?.isPlaced) {
+                    token.attrSet('data-placement-state', 'placed');
+                } else {
+                    token.attrSet('data-placement-state', 'unplaced');
+                }
             }
 
             return defaultRender(tokens, idx, options, env, self);
+        };
+
+        // Custom renderer for link close to add placement icons
+        const defaultLinkClose = md.renderer.rules.link_close || function (tokens: any, idx: any, options: any, env: any, self: any) {
+            return self.renderToken(tokens, idx, options);
+        };
+
+        md.renderer.rules.link_close = (tokens: any, idx: any, options: any, env: any, self: any) => {
+            // Find the corresponding link_open token
+            let openToken = null;
+            for (let i = idx - 1; i >= 0; i--) {
+                if (tokens[i].type === 'link_open') {
+                    openToken = tokens[i];
+                    break;
+                }
+            }
+
+            if (openToken) {
+                const href = openToken.attrGet('href');
+                console.log('[RENDERER] Processing link_close for href:', href);
+                if (href && href.startsWith('dialectic:')) {
+                    const linkKey = `link:${href}`;
+                    const placementState = this.placementMemory?.get(linkKey);
+                    const isPlaced = placementState?.isPlaced || false;
+                    
+                    // Choose icon: 📍 for placed, 🔍 for unplaced
+                    const icon = isPlaced ? '📍' : '🔍';
+                    const action = isPlaced ? 'relocate' : 'place';
+                    const title = isPlaced ? 'Relocate this link' : 'Place this link';
+                    
+                    const result = `</a><button class="placement-icon" data-dialectic-url="${href}" data-action="${action}" title="${title}">${icon}</button>`;
+                    console.log('[RENDERER] Generated icon HTML:', result);
+                    return result;
+                }
+            }
+
+            return defaultLinkClose(tokens, idx, options, env, self);
         };
 
         return md;
@@ -131,6 +177,12 @@ export class WalkthroughWebviewProvider implements vscode.WebviewViewProvider {
             case 'openFile':
                 console.log('Walkthrough: openFile command received:', message.dialecticUrl);
                 await openDialecticUrl(message.dialecticUrl, this.outputChannel, this.baseUri, this.placementMemory);
+                // After placement, update the UI
+                this.updateLinkPlacementUI(message.dialecticUrl);
+                break;
+            case 'relocateLink':
+                console.log('Walkthrough: relocateLink command received:', message.dialecticUrl);
+                await this.relocateLink(message.dialecticUrl);
                 break;
             case 'action':
                 console.log('Walkthrough: action received:', message.message);
@@ -568,6 +620,35 @@ export class WalkthroughWebviewProvider implements vscode.WebviewViewProvider {
         };
     }
 
+    private async relocateLink(dialecticUrl: string): Promise<void> {
+        // Remove the current placement to force re-disambiguation
+        const linkKey = `link:${dialecticUrl}`;
+        this.placementMemory?.delete(linkKey);
+        
+        // Open the link again - this will show disambiguation
+        await openDialecticUrl(dialecticUrl, this.outputChannel, this.baseUri, this.placementMemory);
+        
+        // Update UI after relocation
+        this.updateLinkPlacementUI(dialecticUrl);
+    }
+
+    private updateLinkPlacementUI(dialecticUrl: string): void {
+        if (!this._view) return;
+        
+        const linkKey = `link:${dialecticUrl}`;
+        const placementState = this.placementMemory?.get(linkKey);
+        const isPlaced = placementState?.isPlaced || false;
+        
+        console.log(`[Walkthrough] Updating UI for ${dialecticUrl}: isPlaced=${isPlaced}, placementState=`, placementState);
+        
+        // Send update to webview
+        this._view.webview.postMessage({
+            type: 'updateLinkPlacement',
+            dialecticUrl: dialecticUrl,
+            isPlaced: isPlaced
+        });
+    }
+
     private _getHtmlForWebview(webview: vscode.Webview) {
         const nonce = crypto.randomBytes(16).toString('base64');
 
@@ -708,6 +789,36 @@ export class WalkthroughWebviewProvider implements vscode.WebviewViewProvider {
                         color: var(--vscode-foreground);
                         font-size: 0.9em;
                     }
+                    
+                    /* Placement UI styles */
+                    .file-ref {
+                        cursor: pointer;
+                        text-decoration: none;
+                        display: inline-flex;
+                        align-items: center;
+                        gap: 4px;
+                        color: var(--vscode-textLink-foreground);
+                        border-bottom: 1px solid var(--vscode-textLink-foreground);
+                    }
+                    
+                    .file-ref:hover {
+                        color: var(--vscode-textLink-activeForeground);
+                        border-bottom-color: var(--vscode-textLink-activeForeground);
+                    }
+                    
+                    .placement-icon {
+                        background: none;
+                        border: none;
+                        cursor: pointer;
+                        padding: 0;
+                        font-size: 0.9em;
+                        opacity: 0.8;
+                        margin-left: 2px;
+                    }
+                    
+                    .placement-icon:hover {
+                        opacity: 1;
+                    }
                 </style>
             </head>
             <body>
@@ -719,18 +830,40 @@ export class WalkthroughWebviewProvider implements vscode.WebviewViewProvider {
                     const vscode = acquireVsCodeApi();
                     console.log('VSCode API acquired');
                     
-                    // Handle clicks on dialectic URLs
+                    // Handle clicks on dialectic URLs and placement icons
                     document.addEventListener('click', function(event) {
                         const target = event.target;
                         if (!target) return;
                         
-                        // Check if clicked element or parent has dialectic URL
+                        // Handle placement icon clicks
+                        if (target.classList.contains('placement-icon')) {
+                            event.preventDefault();
+                            const dialecticUrl = target.getAttribute('data-dialectic-url');
+                            const action = target.getAttribute('data-action');
+                            
+                            console.log('[Walkthrough] Placement icon clicked:', dialecticUrl, 'action:', action);
+                            
+                            if (action === 'relocate') {
+                                vscode.postMessage({
+                                    command: 'relocateLink',
+                                    dialecticUrl: dialecticUrl
+                                });
+                            } else {
+                                vscode.postMessage({
+                                    command: 'openFile',
+                                    dialecticUrl: dialecticUrl
+                                });
+                            }
+                            return;
+                        }
+                        
+                        // Check if clicked element or parent has dialectic URL (link text clicked)
                         let element = target;
                         while (element && element !== document) {
                             const dialecticUrl = element.getAttribute('data-dialectic-url');
-                            if (dialecticUrl) {
+                            if (dialecticUrl && element.classList.contains('file-ref')) {
                                 event.preventDefault();
-                                console.log('[Walkthrough] Dialectic URL clicked:', dialecticUrl);
+                                console.log('[Walkthrough] Link text clicked - navigating:', dialecticUrl);
                                 
                                 vscode.postMessage({
                                     command: 'openFile',
@@ -741,6 +874,75 @@ export class WalkthroughWebviewProvider implements vscode.WebviewViewProvider {
                             element = element.parentElement;
                         }
                     });
+                    
+                    // Function to add placement icons to all dialectic links
+                    function addPlacementIcons() {
+                        console.log('[ICONS] Adding placement icons to dialectic links');
+                        const dialecticLinks = document.querySelectorAll('a[data-dialectic-url]');
+                        console.log('[ICONS] Found', dialecticLinks.length, 'dialectic links');
+                        
+                        dialecticLinks.forEach((link, index) => {
+                            const dialecticUrl = link.getAttribute('data-dialectic-url');
+                            console.log('[ICONS] Processing link', index, 'URL:', dialecticUrl);
+                            
+                            // Check if ANY placement icon already exists for this URL
+                            const existingIcons = document.querySelectorAll('.placement-icon[data-dialectic-url="' + dialecticUrl + '"]');
+                            if (existingIcons.length > 0) {
+                                console.log('[ICONS] Icon already exists for URL:', dialecticUrl, 'count:', existingIcons.length);
+                                return;
+                            }
+                            
+                            // Create placement icon
+                            const icon = document.createElement('button');
+                            icon.className = 'placement-icon';
+                            icon.setAttribute('data-dialectic-url', dialecticUrl);
+                            icon.setAttribute('data-action', 'place');
+                            icon.setAttribute('title', 'Place this link');
+                            icon.textContent = '🔍'; // Default to search icon
+                            
+                            // Insert icon after the link
+                            link.parentNode.insertBefore(icon, link.nextSibling);
+                            console.log('[ICONS] Added icon for link', index);
+                        });
+                    }
+
+                    // Function to update link rendering after placement changes
+                    function updateLinkPlacement(dialecticUrl, isPlaced) {
+                        console.log('[PLACEMENT] updateLinkPlacement called with:', dialecticUrl, 'isPlaced:', isPlaced);
+                        
+                        // Debug: show all placement icons in the DOM
+                        const allIcons = document.querySelectorAll('.placement-icon');
+                        console.log('[PLACEMENT] All placement icons in DOM:', allIcons.length);
+                        allIcons.forEach((icon, i) => {
+                            console.log('[PLACEMENT] Icon ' + i + ': data-dialectic-url="' + icon.getAttribute('data-dialectic-url') + '" text="' + icon.textContent + '"');
+                        });
+                        
+                        // Update placement icons
+                        const icons = document.querySelectorAll('.placement-icon[data-dialectic-url="' + dialecticUrl + '"]');
+                        console.log('[PLACEMENT] Found', icons.length, 'icons to update for URL:', dialecticUrl);
+                        
+                        icons.forEach((icon, index) => {
+                            console.log('[PLACEMENT] Updating icon', index, 'current text:', icon.textContent);
+                            if (isPlaced) {
+                                icon.textContent = '📍';
+                                icon.setAttribute('data-action', 'relocate');
+                                icon.setAttribute('title', 'Relocate this link');
+                                console.log('[PLACEMENT] Set icon to 📍 (relocate)');
+                            } else {
+                                icon.textContent = '🔍';
+                                icon.setAttribute('data-action', 'place');
+                                icon.setAttribute('title', 'Place this link');
+                                console.log('[PLACEMENT] Set icon to 🔍 (place)');
+                            }
+                        });
+                        
+                        // Update link data attributes
+                        const links = document.querySelectorAll('.file-ref[data-dialectic-url="' + dialecticUrl + '"]');
+                        console.log('[PLACEMENT] Found', links.length, 'links to update');
+                        links.forEach(link => {
+                            link.setAttribute('data-placement-state', isPlaced ? 'placed' : 'unplaced');
+                        });
+                    }
                     
                     function renderMarkdown(text) {
                         return text; // Content is already rendered HTML
@@ -875,9 +1077,15 @@ export class WalkthroughWebviewProvider implements vscode.WebviewViewProvider {
                             if (contentElement) {
                                 contentElement.innerHTML = finalHtml;
                                 console.log('[SUCCESS] Content updated successfully');
+                                
+                                // Add placement icons to all dialectic links
+                                addPlacementIcons();
                             } else {
                                 console.error('[ERROR] Content element not found!');
                             }
+                        } else if (message.type === 'updateLinkPlacement') {
+                            console.log('[PLACEMENT] Updating link placement:', message.dialecticUrl, 'isPlaced:', message.isPlaced);
+                            updateLinkPlacement(message.dialecticUrl, message.isPlaced);
                         } else {
                             console.log('[IGNORE] Ignoring message type:', message.type);
                         }
