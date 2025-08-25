@@ -2,6 +2,13 @@ import * as vscode from 'vscode';
 import { parseDialecticUrl, DialecticUrl } from './dialecticUrl';
 import { searchInFile, getBestSearchResult, formatSearchResults, needsDisambiguation } from './searchEngine';
 
+// Placement state for unified link and comment management
+interface PlacementState {
+    isPlaced: boolean;
+    chosenLocation: any; // FileRange, SearchResult, or other location type
+    wasAmbiguous: boolean; // Whether this item had multiple possible locations
+}
+
 /**
  * Open a file location specified by a dialectic URL
  * Full implementation with regex search support extracted from reviewWebview
@@ -10,7 +17,7 @@ export async function openDialecticUrl(
     dialecticUrl: string, 
     outputChannel: vscode.OutputChannel, 
     baseUri?: vscode.Uri,
-    placementMemory?: Map<string, any>
+    placementMemory?: Map<string, PlacementState>
 ): Promise<void> {
     try {
         // Parse the dialectic URL to extract components
