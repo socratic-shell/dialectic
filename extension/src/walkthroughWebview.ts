@@ -71,7 +71,7 @@ export class WalkthroughWebviewProvider implements vscode.WebviewViewProvider {
     private baseUri?: vscode.Uri;
     private diffContentProvider: WalkthroughDiffContentProvider;
     private currentWalkthrough?: WalkthroughData;
-    private choiceMemory = new Map<string, PlacementState>(); // Unified placement memory
+    private placementMemory = new Map<string, PlacementState>(); // Unified placement memory
 
     constructor(
         private readonly _extensionUri: vscode.Uri,
@@ -235,14 +235,14 @@ export class WalkthroughWebviewProvider implements vscode.WebviewViewProvider {
      * Get placement state for an item (link or comment)
      */
     private getPlacementState(key: string): PlacementState | undefined {
-        return this.choiceMemory.get(key);
+        return this.placementMemory.get(key);
     }
 
     /**
      * Set placement state for an item
      */
     private setPlacementState(key: string, state: PlacementState): void {
-        this.choiceMemory.set(key, state);
+        this.placementMemory.set(key, state);
     }
 
     /**
@@ -274,7 +274,7 @@ export class WalkthroughWebviewProvider implements vscode.WebviewViewProvider {
      * Clear all placement memory (called when new walkthrough loads)
      */
     private clearPlacementMemory(): void {
-        this.choiceMemory.clear();
+        this.placementMemory.clear();
     }
     private async showFileDiff(filePath: string): Promise<void> {
         console.log(`[WALKTHROUGH DIFF] Starting showFileDiff for: ${filePath}`);
