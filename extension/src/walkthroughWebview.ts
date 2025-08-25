@@ -4,6 +4,13 @@ import * as path from 'path';
 import * as MarkdownIt from 'markdown-it';
 import { openDialecticUrl } from './fileNavigation';
 
+// Placement state for unified link and comment management
+interface PlacementState {
+    isPlaced: boolean;
+    chosenLocation: any; // FileRange, SearchResult, or other location type
+    wasAmbiguous: boolean; // Whether this item had multiple possible locations
+}
+
 // Reuse types from synthetic PR system
 interface FileChange {
     path: string;
@@ -64,6 +71,7 @@ export class WalkthroughWebviewProvider implements vscode.WebviewViewProvider {
     private baseUri?: vscode.Uri;
     private diffContentProvider: WalkthroughDiffContentProvider;
     private currentWalkthrough?: WalkthroughData;
+    private choiceMemory = new Map<string, PlacementState>(); // Unified placement memory
 
     constructor(
         private readonly _extensionUri: vscode.Uri,
@@ -219,6 +227,54 @@ export class WalkthroughWebviewProvider implements vscode.WebviewViewProvider {
         // TODO: Implement simplified CommentController for walkthrough comments
         // This will create comment threads with reply buttons that trigger "Ask Socratic Shell"
         console.log(`[WALKTHROUGH COMMENT] Creating comment thread for ${filePath}:${location.start.line}`);
+    }
+
+    // Placement state management methods
+
+    /**
+     * Get placement state for an item (link or comment)
+     */
+    private getPlacementState(key: string): PlacementState | undefined {
+        return this.choiceMemory.get(key);
+    }
+
+    /**
+     * Set placement state for an item
+     */
+    private setPlacementState(key: string, state: PlacementState): void {
+        this.choiceMemory.set(key, state);
+    }
+
+    /**
+     * Mark an item as placed with chosen location
+     */
+    private placeItem(key: string, location: any, wasAmbiguous: boolean): void {
+        this.setPlacementState(key, {
+            isPlaced: true,
+            chosenLocation: location,
+            wasAmbiguous
+        });
+    }
+
+    /**
+     * Mark an item as unplaced (for relocate functionality)
+     */
+    private unplaceItem(key: string): void {
+        const currentState = this.getPlacementState(key);
+        if (currentState) {
+            this.setPlacementState(key, {
+                ...currentState,
+                isPlaced: false,
+                chosenLocation: null
+            });
+        }
+    }
+
+    /**
+     * Clear all placement memory (called when new walkthrough loads)
+     */
+    private clearPlacementMemory(): void {
+        this.choiceMemory.clear();
     }
     private async showFileDiff(filePath: string): Promise<void> {
         console.log(`[WALKTHROUGH DIFF] Starting showFileDiff for: ${filePath}`);
@@ -465,6 +521,9 @@ export class WalkthroughWebviewProvider implements vscode.WebviewViewProvider {
         
         // Store walkthrough data for diff functionality
         this.currentWalkthrough = walkthrough;
+        
+        // Clear placement memory for new walkthrough
+        this.clearPlacementMemory();
         
         if (this._view) {
             console.log('Webview exists, showing and posting message');
