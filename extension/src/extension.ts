@@ -77,7 +77,7 @@ interface PresentWalkthroughPayload {
 type WalkthroughElement = 
     | { content: string }  // ResolvedMarkdownElement with processed dialectic: URLs
     | { comment: ResolvedComment }
-    | FileChange[]  // GitDiff - untagged serialization means it's just the array directly
+    | { "0": FileChange[] }  // GitDiffElement - newtype serializes as {"0": [...]}
     | { action: ResolvedAction };
 
 interface ResolvedComment {

@@ -246,7 +246,7 @@ pub struct GitDiff {
 }
 
 impl<U: IpcClient> DialectFunction<U> for GitDiff {
-    type Output = Vec<crate::synthetic_pr::FileChange>;
+    type Output = GitDiffElement;
 
     const DEFAULT_FIELD_NAME: Option<&'static str> = None;
 
@@ -262,8 +262,8 @@ impl<U: IpcClient> DialectFunction<U> for GitDiff {
         let file_changes = git_service.generate_diff(base_oid, head_oid)?;
 
         // TODO: Apply exclude filters for staged/unstaged changes
-        // For now, return all changes
-        Ok(file_changes)
+        // For now, return all changes wrapped in GitDiffElement
+        Ok(GitDiffElement(file_changes))
     }
 }
 
@@ -655,6 +655,9 @@ fn convert_url_to_dialectic(url: &str) -> String {
 
 
 #[derive(Serialize, Deserialize, Debug)]
+pub struct GitDiffElement(pub Vec<crate::synthetic_pr::FileChange>);
+
+#[derive(Serialize, Deserialize, Debug)]
 #[serde(untagged)]
 pub enum ResolvedWalkthroughElement {
     /// Plain markdown text with processed links
@@ -662,7 +665,7 @@ pub enum ResolvedWalkthroughElement {
     /// Comment placed at specific locations
     Comment(ResolvedComment),
     /// Git diff display
-    GitDiff(Vec<crate::synthetic_pr::FileChange>),
+    GitDiff(GitDiffElement),
     /// Action button
     Action(ResolvedAction),
 }

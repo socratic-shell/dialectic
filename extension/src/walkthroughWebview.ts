@@ -45,7 +45,7 @@ class WalkthroughDiffContentProvider implements vscode.TextDocumentContentProvid
 type WalkthroughElement = 
     | { content: string }  // ResolvedMarkdownElement with processed dialectic: URLs
     | { comment: any }  // Simplified for now
-    | FileChange[]  // GitDiff - untagged serialization means it's just the array directly
+    | { "0": FileChange[] }  // GitDiffElement - newtype serializes as {"0": [...]}
     | { action: { button: string; description?: string; tell_agent?: string } };
 
 interface WalkthroughData {
@@ -164,9 +164,9 @@ export class WalkthroughWebviewProvider implements vscode.WebviewViewProvider {
         ];
         
         for (const item of allSections) {
-            if (Array.isArray(item)) {
-                // This is a FileChange array (gitdiff) - untagged serialization
-                fileChange = item.find((fc: FileChange) => fc.path === filePath);
+            if (typeof item === 'object' && '0' in item) {
+                // This is a GitDiffElement newtype - {"0": FileChange[]}
+                fileChange = item['0'].find((fc: FileChange) => fc.path === filePath);
                 if (fileChange) break;
             }
         }
@@ -416,8 +416,8 @@ export class WalkthroughWebviewProvider implements vscode.WebviewViewProvider {
             return items.map(item => {
                 if (typeof item === 'object' && 'content' in item) {
                     return { content: this.sanitizeHtml(this.md.render(item.content)) };
-                } else if (Array.isArray(item)) {
-                    // Handle gitdiff arrays (FileChange[]) - untagged serialization
+                } else if (typeof item === 'object' && '0' in item) {
+                    // Handle GitDiffElement newtype - {"0": FileChange[]}
                     return item; // Keep as-is, will be handled in rendering
                 }
                 return item;
@@ -588,11 +588,11 @@ export class WalkthroughWebviewProvider implements vscode.WebviewViewProvider {
                             if (typeof item === 'object' && 'content' in item) {
                                 // ResolvedMarkdownElement with processed dialectic: URLs
                                 html += '<div class="content-item">' + renderMarkdown(item.content) + '</div>';
-                            } else if (Array.isArray(item)) {
-                                // Git diff FileChange array (untagged serialization)
+                            } else if (typeof item === 'object' && '0' in item) {
+                                // GitDiffElement newtype - {"0": FileChange[]}
                                 html += '<div class="content-item">';
                                 html += '<div class="gitdiff-container">';
-                                item.forEach(fileChange => {
+                                item['0'].forEach(fileChange => {
                                     html += '<div class="file-diff">';
                                     html += '<div class="file-header">';
                                     html += '<span class="file-path clickable-file" data-file-path="' + fileChange.path + '">' + fileChange.path + '</span>';
