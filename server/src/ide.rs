@@ -297,6 +297,10 @@ pub enum ResolvedLocation {
     SymbolDefs(Vec<SymbolDef>),
 }
 
+/// Resolved comment output from the [`Comment`] dialect function.
+/// 
+/// This is the processed result after normalizing different location types 
+/// (FileRange, SymbolDef, SymbolRef) into a consistent Vec<FileRange> format.
 /// The fully normalized struct that we send over IPC.
 #[derive(Serialize, Deserialize, Debug)]
 pub struct ResolvedComment {
@@ -404,6 +408,9 @@ pub struct Action {
     pub tell_agent: Option<String>,
 }
 
+/// Resolved action output from the [`Action`] dialect function.
+/// 
+/// This is the processed result with button text and optional agent instructions.
 #[derive(Serialize, Deserialize, Debug)]
 pub struct ResolvedAction {
     pub button: String,
@@ -429,6 +436,10 @@ impl<U: IpcClient> DialectFunction<U> for Action {
 
 /// Resolved walkthrough types for IPC communication with VSCode extension
 
+/// Resolved walkthrough output from the `present_walkthrough` MCP tool.
+/// 
+/// This is the processed result after executing all Dialect programs in the 
+/// walkthrough sections and converting them to their resolved forms.
 #[derive(Serialize, Debug)]
 pub struct ResolvedWalkthrough {
     pub introduction: Option<Vec<ResolvedWalkthroughElement>>,
@@ -438,6 +449,9 @@ pub struct ResolvedWalkthrough {
     pub base_uri: String,
 }
 
+/// Resolved markdown element from plain string input in walkthrough sections.
+/// 
+/// This represents the processed result when a walkthrough element is a plain string.
 /// Markdown content with processed file references converted to dialectic: URLs.
 /// 
 /// This type has a custom `Deserialize` implementation that automatically processes
@@ -654,11 +668,24 @@ fn convert_url_to_dialectic(url: &str) -> String {
 
 
 
+/// Resolved git diff output from the [`GitDiff`] dialect function.
+/// 
+/// This is the processed result containing file changes from a git commit range,
+/// with each file's additions, deletions, and diff hunks.
 #[derive(Serialize, Deserialize, Debug)]
 pub struct GitDiffElement {
     pub files: Vec<crate::synthetic_pr::FileChange>,
 }
 
+/// Resolved walkthrough element output from various dialect functions.
+/// 
+/// This enum represents the processed results from executing Dialect programs
+/// in walkthrough sections. Each variant corresponds to a different type of
+/// input that can be resolved:
+/// - Plain strings → [`ResolvedMarkdownElement`]
+/// - [`Comment`] dialect function → [`ResolvedComment`] 
+/// - [`GitDiff`] dialect function → [`GitDiffElement`]
+/// - [`Action`] dialect function → [`ResolvedAction`]
 #[derive(Serialize, Deserialize, Debug)]
 #[serde(untagged)]
 pub enum ResolvedWalkthroughElement {
