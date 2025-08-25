@@ -130,7 +130,7 @@ export class WalkthroughWebviewProvider implements vscode.WebviewViewProvider {
         switch (message.command || message.type) {
             case 'openFile':
                 console.log('Walkthrough: openFile command received:', message.dialecticUrl);
-                await openDialecticUrl(message.dialecticUrl, this.outputChannel, this.baseUri);
+                await openDialecticUrl(message.dialecticUrl, this.outputChannel, this.baseUri, this.placementMemory);
                 break;
             case 'action':
                 console.log('Walkthrough: action received:', message.message);

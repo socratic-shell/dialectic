@@ -2,14 +2,18 @@ import * as vscode from 'vscode';
 import { parseDialecticUrl, DialecticUrl } from './dialecticUrl';
 import { searchInFile, getBestSearchResult, formatSearchResults, needsDisambiguation } from './searchEngine';
 
-// Global choice memory - remembers previous disambiguation choices
-const choiceMemory = new Map<string, import('./searchEngine').SearchResult>();
+// Choice memory is now managed by WalkthroughWebviewProvider and threaded down as parameter
 
 /**
  * Open a file location specified by a dialectic URL
  * Full implementation with regex search support extracted from reviewWebview
  */
-export async function openDialecticUrl(dialecticUrl: string, outputChannel: vscode.OutputChannel, baseUri?: vscode.Uri): Promise<void> {
+export async function openDialecticUrl(
+    dialecticUrl: string, 
+    outputChannel: vscode.OutputChannel, 
+    baseUri?: vscode.Uri,
+    placementMemory?: Map<string, any>
+): Promise<void> {
     try {
         // Parse the dialectic URL to extract components
         const parsed = parseDialecticUrl(dialecticUrl);
@@ -67,11 +71,13 @@ export async function openDialecticUrl(dialecticUrl: string, outputChannel: vsco
                         targetColumn = parsed.line.startColumn || 1;
                     }
                 } else if (needsDisambiguation(searchResults)) {
-                    // Multiple matches - check choice memory first
-                    const memoryKey = `${parsed.path}:${parsed.regex}`;
-                    const rememberedChoice = choiceMemory.get(memoryKey);
+                    // Multiple matches - check placement memory first
+                    const linkKey = `link:${dialecticUrl}`;
+                    const placementState = placementMemory?.get(linkKey);
                     
-                    if (rememberedChoice) {
+                    if (placementState?.isPlaced && placementState.chosenLocation) {
+                        // Use previously placed location
+                        const rememberedChoice = placementState.chosenLocation;
                         // Check if remembered choice is still valid in current results
                         const stillValid = searchResults.find(r => 
                             r.line === rememberedChoice.line && 
@@ -88,8 +94,12 @@ export async function openDialecticUrl(dialecticUrl: string, outputChannel: vsco
                             if (selectedResult) {
                                 targetLine = selectedResult.line;
                                 targetColumn = selectedResult.column;
-                                // Update memory with new choice (might be same or different)
-                                choiceMemory.set(memoryKey, selectedResult);
+                                // Update placement memory with new choice
+                                placementMemory?.set(linkKey, {
+                                    isPlaced: true,
+                                    chosenLocation: selectedResult,
+                                    wasAmbiguous: true
+                                });
                             }
                         } else {
                             // Remembered choice no longer valid, show normal disambiguation
@@ -97,7 +107,11 @@ export async function openDialecticUrl(dialecticUrl: string, outputChannel: vsco
                             if (selectedResult) {
                                 targetLine = selectedResult.line;
                                 targetColumn = selectedResult.column;
-                                choiceMemory.set(memoryKey, selectedResult);
+                                placementMemory?.set(linkKey, {
+                                    isPlaced: true,
+                                    chosenLocation: selectedResult,
+                                    wasAmbiguous: true
+                                });
                             }
                         }
                     } else {
@@ -106,7 +120,11 @@ export async function openDialecticUrl(dialecticUrl: string, outputChannel: vsco
                         if (selectedResult) {
                             targetLine = selectedResult.line;
                             targetColumn = selectedResult.column;
-                            choiceMemory.set(memoryKey, selectedResult);
+                            placementMemory?.set(linkKey, {
+                                isPlaced: true,
+                                chosenLocation: selectedResult,
+                                wasAmbiguous: true
+                            });
                         }
                     }
                 } else {
@@ -116,6 +134,14 @@ export async function openDialecticUrl(dialecticUrl: string, outputChannel: vsco
                         targetLine = bestResult.line;
                         targetColumn = bestResult.column;
                         outputChannel.appendLine(`Using best result: line ${targetLine}, column ${targetColumn}`);
+                        
+                        // Auto-place unambiguous links
+                        const linkKey = `link:${dialecticUrl}`;
+                        placementMemory?.set(linkKey, {
+                            isPlaced: true,
+                            chosenLocation: bestResult,
+                            wasAmbiguous: false
+                        });
                     }
                 }
             } catch (error) {
@@ -412,12 +438,7 @@ async function showSearchDisambiguation(
     });
 }
 
-/**
- * Clear choice memory (call when review is cleared)
- */
-export function clearChoiceMemory(): void {
-    choiceMemory.clear();
-}
+// clearChoiceMemory is no longer needed - placement memory is managed by WalkthroughWebviewProvider
 
 /**
  * Create decoration ranges based on line specification or search result

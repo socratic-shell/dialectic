@@ -153,7 +153,7 @@ export class ReviewWebviewProvider {
     private async handleWebviewMessage(message: any): Promise<void> {
         switch (message.command) {
             case 'openFile':
-                await openDialecticUrl(message.dialecticUrl, this.outputChannel, this.baseUri);
+                await openDialecticUrl(message.dialecticUrl, this.outputChannel, this.baseUri, undefined);
                 break;
             case 'copyReview':
                 await vscode.env.clipboard.writeText(this.reviewContent);
