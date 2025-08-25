@@ -8,12 +8,20 @@ import { parseDialecticUrl, DialecticUrl } from './dialecticUrl';
 import { searchInFile, getBestSearchResult, formatSearchResults, needsDisambiguation } from './searchEngine';
 import { openDialecticUrl } from './fileNavigation';
 
+// Placement state for unified link and comment management
+interface PlacementState {
+    isPlaced: boolean;
+    chosenLocation: any; // FileRange, SearchResult, or other location type
+    wasAmbiguous: boolean; // Whether this item had multiple possible locations
+}
+
 export class ReviewWebviewProvider {
     private panel: vscode.WebviewPanel | undefined;
     private reviewContent: string = '';
     private baseUri: vscode.Uri | undefined;
     private md: MarkdownIt;
     private lineHighlightDecoration: vscode.TextEditorDecorationType;
+    private placementMemory = new Map<string, PlacementState>(); // Unified placement memory
 
     constructor(
         private context: vscode.ExtensionContext,
@@ -133,6 +141,8 @@ export class ReviewWebviewProvider {
         switch (mode) {
             case 'replace':
                 this.reviewContent = content;
+                // Clear placement memory for new review
+                this.placementMemory.clear();
                 break;
             case 'append':
                 this.reviewContent += '\n\n' + content;
@@ -140,6 +150,8 @@ export class ReviewWebviewProvider {
             case 'update-section':
                 // For now, treat as replace - could implement section updating later
                 this.reviewContent = content;
+                // Clear placement memory for new review
+                this.placementMemory.clear();
                 break;
         }
 
@@ -153,7 +165,7 @@ export class ReviewWebviewProvider {
     private async handleWebviewMessage(message: any): Promise<void> {
         switch (message.command) {
             case 'openFile':
-                await openDialecticUrl(message.dialecticUrl, this.outputChannel, this.baseUri, undefined);
+                await openDialecticUrl(message.dialecticUrl, this.outputChannel, this.baseUri, this.placementMemory);
                 break;
             case 'copyReview':
                 await vscode.env.clipboard.writeText(this.reviewContent);
