@@ -263,7 +263,7 @@ impl<U: IpcClient> DialectFunction<U> for GitDiff {
 
         // TODO: Apply exclude filters for staged/unstaged changes
         // For now, return all changes wrapped in GitDiffElement
-        Ok(GitDiffElement(file_changes))
+        Ok(GitDiffElement { files: file_changes })
     }
 }
 
@@ -655,7 +655,9 @@ fn convert_url_to_dialectic(url: &str) -> String {
 
 
 #[derive(Serialize, Deserialize, Debug)]
-pub struct GitDiffElement(pub Vec<crate::synthetic_pr::FileChange>);
+pub struct GitDiffElement {
+    pub files: Vec<crate::synthetic_pr::FileChange>,
+}
 
 #[derive(Serialize, Deserialize, Debug)]
 #[serde(untagged)]

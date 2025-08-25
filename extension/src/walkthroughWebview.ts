@@ -45,7 +45,7 @@ class WalkthroughDiffContentProvider implements vscode.TextDocumentContentProvid
 type WalkthroughElement = 
     | { content: string }  // ResolvedMarkdownElement with processed dialectic: URLs
     | { comment: any }  // Simplified for now
-    | { "0": FileChange[] }  // GitDiffElement - newtype serializes as {"0": [...]}
+    | { files: FileChange[] }  // GitDiffElement - named field serializes as {"files": [...]}
     | { action: { button: string; description?: string; tell_agent?: string } };
 
 interface WalkthroughData {
@@ -164,9 +164,9 @@ export class WalkthroughWebviewProvider implements vscode.WebviewViewProvider {
         ];
         
         for (const item of allSections) {
-            if (typeof item === 'object' && '0' in item) {
-                // This is a GitDiffElement newtype - {"0": FileChange[]}
-                fileChange = item['0'].find((fc: FileChange) => fc.path === filePath);
+            if (typeof item === 'object' && 'files' in item) {
+                // This is a GitDiffElement named field - {"files": FileChange[]}
+                fileChange = item.files.find((fc: FileChange) => fc.path === filePath);
                 if (fileChange) break;
             }
         }
@@ -416,8 +416,8 @@ export class WalkthroughWebviewProvider implements vscode.WebviewViewProvider {
             return items.map(item => {
                 if (typeof item === 'object' && 'content' in item) {
                     return { content: this.sanitizeHtml(this.md.render(item.content)) };
-                } else if (typeof item === 'object' && '0' in item) {
-                    // Handle GitDiffElement newtype - {"0": FileChange[]}
+                } else if (typeof item === 'object' && 'files' in item) {
+                    // Handle GitDiffElement named field - {"files": FileChange[]}
                     return item; // Keep as-is, will be handled in rendering
                 }
                 return item;
@@ -588,11 +588,11 @@ export class WalkthroughWebviewProvider implements vscode.WebviewViewProvider {
                             if (typeof item === 'object' && 'content' in item) {
                                 // ResolvedMarkdownElement with processed dialectic: URLs
                                 html += '<div class="content-item">' + renderMarkdown(item.content) + '</div>';
-                            } else if (typeof item === 'object' && '0' in item) {
-                                // GitDiffElement newtype - {"0": FileChange[]}
+                            } else if (typeof item === 'object' && 'files' in item) {
+                                // GitDiffElement named field - {"files": FileChange[]}
                                 html += '<div class="content-item">';
                                 html += '<div class="gitdiff-container">';
-                                item['0'].forEach(fileChange => {
+                                item.files.forEach(fileChange => {
                                     html += '<div class="file-diff">';
                                     html += '<div class="file-header">';
                                     html += '<span class="file-path clickable-file" data-file-path="' + fileChange.path + '">' + fileChange.path + '</span>';
