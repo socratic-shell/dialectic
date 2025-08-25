@@ -19,7 +19,7 @@ export async function resolveDialecticUrlPlacement(
     outputChannel: vscode.OutputChannel,
     baseUri?: vscode.Uri,
     placementMemory?: Map<string, PlacementState>
-): Promise<{ line: number; column: number; document: vscode.TextDocument } | null> {
+): Promise<{ range: vscode.Range; document: vscode.TextDocument } | null> {
     try {
         // Parse the dialectic URL to extract components
         const parsed = parseDialecticUrl(dialecticUrl);
@@ -110,7 +110,10 @@ export async function resolveDialecticUrlPlacement(
             targetColumn = parsed.line.startColumn || 1;
         }
 
-        return { line: targetLine, column: targetColumn, document };
+        return { 
+            range: new vscode.Range(targetLine - 1, targetColumn - 1, targetLine - 1, targetColumn - 1), 
+            document 
+        };
 
     } catch (error) {
         outputChannel.appendLine(`Error resolving dialectic URL: ${error}`);
