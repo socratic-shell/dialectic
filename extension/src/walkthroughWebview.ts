@@ -73,6 +73,7 @@ export class WalkthroughWebviewProvider implements vscode.WebviewViewProvider {
     private currentWalkthrough?: WalkthroughData;
     private placementMemory = new Map<string, PlacementState>(); // Unified placement memory
     private commentController?: vscode.CommentController;
+    private commentThreads = new Map<string, vscode.CommentThread>(); // Track comment threads by location key
 
     constructor(
         private readonly _extensionUri: vscode.Uri,
@@ -209,6 +210,43 @@ export class WalkthroughWebviewProvider implements vscode.WebviewViewProvider {
     /**
      * Show comment using VSCode CommentController with context-aware file opening
      */
+    /**
+     * Place a comment at a specific location, avoiding duplicates
+     */
+    private async placeComment(comment: any, location: any): Promise<void> {
+        const locationKey = `${location.path}:${location.start.line}`;
+        
+        // Check if comment already exists at this location
+        if (this.commentThreads.has(locationKey)) {
+            console.log(`[WALKTHROUGH] Comment already exists at ${locationKey}, navigating to it`);
+            await this.navigateToExistingComment(location.path, location);
+            return;
+        }
+
+        await this.createCommentThread(location.path, location, comment);
+    }
+
+    /**
+     * Navigate to existing comment instead of creating duplicate
+     */
+    private async navigateToExistingComment(filePath: string, location: any): Promise<void> {
+        if (!this.baseUri) return;
+        
+        try {
+            const uri = vscode.Uri.file(path.resolve(this.baseUri.fsPath, filePath));
+            const document = await vscode.workspace.openTextDocument(uri);
+            const editor = await vscode.window.showTextDocument(document);
+            
+            // Navigate to the line
+            const line = Math.max(0, location.start.line - 1);
+            const position = new vscode.Position(line, 0);
+            editor.selection = new vscode.Selection(position, position);
+            editor.revealRange(new vscode.Range(position, position));
+        } catch (error) {
+            console.error(`[WALKTHROUGH] Failed to navigate to comment:`, error);
+        }
+    }
+
     private async showComment(comment: any): Promise<void> {
         console.log(`[WALKTHROUGH COMMENT] Starting showComment:`, comment);
 
@@ -242,10 +280,8 @@ export class WalkthroughWebviewProvider implements vscode.WebviewViewProvider {
             selectedLocation = selected.location;
         }
 
-        // Create comment thread at the selected location
-        await this.createCommentThread(selectedLocation.path, selectedLocation, comment);
-        
-        // TODO: Update the display to show the precise location and allow relocation
+        // Use placeComment to handle duplicates
+        await this.placeComment(comment, selectedLocation);
     }
 
     /**
@@ -309,6 +345,7 @@ export class WalkthroughWebviewProvider implements vscode.WebviewViewProvider {
             // Create comment thread
             const thread = this.commentController.createCommentThread(uri, range, []);
             thread.label = 'Walkthrough Comment';
+            thread.collapsibleState = vscode.CommentThreadCollapsibleState.Expanded; // Make visible immediately
             
             // Add the comment content as the initial comment
             if (comment.comment && comment.comment.length > 0) {
@@ -321,6 +358,10 @@ export class WalkthroughWebviewProvider implements vscode.WebviewViewProvider {
                 };
                 thread.comments = [vscodeComment];
             }
+            
+            // Track the thread
+            const locationKey = `${filePath}:${location.start.line}`;
+            this.commentThreads.set(locationKey, thread);
             
             console.log(`[WALKTHROUGH COMMENT] Created comment thread at ${filePath}:${startLine + 1}`);
             
@@ -626,6 +667,9 @@ export class WalkthroughWebviewProvider implements vscode.WebviewViewProvider {
         // Clear placement memory for new walkthrough
         this.clearPlacementMemory();
 
+        // Clear all existing comments
+        this.clearAllComments();
+
         if (this._view) {
             console.log('Webview exists, showing and posting message');
             this._view.show?.(true);
@@ -638,8 +682,45 @@ export class WalkthroughWebviewProvider implements vscode.WebviewViewProvider {
                 data: processedWalkthrough
             });
             console.log('Message posted to webview');
+
+            // Auto-place unambiguous comments
+            this.autoPlaceUnambiguousComments(walkthrough);
         } else {
             console.log('ERROR: No webview available');
+        }
+    }
+
+    /**
+     * Clear all existing comment threads
+     */
+    private clearAllComments(): void {
+        if (this.commentController) {
+            console.log('[WALKTHROUGH] Clearing all existing comments');
+            this.commentController.dispose();
+            this.commentController = undefined;
+        }
+        this.commentThreads.clear();
+    }
+
+    /**
+     * Auto-place comments that have unambiguous locations (exactly one location)
+     */
+    private async autoPlaceUnambiguousComments(walkthrough: WalkthroughData): Promise<void> {
+        const allSections = [
+            ...(walkthrough.introduction || []),
+            ...(walkthrough.highlights || []),
+            ...(walkthrough.changes || []),
+            ...(walkthrough.actions || [])
+        ];
+
+        for (const item of allSections) {
+            if (typeof item === 'object' && 'comment' in item) {
+                const comment = (item as any).comment;
+                if (comment.locations && comment.locations.length === 1) {
+                    console.log('[WALKTHROUGH] Auto-placing unambiguous comment:', comment);
+                    await this.placeComment(comment, comment.locations[0]);
+                }
+            }
         }
     }
 
