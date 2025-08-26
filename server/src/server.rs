@@ -1,6 +1,6 @@
 //! Dialectic MCP Server implementation using the official rmcp SDK
 //!
-//! Provides present_review, get_selection, and ide_operation tools for AI assistants
+//! Provides get_selection, ide_operation, and present_walkthrough tools for AI assistants
 //! to interact with the VSCode extension via IPC.
 
 use anyhow::Result;
@@ -20,7 +20,7 @@ use crate::ipc::IPCCommunicator;
 use crate::synthetic_pr::{
     CompletionAction, RequestReviewParams, UpdateReviewParams, UserFeedback,
 };
-use crate::types::{LogLevel, PresentReviewParams, PresentWalkthroughParams};
+use crate::types::{LogLevel, PresentWalkthroughParams};
 use serde::{Deserialize, Serialize};
 
 /// Parameters for the ide_operation tool
@@ -243,9 +243,6 @@ impl DialecticServer {
             )
             .await;
 
-        Ok(CallToolResult::success(vec![Content::text(
-            "Review successfully displayed in VSCode",
-        )]))
     }
 
     /// Display a code walkthrough in VSCode
@@ -701,10 +698,10 @@ impl ServerHandler for DialecticServer {
                 version: "0.1.0".to_string(),
             },
             instructions: Some(
-                "This server provides tools for AI assistants to display code reviews and perform IDE operations in VSCode. \
-                Use 'present_review' to display structured markdown reviews with file references, \
-                'get_selection' to retrieve currently selected text from the active editor, \
+                "This server provides tools for AI assistants to perform IDE operations and display walkthroughs in VSCode. \
+                Use 'get_selection' to retrieve currently selected text from the active editor, \
                 'ide_operation' to execute IDE operations like finding symbol definitions and references using Dialect, \
+                'present_walkthrough' to display structured code walkthroughs with interactive elements, \
                 'request_review' to create synthetic pull requests from Git commit ranges with AI insight comments, \
                 'update_review' to manage review workflows and wait for user feedback, \
                 and 'get_review_status' to check the current synthetic PR status."

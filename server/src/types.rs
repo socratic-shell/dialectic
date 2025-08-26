@@ -30,42 +30,6 @@ pub struct PresentWalkthroughParams {
 }
 // ANCHOR_END: present_walkthrough_params
 
-/// Parameters for the present-review MCP tool
-///
-/// Matches PresentReviewParams from TypeScript implementation
-// ANCHOR: present_review_params
-#[derive(Debug, Clone, Deserialize, Serialize, JsonSchema)]
-pub struct PresentReviewParams {
-    /// Markdown content of the review to display
-    pub content: String,
-
-    /// How to handle the review content in the extension
-    pub mode: ReviewMode,
-
-    /// Optional section name for update-section mode
-    pub section: Option<String>,
-
-    /// Base directory path for resolving relative file references
-    #[serde(rename = "baseUri")]
-    pub base_uri: String,
-}
-// ANCHOR_END: present_review_params
-
-/// Review display modes
-#[derive(Debug, Clone, Deserialize, Serialize, JsonSchema)]
-#[serde(rename_all = "kebab-case")]
-pub enum ReviewMode {
-    Replace,
-    UpdateSection,
-    Append,
-}
-
-impl Default for ReviewMode {
-    fn default() -> Self {
-        ReviewMode::Replace
-    }
-}
-
 /// Parameters for log messages sent via IPC
 #[derive(Debug, Clone, Deserialize, Serialize)]
 pub struct LogParams {
