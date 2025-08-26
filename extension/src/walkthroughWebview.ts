@@ -238,6 +238,19 @@ export class WalkthroughWebviewProvider implements vscode.WebviewViewProvider {
         const thread = await this.createCommentThread(selectedLocation.path, selectedLocation, comment);
         if (thread) {
             this.commentThreads.set(comment.id, thread);
+            
+            // Store placement state for ambiguous comments
+            if (comment.locations.length > 1) {
+                this.setPlacementState(comment.id, {
+                    isPlaced: true,
+                    chosenLocation: selectedLocation,
+                    wasAmbiguous: true
+                });
+                
+                // Update sidebar to show chosen location
+                this.updateCommentDisplay(comment.id, selectedLocation);
+            }
+            
             await this.navigateToThread(thread);
         }
     }
@@ -297,6 +310,16 @@ export class WalkthroughWebviewProvider implements vscode.WebviewViewProvider {
             const newThread = await this.createCommentThread(selected.location.path, selected.location, comment);
             if (newThread) {
                 this.commentThreads.set(comment.id, newThread);
+                
+                // Update placement state
+                this.setPlacementState(comment.id, {
+                    isPlaced: true,
+                    chosenLocation: selected.location,
+                    wasAmbiguous: true
+                });
+                
+                // Update sidebar to show new chosen location
+                this.updateCommentDisplay(comment.id, selected.location);
             }
         }
     }
@@ -402,6 +425,22 @@ export class WalkthroughWebviewProvider implements vscode.WebviewViewProvider {
             vscode.window.showErrorMessage(`Failed to create comment: ${error}`);
             return undefined;
         }
+    }
+
+    /**
+     * Update comment display in sidebar after location selection
+     */
+    private updateCommentDisplay(commentId: string, chosenLocation: any): void {
+        if (!this._view) return;
+        
+        console.log(`[WALKTHROUGH] Updating comment display for ${commentId}:`, chosenLocation);
+        
+        // Send update to webview
+        this._view.webview.postMessage({
+            type: 'updateCommentDisplay',
+            commentId: commentId,
+            chosenLocation: chosenLocation
+        });
     }
 
     // Placement state management methods
@@ -1111,6 +1150,29 @@ export class WalkthroughWebviewProvider implements vscode.WebviewViewProvider {
                         });
                     }
                     
+                    // Function to update comment display after location selection
+                    function updateCommentDisplay(commentId, chosenLocation) {
+                        console.log('[COMMENT] updateCommentDisplay called with:', commentId, chosenLocation);
+                        
+                        // Find the comment item by ID
+                        const commentItems = document.querySelectorAll('.comment-item');
+                        commentItems.forEach(item => {
+                            try {
+                                const commentData = JSON.parse(decodeURIComponent(item.dataset.comment));
+                                if (commentData.id === commentId) {
+                                    // Update the location display
+                                    const locationElement = item.querySelector('.comment-locations .comment-location');
+                                    if (locationElement) {
+                                        locationElement.textContent = chosenLocation.path + ':' + chosenLocation.start.line;
+                                        console.log('[COMMENT] Updated location display for', commentId);
+                                    }
+                                }
+                            } catch (e) {
+                                console.error('[COMMENT] Error parsing comment data:', e);
+                            }
+                        });
+                    }
+                    
                     function renderMarkdown(text) {
                         return text; // Content is already rendered HTML
                     }
@@ -1267,6 +1329,9 @@ export class WalkthroughWebviewProvider implements vscode.WebviewViewProvider {
                         } else if (message.type === 'updateLinkPlacement') {
                             console.log('[PLACEMENT] Updating link placement:', message.dialecticUrl, 'isPlaced:', message.isPlaced);
                             updateLinkPlacement(message.dialecticUrl, message.isPlaced);
+                        } else if (message.type === 'updateCommentDisplay') {
+                            console.log('[COMMENT] Updating comment display:', message.commentId, message.chosenLocation);
+                            updateCommentDisplay(message.commentId, message.chosenLocation);
                         } else {
                             console.log('[IGNORE] Ignoring message type:', message.type);
                         }
