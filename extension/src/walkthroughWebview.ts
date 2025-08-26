@@ -221,13 +221,7 @@ export class WalkthroughWebviewProvider implements vscode.WebviewViewProvider {
         // Check if comment already exists (by ID)
         const existingThread = this.commentThreads.get(comment.id);
         if (existingThread) {
-            if (comment.locations.length === 1) {
-                // Unambiguous - just navigate to existing
-                await this.navigateToThread(existingThread);
-            } else {
-                // Ambiguous - show relocation dialog
-                await this.showRelocationDialog(comment, existingThread);
-            }
+            await this.navigateToThread(existingThread);
             return;
         }
 
@@ -244,6 +238,7 @@ export class WalkthroughWebviewProvider implements vscode.WebviewViewProvider {
         const thread = await this.createCommentThread(selectedLocation.path, selectedLocation, comment);
         if (thread) {
             this.commentThreads.set(comment.id, thread);
+            await this.navigateToThread(thread);
         }
     }
 
@@ -254,7 +249,7 @@ export class WalkthroughWebviewProvider implements vscode.WebviewViewProvider {
         try {
             const document = await vscode.workspace.openTextDocument(thread.uri);
             const editor = await vscode.window.showTextDocument(document);
-            
+
             const range = thread.range;
             if (range) {
                 const position = range.start;
@@ -274,7 +269,7 @@ export class WalkthroughWebviewProvider implements vscode.WebviewViewProvider {
         const currentRange = existingThread.range;
         const currentPath = vscode.workspace.asRelativePath(existingThread.uri);
         const currentLine = currentRange ? currentRange.start.line + 1 : 0;
-        
+
         // Build location options
         const locationItems = comment.locations.map((loc: any) => {
             const isCurrent = loc.path === currentPath && loc.start.line === currentLine;
@@ -356,19 +351,19 @@ export class WalkthroughWebviewProvider implements vscode.WebviewViewProvider {
      */
     private async createCommentThread(filePath: string, location: any, comment: any): Promise<vscode.CommentThread | undefined> {
         console.log(`[WALKTHROUGH COMMENT] Creating comment thread for ${filePath}:${location.start.line}`);
-        
+
         if (!this.baseUri) {
             console.error('[WALKTHROUGH COMMENT] No baseUri set');
             vscode.window.showErrorMessage('Cannot create comment: no base URI set');
             return undefined;
         }
-        
+
         try {
             // Open the file first
             const uri = vscode.Uri.file(path.resolve(this.baseUri.fsPath, filePath));
             const document = await vscode.workspace.openTextDocument(uri);
             await vscode.window.showTextDocument(document);
-            
+
             // Create comment controller if it doesn't exist
             if (!this.commentController) {
                 this.commentController = vscode.comments.createCommentController(
@@ -376,17 +371,17 @@ export class WalkthroughWebviewProvider implements vscode.WebviewViewProvider {
                     'Dialectic Walkthrough Comments'
                 );
             }
-            
+
             // Create range for the comment (convert to 0-based)
             const startLine = Math.max(0, location.start.line - 1);
             const endLine = Math.max(0, (location.end?.line || location.start.line) - 1);
             const range = new vscode.Range(startLine, 0, endLine, Number.MAX_SAFE_INTEGER);
-            
+
             // Create comment thread
             const thread = this.commentController.createCommentThread(uri, range, []);
             thread.label = 'Walkthrough Comment';
             thread.collapsibleState = vscode.CommentThreadCollapsibleState.Expanded; // Make visible immediately
-            
+
             // Add the comment content as the initial comment
             if (comment.comment && comment.comment.length > 0) {
                 const commentBody = new vscode.MarkdownString(comment.comment.join('\n\n'));
@@ -398,10 +393,10 @@ export class WalkthroughWebviewProvider implements vscode.WebviewViewProvider {
                 };
                 thread.comments = [vscodeComment];
             }
-            
+
             console.log(`[WALKTHROUGH COMMENT] Created comment thread at ${filePath}:${startLine + 1}`);
             return thread;
-            
+
         } catch (error) {
             console.error(`[WALKTHROUGH COMMENT] Failed to create comment thread:`, error);
             vscode.window.showErrorMessage(`Failed to create comment: ${error}`);
