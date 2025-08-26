@@ -9,7 +9,7 @@
 - [Installation](./installation.md) <!-- 💡: Step-by-step setup for both VSCode extension and MCP server components -->
 - [Quick start](./quick-start.md) <!-- 💡: Basic workflow example showing AI assistant → review display → navigation cycle -->
 - [Features]() <!-- 💡: Explains how to use each feature -->
-    - [Code walkthroughs and Ask Socratic Shell](./present-review.md) <!-- 💡: Give examples of how to ask the agent to walk through code with you, what happens when you click links, and how you can use Ask Socratic Shell. -->
+    - [Code walkthroughs and Ask Socratic Shell](./walkthroughs.md) <!-- 💡: Give examples of how to ask the agent to walk through code with you, what happens when you click links, and how you can use Ask Socratic Shell. -->
     - [Synthetic Pull Requests](./synthetic-pr.md) <!-- 💡: How to create PR-like reviews from LLM code changes, with AI insight comments (💡❓TODO/FIXME) and familiar review workflows for approving/requesting changes -->
     - [IDE Capabilities](./ide-capabilities.md) <!-- 💡: Natural language interface to VSCode/LSP features, current capabilities, and implementation details -->
     - [Review format](./review-format.md) <!-- 💡: Explains file:line syntax, reference-style links [file:line][], and markdown conventions AI assistants should follow -->
@@ -25,7 +25,6 @@
     - [Codebase structure](./design/codebase-structure.md) <!-- 💡: Overview of project structure, key files, and how components connect for contributors -->
 - [How each feature works]() <!-- 💡: Walk through the flow of particular features -->
     - [Code walkthroughs](./design/code-walkthroughs.md)
-    - [Present Review](./design/present-review.md) <!-- 💡: How AI assistants present code reviews, message flows, and implementation details -->
     - [Synthetic Pull Requests](./design/synthetic-pr.md) <!-- 💡: Git operations with git2, AI comment parsing (💡❓TODO/FIXME), MCP tool implementation, and VSCode CommentController integration for PR-like workflows -->
     - [Ask Socratic Shell](./design/ask-socratic-shell.md) <!-- 💡: How Ask Socratic Shell works, message flows, and implementation details -->
     - [IDE Capabilities](./design/ide-capabilities.md) <!-- 💡: Natural language interface to VSCode/LSP features, current capabilities, and implementation details -->
