@@ -269,6 +269,9 @@ export class WalkthroughWebviewProvider implements vscode.WebviewViewProvider {
                 editor.selection = new vscode.Selection(position, position);
                 editor.revealRange(range);
             }
+            
+            // Ensure comment thread is visible
+            thread.collapsibleState = vscode.CommentThreadCollapsibleState.Expanded;
         } catch (error) {
             console.error('[WALKTHROUGH] Failed to navigate to thread:', error);
         }
