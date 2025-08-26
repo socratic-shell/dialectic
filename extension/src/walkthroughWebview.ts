@@ -722,12 +722,12 @@ export class WalkthroughWebviewProvider implements vscode.WebviewViewProvider {
             
             if (typeof item === 'object' && 'comment' in item) {
                 console.log('[WALKTHROUGH] Found comment item:', item);
-                const comment = (item as any).comment;
-                if (comment.locations && comment.locations.length === 1) {
-                    console.log('[WALKTHROUGH] Auto-placing unambiguous comment:', comment);
-                    await this.placeComment(comment, comment.locations[0]);
+                const commentItem = item as any;
+                if (commentItem.locations && commentItem.locations.length === 1) {
+                    console.log('[WALKTHROUGH] Auto-placing unambiguous comment:', commentItem);
+                    await this.placeComment(commentItem, commentItem.locations[0]);
                 } else {
-                    console.log('[WALKTHROUGH] Comment has', comment.locations?.length || 0, 'locations, skipping auto-placement');
+                    console.log('[WALKTHROUGH] Comment has', commentItem.locations?.length || 0, 'locations, skipping auto-placement');
                 }
             }
         }
