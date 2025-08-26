@@ -53,6 +53,11 @@
         "category": "Dialectic"
       },
       {
+        "command": "dialectic.addWalkthroughComment",
+        "title": "Add Walkthrough Comment",
+        "category": "Dialectic"
+      },
+      {
         "command": "dialectic.toggleComments",
         "title": "Toggle Comments",
         "category": "Dialectic",
@@ -94,6 +99,11 @@
           "command": "dialectic.addComment",
           "group": "inline@1",
           "when": "commentController == dialectic-synthetic-pr"
+        },
+        {
+          "command": "dialectic.addWalkthroughComment",
+          "group": "inline@1",
+          "when": "commentController == dialectic-walkthrough"
         }
       ]
     }

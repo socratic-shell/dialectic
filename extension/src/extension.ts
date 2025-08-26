@@ -867,6 +867,12 @@ export function activate(context: vscode.ExtensionContext) {
         vscode.window.registerWebviewViewProvider(WalkthroughWebviewProvider.viewType, walkthroughProvider)
     );
 
+    // Register walkthrough comment reply command
+    const walkthroughCommentCommand = vscode.commands.registerCommand('dialectic.addWalkthroughComment',
+        (reply: vscode.CommentReply) => walkthroughProvider.handleCommentSubmission(reply)
+    );
+    context.subscriptions.push(walkthroughCommentCommand);
+
     console.log('Webview provider created successfully');
 
     // 💡: Set up daemon client connection for message bus communication

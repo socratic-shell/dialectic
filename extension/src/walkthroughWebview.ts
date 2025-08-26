@@ -396,6 +396,12 @@ export class WalkthroughWebviewProvider implements vscode.WebviewViewProvider {
                     'dialectic-walkthrough',
                     'Dialectic Walkthrough Comments'
                 );
+                
+                // Set options to enable submit button
+                this.commentController.options = {
+                    prompt: 'Ask Socratic Shell...',
+                    placeHolder: 'Type your question or comment here'
+                };
             }
 
             // Create range for the comment (convert to 0-based)
@@ -407,6 +413,7 @@ export class WalkthroughWebviewProvider implements vscode.WebviewViewProvider {
             const thread = this.commentController.createCommentThread(uri, range, []);
             thread.label = 'Walkthrough Comment';
             thread.collapsibleState = vscode.CommentThreadCollapsibleState.Expanded; // Make visible immediately
+            thread.canReply = true; // Enable reply functionality
 
             // Add the comment content as the initial comment
             if (comment.comment && comment.comment.length > 0) {
@@ -762,6 +769,65 @@ export class WalkthroughWebviewProvider implements vscode.WebviewViewProvider {
             this.autoPlaceUnambiguousComments(walkthrough);
         } else {
             console.log('ERROR: No webview available');
+        }
+    }
+
+    /**
+     * Handle comment submission from VSCode (replies to walkthrough comments)
+     */
+    public handleCommentSubmission(reply: vscode.CommentReply): void {
+        const newComment: vscode.Comment = {
+            body: new vscode.MarkdownString(reply.text),
+            mode: vscode.CommentMode.Preview,
+            author: {
+                name: 'User'
+            },
+            timestamp: new Date()
+        };
+
+        reply.thread.comments = [...reply.thread.comments, newComment];
+        
+        // Ensure the thread can accept more replies
+        reply.thread.canReply = true;
+
+        // Send to active AI shell with context
+        this.sendCommentToShell(reply.text, reply.thread);
+    }
+
+    /**
+     * Send comment reply to active AI shell with context
+     */
+    private sendCommentToShell(text: string, thread: vscode.CommentThread): void {
+        try {
+            if (!thread.range) {
+                console.error('[WALKTHROUGH] Comment thread has no range');
+                return;
+            }
+
+            const uri = thread.uri;
+            const lineNumber = thread.range.start.line + 1; // Convert to 1-based
+            const filePath = vscode.workspace.asRelativePath(uri);
+            
+            // Create context XML similar to action buttons
+            const contextXml = `<comment_reply>
+<file>${filePath}</file>
+<line>${lineNumber}</line>
+<user_comment>${text}</user_comment>
+</comment_reply>
+
+`;
+
+            // Send to active shell via daemon client
+            if (this.daemonClient) {
+                this.daemonClient.sendToActiveShell(contextXml);
+                this.outputChannel.appendLine(`Comment reply sent to AI shell: ${text}`);
+            } else {
+                this.outputChannel.appendLine('No daemon client available for comment reply');
+                vscode.window.showWarningMessage('Could not send comment to AI shell');
+            }
+        } catch (error) {
+            console.error('[WALKTHROUGH] Error sending comment to shell:', error);
+            this.outputChannel.appendLine(`Error sending comment: ${error}`);
         }
     }
 
