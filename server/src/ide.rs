@@ -306,6 +306,7 @@ pub enum ResolvedLocation {
 /// The fully normalized struct that we send over IPC.
 #[derive(Serialize, Deserialize, Debug)]
 pub struct ResolvedComment {
+    pub id: String,
     pub locations: Vec<FileRange>,
     pub icon: Option<String>,
     pub comment: Vec<ResolvedWalkthroughElement>,
@@ -354,6 +355,7 @@ impl<U: IpcClient> DialectFunction<U> for Comment {
         }
 
         Ok(ResolvedComment {
+            id: uuid::Uuid::new_v4().to_string(),
             locations,
             icon: self.icon,
             comment: resolved_content,
@@ -873,6 +875,7 @@ Check [foo.rs][], [foo](foo.rs?a b), [bar.rs][].
 
         // 3. Test the full ResolvedComment
         let json = r#"{
+            "id": "test-comment-id",
             "content": ["This should find exactly one location with no icon!"],
             "icon": null,
             "locations": [{
