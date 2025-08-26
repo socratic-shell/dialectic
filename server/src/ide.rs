@@ -308,7 +308,7 @@ pub enum ResolvedLocation {
 pub struct ResolvedComment {
     pub locations: Vec<FileRange>,
     pub icon: Option<String>,
-    pub content: Vec<ResolvedWalkthroughElement>,
+    pub comment: Vec<ResolvedWalkthroughElement>,
 }
 
 impl<U: IpcClient> DialectFunction<U> for Comment {
@@ -356,7 +356,7 @@ impl<U: IpcClient> DialectFunction<U> for Comment {
         Ok(ResolvedComment {
             locations,
             icon: self.icon,
-            content: resolved_content,
+            comment: resolved_content,
         })
     }
 }

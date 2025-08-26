@@ -72,6 +72,7 @@ export class WalkthroughWebviewProvider implements vscode.WebviewViewProvider {
     private diffContentProvider: WalkthroughDiffContentProvider;
     private currentWalkthrough?: WalkthroughData;
     private placementMemory = new Map<string, PlacementState>(); // Unified placement memory
+    private commentController?: vscode.CommentController;
 
     constructor(
         private readonly _extensionUri: vscode.Uri,
@@ -109,11 +110,11 @@ export class WalkthroughWebviewProvider implements vscode.WebviewViewProvider {
             if (href && href.startsWith('dialectic:')) {
                 const linkKey = `link:${href}`;
                 const placementState = this.placementMemory?.get(linkKey);
-                
+
                 token.attrSet('href', 'javascript:void(0)');
                 token.attrSet('data-dialectic-url', href);
                 token.attrSet('class', 'file-ref');
-                
+
                 if (placementState?.isPlaced) {
                     token.attrSet('data-placement-state', 'placed');
                 } else {
@@ -146,12 +147,12 @@ export class WalkthroughWebviewProvider implements vscode.WebviewViewProvider {
                     const linkKey = `link:${href}`;
                     const placementState = this.placementMemory?.get(linkKey);
                     const isPlaced = placementState?.isPlaced || false;
-                    
+
                     // Choose icon: 📍 for placed, 🔍 for unplaced
                     const icon = isPlaced ? '📍' : '🔍';
                     const action = isPlaced ? 'relocate' : 'place';
                     const title = isPlaced ? 'Relocate this link' : 'Place this link';
-                    
+
                     const result = `</a><button class="placement-icon" data-dialectic-url="${href}" data-action="${action}" title="${title}">${icon}</button>`;
                     console.log('[RENDERER] Generated icon HTML:', result);
                     return result;
@@ -216,33 +217,35 @@ export class WalkthroughWebviewProvider implements vscode.WebviewViewProvider {
             return;
         }
 
-        // Check if any files in the comment appear in gitdiff sections
-        const filesInDiff = this.getFilesInCurrentGitDiff();
-
-        for (const location of comment.locations) {
-            const filePath = location.path;
-            const line = location.start.line - 1; // Convert to 0-based
-
-            // Context-aware file opening
-            if (filesInDiff.has(filePath)) {
-                console.log(`[WALKTHROUGH COMMENT] File ${filePath} appears in gitdiff, opening diff view`);
-                await this.showFileDiff(filePath);
-            } else {
-                console.log(`[WALKTHROUGH COMMENT] File ${filePath} not in gitdiff, opening regular file`);
-                const baseUriPath = typeof this.baseUri === 'string' ? this.baseUri : this.baseUri?.fsPath || '';
-                const uri = vscode.Uri.file(path.join(baseUriPath, filePath));
-                const document = await vscode.workspace.openTextDocument(uri);
-                const editor = await vscode.window.showTextDocument(document);
-
-                // Navigate to the specific line
-                const position = new vscode.Position(line, location.start.column || 0);
-                editor.selection = new vscode.Selection(position, position);
-                editor.revealRange(new vscode.Range(position, position));
+        let selectedLocation;
+        
+        if (comment.locations.length === 1) {
+            // Unambiguous - use the single location
+            selectedLocation = comment.locations[0];
+        } else {
+            // Ambiguous - show disambiguation dialog
+            const locationItems = comment.locations.map((loc: any, index: number) => ({
+                label: `${loc.path}:${loc.start.line}`,
+                description: loc.content.substring(0, 80) + (loc.content.length > 80 ? '...' : ''),
+                location: loc
+            }));
+            
+            const selected = await vscode.window.showQuickPick(locationItems, {
+                placeHolder: 'Choose the location for this comment',
+                matchOnDescription: true
+            }) as { label: string; description: string; location: any } | undefined;
+            
+            if (!selected) {
+                return; // User cancelled
             }
-
-            // Create comment thread using simplified CommentController
-            await this.createCommentThread(filePath, location, comment);
+            
+            selectedLocation = selected.location;
         }
+
+        // Create comment thread at the selected location
+        await this.createCommentThread(selectedLocation.path, selectedLocation, comment);
+        
+        // TODO: Update the display to show the precise location and allow relocation
     }
 
     /**
@@ -273,12 +276,58 @@ export class WalkthroughWebviewProvider implements vscode.WebviewViewProvider {
     }
 
     /**
-     * Create comment thread using simplified CommentController
+     * Create comment thread using VSCode CommentController
      */
     private async createCommentThread(filePath: string, location: any, comment: any): Promise<void> {
-        // TODO: Implement simplified CommentController for walkthrough comments
-        // This will create comment threads with reply buttons that trigger "Ask Socratic Shell"
         console.log(`[WALKTHROUGH COMMENT] Creating comment thread for ${filePath}:${location.start.line}`);
+        
+        if (!this.baseUri) {
+            console.error('[WALKTHROUGH COMMENT] No baseUri set');
+            vscode.window.showErrorMessage('Cannot create comment: no base URI set');
+            return;
+        }
+        
+        try {
+            // Open the file first
+            const uri = vscode.Uri.file(path.resolve(this.baseUri.fsPath, filePath));
+            const document = await vscode.workspace.openTextDocument(uri);
+            await vscode.window.showTextDocument(document);
+            
+            // Create comment controller if it doesn't exist
+            if (!this.commentController) {
+                this.commentController = vscode.comments.createCommentController(
+                    'dialectic-walkthrough',
+                    'Dialectic Walkthrough Comments'
+                );
+            }
+            
+            // Create range for the comment (convert to 0-based)
+            const startLine = Math.max(0, location.start.line - 1);
+            const endLine = Math.max(0, (location.end?.line || location.start.line) - 1);
+            const range = new vscode.Range(startLine, 0, endLine, Number.MAX_SAFE_INTEGER);
+            
+            // Create comment thread
+            const thread = this.commentController.createCommentThread(uri, range, []);
+            thread.label = 'Walkthrough Comment';
+            
+            // Add the comment content as the initial comment
+            if (comment.comment && comment.comment.length > 0) {
+                const commentBody = new vscode.MarkdownString(comment.comment.join('\n\n'));
+                const vscodeComment: vscode.Comment = {
+                    body: commentBody,
+                    mode: vscode.CommentMode.Preview,
+                    author: { name: 'Dialectic Walkthrough' },
+                    timestamp: new Date()
+                };
+                thread.comments = [vscodeComment];
+            }
+            
+            console.log(`[WALKTHROUGH COMMENT] Created comment thread at ${filePath}:${startLine + 1}`);
+            
+        } catch (error) {
+            console.error(`[WALKTHROUGH COMMENT] Failed to create comment thread:`, error);
+            vscode.window.showErrorMessage(`Failed to create comment: ${error}`);
+        }
     }
 
     // Placement state management methods
@@ -624,23 +673,23 @@ export class WalkthroughWebviewProvider implements vscode.WebviewViewProvider {
         // Remove the current placement to force re-disambiguation
         const linkKey = `link:${dialecticUrl}`;
         this.placementMemory?.delete(linkKey);
-        
+
         // Open the link again - this will show disambiguation
         await openDialecticUrl(dialecticUrl, this.outputChannel, this.baseUri, this.placementMemory);
-        
+
         // Update UI after relocation
         this.updateLinkPlacementUI(dialecticUrl);
     }
 
     private updateLinkPlacementUI(dialecticUrl: string): void {
         if (!this._view) return;
-        
+
         const linkKey = `link:${dialecticUrl}`;
         const placementState = this.placementMemory?.get(linkKey);
         const isPlaced = placementState?.isPlaced || false;
-        
+
         console.log(`[Walkthrough] Updating UI for ${dialecticUrl}: isPlaced=${isPlaced}, placementState=`, placementState);
-        
+
         // Send update to webview
         this._view.webview.postMessage({
             type: 'updateLinkPlacement',
@@ -958,20 +1007,34 @@ export class WalkthroughWebviewProvider implements vscode.WebviewViewProvider {
                             if (typeof item === 'string') {
                                 // ResolvedMarkdownElement now serialized as plain string
                                 html += '<div class="content-item">' + renderMarkdown(item) + '</div>';
-                            } else if (typeof item === 'object' && 'comment' in item) {
-                                // Comment element - render as clickable item that creates VSCode comments
+                            } else if (typeof item === 'object' && 'locations' in item && 'comment' in item) {
+                                // ResolvedComment object sent directly (not wrapped)
                                 html += '<div class="content-item">';
-                                html += '<div class="comment-item" data-comment="' + encodeURIComponent(JSON.stringify(item.comment)) + '">';
+                                html += '<div class="comment-item" data-comment="' + encodeURIComponent(JSON.stringify(item)) + '">';
                                 html += '<div class="comment-icon">💬</div>';
                                 html += '<div class="comment-content">';
+                                
+                                // Smart location display for ambiguous comments
                                 html += '<div class="comment-locations">';
-                                item.comment.locations.forEach((location, index) => {
-                                    if (index > 0) html += ', ';
-                                    html += '<span class="comment-location">' + location.path + ':' + location.start.line + '</span>';
-                                });
+                                if (item.locations.length === 1) {
+                                    // Unambiguous - show exact location
+                                    const loc = item.locations[0];
+                                    html += '<span class="comment-location">' + loc.path + ':' + loc.start.line + '</span>';
+                                } else {
+                                    // Ambiguous - check if all same file
+                                    const firstFile = item.locations[0].path;
+                                    const allSameFile = item.locations.every(loc => loc.path === firstFile);
+                                    
+                                    if (allSameFile) {
+                                        html += '<span class="comment-location">' + firstFile + ' 🔍</span>';
+                                    } else {
+                                        html += '<span class="comment-location">(' + item.locations.length + ' possible locations) 🔍</span>';
+                                    }
+                                }
                                 html += '</div>';
-                                if (item.comment.content && item.comment.content.length > 0) {
-                                    html += '<div class="comment-text">' + item.comment.content.join(' ') + '</div>';
+                                
+                                if (item.comment && item.comment.length > 0) {
+                                    html += '<div class="comment-text">' + item.comment.join(' ') + '</div>';
                                 }
                                 html += '</div>';
                                 html += '</div>';
@@ -1105,5 +1168,12 @@ export class WalkthroughWebviewProvider implements vscode.WebviewViewProvider {
         this.outputChannel.appendLine(`-----------------------------------------`);
 
         return html;
+    }
+
+    dispose() {
+        if (this.commentController) {
+            this.commentController.dispose();
+            this.commentController = undefined;
+        }
     }
 }
