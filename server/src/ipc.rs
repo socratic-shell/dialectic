@@ -142,7 +142,7 @@ impl IPCCommunicator {
         Ok(())
     }
 
-    pub async fn present_review(&self, params: PresentReviewParams) -> Result<()> {
+    pub async fn (&self, params: PresentReviewParams) -> Result<()> {
         if self.test_mode {
             info!("Present review called (test mode): {:?}", params);
             return Ok(());
@@ -166,8 +166,8 @@ impl IPCCommunicator {
             id: Uuid::new_v4().to_string(),
         };
 
-        debug!("Sending present_review message: {:?}", message);
-        trace!("About to call send_message_with_reply for present_review");
+        debug!("Sending  message: {:?}", message);
+        trace!("About to call send_message_with_reply for ");
 
         let response: () = self.send_message_with_reply(message).await?;
 
@@ -1071,8 +1071,8 @@ mod test {
             base_uri: "/test/project".to_string(),
         };
 
-        // Test present_review in test mode
-        let result = ipc.present_review(params).await;
+        // Test  in test mode
+        let result = ipc.(params).await;
         assert!(result.is_ok());
 
         result.unwrap();
@@ -1095,7 +1095,7 @@ mod test {
     }
 
     #[tokio::test]
-    async fn test_present_review_with_update_section_mode() {
+    async fn test__with_update_section_mode() {
         let _ = tracing_subscriber::fmt::try_init();
 
         let ipc = IPCCommunicator::new_test();
@@ -1107,7 +1107,7 @@ mod test {
             base_uri: "/test/project".to_string(),
         };
 
-        let result = ipc.present_review(params).await;
+        let result = ipc.(params).await;
         assert!(result.is_ok());
 
         result.unwrap();

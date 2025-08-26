@@ -188,21 +188,21 @@ impl DialecticServer {
     ///
     /// This tool allows AI assistants to display structured markdown reviews
     /// with clickable file references in the VSCode extension.
-    // ANCHOR: present_review_tool
+    // ANCHOR: _tool
     #[tool(description = "Display a code review in the VSCode review panel. \
                        Reviews should be structured markdown with clear sections and actionable feedback. \
                        The Dialectic guidance in your context describe link format and overall structure.")]
-    async fn present_review(
+    async fn (
         &self,
         Parameters(params): Parameters<PresentReviewParams>,
     ) -> Result<CallToolResult, McpError> {
-        // ANCHOR_END: present_review_tool
+        // ANCHOR_END: _tool
         // Log the tool call via IPC (also logs locally)
         self.ipc
             .send_log(
                 LogLevel::Debug,
                 format!(
-                    "Received present_review tool call with params: {:?}",
+                    "Received  tool call with params: {:?}",
                     params
                 ),
             )
@@ -227,7 +227,7 @@ impl DialecticServer {
             )
             .await;
 
-        self.ipc.present_review(params).await.map_err(|e| {
+        self.ipc.(params).await.map_err(|e| {
             McpError::internal_error(
                 "IPC communication failed",
                 Some(serde_json::json!({
