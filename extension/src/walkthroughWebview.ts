@@ -775,7 +775,7 @@ export class WalkthroughWebviewProvider implements vscode.WebviewViewProvider {
     /**
      * Handle comment submission from VSCode (replies to walkthrough comments)
      */
-    public handleCommentSubmission(reply: vscode.CommentReply): void {
+    public async handleCommentSubmission(reply: vscode.CommentReply): Promise<void> {
         const newComment: vscode.Comment = {
             body: new vscode.MarkdownString(reply.text),
             mode: vscode.CommentMode.Preview,
@@ -791,13 +791,13 @@ export class WalkthroughWebviewProvider implements vscode.WebviewViewProvider {
         reply.thread.canReply = true;
 
         // Send to active AI shell with context
-        this.sendCommentToShell(reply.text, reply.thread);
+        await this.sendCommentToShell(reply.text, reply.thread);
     }
 
     /**
      * Send comment reply to active AI shell with context
      */
-    private sendCommentToShell(text: string, thread: vscode.CommentThread): void {
+    private async sendCommentToShell(text: string, thread: vscode.CommentThread): Promise<void> {
         try {
             if (!thread.range) {
                 console.error('[WALKTHROUGH] Comment thread has no range');
@@ -817,14 +817,9 @@ export class WalkthroughWebviewProvider implements vscode.WebviewViewProvider {
 
 `;
 
-            // Send to active shell via daemon client
-            if (this.daemonClient) {
-                this.daemonClient.sendToActiveShell(contextXml);
-                this.outputChannel.appendLine(`Comment reply sent to AI shell: ${text}`);
-            } else {
-                this.outputChannel.appendLine('No daemon client available for comment reply');
-                vscode.window.showWarningMessage('Could not send comment to AI shell');
-            }
+            // Use existing sendToActiveShell method
+            await this.sendToActiveShell(contextXml);
+            this.outputChannel.appendLine(`Comment reply sent to AI shell: ${text}`);
         } catch (error) {
             console.error('[WALKTHROUGH] Error sending comment to shell:', error);
             this.outputChannel.appendLine(`Error sending comment: ${error}`);

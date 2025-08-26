@@ -231,12 +231,12 @@ impl<U: IpcClient> DialectFunction<U> for Search {
 /// Generate git diffs for commit ranges, respecting exclude options.
 ///
 /// Examples:
-/// - `{"gitdiff": {"range": "HEAD^.."}}` - Changes in last commit
-/// - `{"gitdiff": {"range": "HEAD~3..HEAD~1"}}` - Changes between specific commits  
-/// - `{"gitdiff": {"range": "HEAD", "exclude_unstaged": true}}` - Only staged changes
+/// - `{"gitdiff": {"commit_range": "HEAD^.."}}` - Changes in last commit
+/// - `{"gitdiff": {"commit_range": "HEAD~3..HEAD~1"}}` - Changes between specific commits  
+/// - `{"gitdiff": {"commit_range": "HEAD", "exclude_unstaged": true}}` - Only staged changes
 #[derive(Deserialize)]
 pub struct GitDiff {
-    pub range: String,
+    pub commit_range: String,
 
     #[expect(dead_code)]
     pub exclude_unstaged: Option<bool>,
@@ -258,7 +258,7 @@ impl<U: IpcClient> DialectFunction<U> for GitDiff {
 
         // Use current directory as repo path (could be made configurable)
         let git_service = GitService::new(".")?;
-        let (base_oid, head_oid) = git_service.parse_commit_range(&self.range)?;
+        let (base_oid, head_oid) = git_service.parse_commit_range(&self.commit_range)?;
         let file_changes = git_service.generate_diff(base_oid, head_oid)?;
 
         // TODO: Apply exclude filters for staged/unstaged changes
