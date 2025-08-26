@@ -35,6 +35,10 @@ The setup tool builds both the Rust MCP server and VSCode extension, then config
 
 This project uses [proto](https://moonrepo.dev/proto) for managing development tools. Individual components include idiomatic tool version files (e.g., `.nvmrc` for Node.js projects) which proto can read automatically. Run `proto install` in any component directory to install the required tools.
 
+## Working Style
+
+* **Auto-commit completed work**: After completing a series of related changes, automatically commit them with a descriptive message. This makes it easier for the user to review progress.
+
 ## Checkpointing
 
 When checkpointing:
