@@ -955,9 +955,9 @@ export class WalkthroughWebviewProvider implements vscode.WebviewViewProvider {
                         html += '<div class="section-title">' + title + '</div>';
                         
                         items.forEach(item => {
-                            if (typeof item === 'object' && 'content' in item) {
-                                // ResolvedMarkdownElement with processed dialectic: URLs
-                                html += '<div class="content-item">' + renderMarkdown(item.content) + '</div>';
+                            if (typeof item === 'string') {
+                                // ResolvedMarkdownElement now serialized as plain string
+                                html += '<div class="content-item">' + renderMarkdown(item) + '</div>';
                             } else if (typeof item === 'object' && 'comment' in item) {
                                 // Comment element - render as clickable item that creates VSCode comments
                                 html += '<div class="content-item">';

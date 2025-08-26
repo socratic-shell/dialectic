@@ -1,7 +1,7 @@
 use std::{future::Future, pin::Pin};
 
-use serde::{Deserialize, Deserializer, Serialize};
 use pulldown_cmark::Event;
+use serde::{Deserialize, Deserializer, Serialize, Serializer};
 
 use crate::dialect::{DialectFunction, DialectInterpreter};
 
@@ -263,7 +263,9 @@ impl<U: IpcClient> DialectFunction<U> for GitDiff {
 
         // TODO: Apply exclude filters for staged/unstaged changes
         // For now, return all changes wrapped in GitDiffElement
-        Ok(GitDiffElement { files: file_changes })
+        Ok(GitDiffElement {
+            files: file_changes,
+        })
     }
 }
 
@@ -298,8 +300,8 @@ pub enum ResolvedLocation {
 }
 
 /// Resolved comment output from the [`Comment`] dialect function.
-/// 
-/// This is the processed result after normalizing different location types 
+///
+/// This is the processed result after normalizing different location types
 /// (FileRange, SymbolDef, SymbolRef) into a consistent Vec<FileRange> format.
 /// The fully normalized struct that we send over IPC.
 #[derive(Serialize, Deserialize, Debug)]
@@ -335,12 +337,18 @@ impl<U: IpcClient> DialectFunction<U> for Comment {
         for content_item in self.content {
             match content_item {
                 serde_json::Value::String(text) => {
-                    resolved_content.push(ResolvedWalkthroughElement::Markdown(ResolvedMarkdownElement { content: text }));
+                    resolved_content.push(ResolvedWalkthroughElement::Markdown(
+                        ResolvedMarkdownElement { markdown: text },
+                    ));
                 }
                 _ => {
                     // For now, convert other types to string and treat as markdown
                     // TODO: Execute Dialect programs here
-                    resolved_content.push(ResolvedWalkthroughElement::Markdown(ResolvedMarkdownElement { content: content_item.to_string() }));
+                    resolved_content.push(ResolvedWalkthroughElement::Markdown(
+                        ResolvedMarkdownElement {
+                            markdown: content_item.to_string(),
+                        },
+                    ));
                 }
             }
         }
@@ -403,13 +411,13 @@ fn process_file(
 pub struct Action {
     /// Button text
     pub button: String,
-    
+
     /// Optional text to send to agent when clicked
     pub tell_agent: Option<String>,
 }
 
 /// Resolved action output from the [`Action`] dialect function.
-/// 
+///
 /// This is the processed result with button text and optional agent instructions.
 #[derive(Serialize, Deserialize, Debug)]
 pub struct ResolvedAction {
@@ -437,8 +445,8 @@ impl<U: IpcClient> DialectFunction<U> for Action {
 /// Resolved walkthrough types for IPC communication with VSCode extension
 
 /// Resolved walkthrough output from the `present_walkthrough` MCP tool.
-/// 
-/// This is the processed result after executing all Dialect programs in the 
+///
+/// This is the processed result after executing all Dialect programs in the
 /// walkthrough sections and converting them to their resolved forms.
 #[derive(Serialize, Debug)]
 pub struct ResolvedWalkthrough {
@@ -450,21 +458,31 @@ pub struct ResolvedWalkthrough {
 }
 
 /// Resolved markdown element from plain string input in walkthrough sections.
-/// 
+///
 /// This represents the processed result when a walkthrough element is a plain string.
 /// Markdown content with processed file references converted to dialectic: URLs.
-/// 
+///
 /// This type has a custom `Deserialize` implementation that automatically processes
 /// markdown during deserialization, converting file references like:
 /// - `[text](src/file.ts?pattern)` → `[text](dialectic:src/file.ts?regex=pattern)`
 /// - `[text](src/file.ts#L42)` → `[text](dialectic:src/file.ts?line=42)`
 /// - `[text](src/file.ts)` → `[text](dialectic:src/file.ts)`
-/// 
+///
 /// This ensures the extension receives properly formatted dialectic: URLs without
 /// needing client-side conversion logic.
-#[derive(Serialize, Debug)]
+#[derive(Debug)]
 pub struct ResolvedMarkdownElement {
-    pub content: String,
+    pub markdown: String,
+}
+
+impl Serialize for ResolvedMarkdownElement {
+    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: Serializer,
+    {
+        // Serialize as just the string content, not as an object
+        self.markdown.serialize(serializer)
+    }
 }
 
 impl<'de> Deserialize<'de> for ResolvedMarkdownElement {
@@ -475,23 +493,23 @@ impl<'de> Deserialize<'de> for ResolvedMarkdownElement {
         let raw_markdown = String::deserialize(deserializer)?;
         let processed_content = process_markdown_links(raw_markdown);
         Ok(ResolvedMarkdownElement {
-            content: processed_content,
+            markdown: processed_content,
         })
     }
 }
 
 pub fn process_markdown_links(markdown: String) -> String {
-    use pulldown_cmark::{Parser, Event, Tag};
-    
+    use pulldown_cmark::{Event, Parser, Tag};
+
     let parser = Parser::new(&markdown);
     let mut events: Vec<Event> = parser.collect();
-    
+
     // Pass 1: Coalesce adjacent Text events first
     events = coalesce_text_events(events);
-    
+
     // Pass 2: Process malformed links in Text events
     events = process_malformed_links_in_events(events);
-    
+
     // Pass 3: Convert well-formed Link events (but skip ones already processed)
     for event in &mut events {
         if let Event::Start(Tag::Link { dest_url, .. }) = event {
@@ -502,7 +520,7 @@ pub fn process_markdown_links(markdown: String) -> String {
             }
         }
     }
-    
+
     // Convert events back to markdown
     let mut output = String::new();
     pulldown_cmark_to_cmark::cmark(events.into_iter(), &mut output).unwrap();
@@ -511,10 +529,10 @@ pub fn process_markdown_links(markdown: String) -> String {
 
 fn coalesce_text_events(events: Vec<Event>) -> Vec<Event> {
     use pulldown_cmark::Event;
-    
+
     let mut result = Vec::new();
     let mut accumulated_text = String::new();
-    
+
     for event in events {
         match event {
             Event::Text(text) => {
@@ -529,20 +547,20 @@ fn coalesce_text_events(events: Vec<Event>) -> Vec<Event> {
             }
         }
     }
-    
+
     // Don't forget any remaining text
     if !accumulated_text.is_empty() {
         result.push(Event::Text(accumulated_text.into()));
     }
-    
+
     result
 }
 
 fn process_malformed_links_in_events(events: Vec<Event>) -> Vec<Event> {
     use pulldown_cmark::Event;
-    
+
     let mut result = Vec::new();
-    
+
     for event in events {
         match event {
             Event::Text(text) => {
@@ -553,57 +571,62 @@ fn process_malformed_links_in_events(events: Vec<Event>) -> Vec<Event> {
             }
         }
     }
-    
+
     result
 }
 
 fn process_malformed_links_in_text(text: &str, events: &mut Vec<Event>) {
-    use pulldown_cmark::{Event, Tag, TagEnd, LinkType};
-    
+    use pulldown_cmark::{Event, LinkType, Tag, TagEnd};
+
     // Combined regex with named captures
     let combined_regex = regex::Regex::new(
         r"(?P<malformed>\[(?P<malformed_text>[^\]]+)\]\((?P<malformed_url>[^)]*[ \{\[\(][^)]*)\))|(?P<reference>\[(?P<reference_text>[^\]]+)\]\[\])"
     ).unwrap();
-    
+
     process_regex_matches(text, &combined_regex, events, |caps, events| {
         if caps.name("malformed").is_some() {
             // Malformed link: [text](url with spaces)
             let link_text = caps.name("malformed_text").unwrap().as_str().to_string();
             let url = caps.name("malformed_url").unwrap().as_str().to_string();
-            
+
             // Generate proper link events
-            events.push(Event::Start(Tag::Link { 
-                link_type: LinkType::Inline, 
-                dest_url: url.into(), 
-                title: "".into(), 
-                id: "".into() 
+            events.push(Event::Start(Tag::Link {
+                link_type: LinkType::Inline,
+                dest_url: url.into(),
+                title: "".into(),
+                id: "".into(),
             }));
             events.push(Event::Text(link_text.into()));
             events.push(Event::End(TagEnd::Link));
-            
         } else if caps.name("reference").is_some() {
             // Reference link: [text][]
             let link_text = caps.name("reference_text").unwrap().as_str().to_string();
-            
+
             // Determine URL based on pattern
-            let url = if let Some(line_caps) = regex::Regex::new(r"^([^:]+\.[a-z]+):(\d+)$").unwrap().captures(&link_text) {
+            let url = if let Some(line_caps) = regex::Regex::new(r"^([^:]+\.[a-z]+):(\d+)$")
+                .unwrap()
+                .captures(&link_text)
+            {
                 let filename = &line_caps[1];
                 let line_num = &line_caps[2];
                 format!("dialectic:{}#L{}", filename, line_num)
-            } else if regex::Regex::new(r"^[^:]+\.[a-z]+$").unwrap().is_match(&link_text) {
+            } else if regex::Regex::new(r"^[^:]+\.[a-z]+$")
+                .unwrap()
+                .is_match(&link_text)
+            {
                 format!("dialectic:{}", link_text)
             } else {
                 // For other reference links, leave as-is for now
                 events.push(Event::Text(format!("[{}][]", link_text).into()));
                 return;
             };
-            
+
             // Generate proper link events
-            events.push(Event::Start(Tag::Link { 
-                link_type: LinkType::Inline, 
-                dest_url: url.into(), 
-                title: "".into(), 
-                id: "".into() 
+            events.push(Event::Start(Tag::Link {
+                link_type: LinkType::Inline,
+                dest_url: url.into(),
+                title: "".into(),
+                id: "".into(),
             }));
             events.push(Event::Text(link_text.into()));
             events.push(Event::End(TagEnd::Link));
@@ -620,20 +643,20 @@ fn process_regex_matches<F>(
     F: FnMut(&regex::Captures, &mut Vec<Event>),
 {
     let mut last_end = 0;
-    
+
     for m in regex.find_iter(text) {
         // Add text before the match
         if m.start() > last_end {
             events.push(Event::Text(text[last_end..m.start()].to_string().into()));
         }
-        
+
         if let Some(caps) = regex.captures(&text[m.start()..m.end()]) {
             handle_match(&caps, events);
         }
-        
+
         last_end = m.end();
     }
-    
+
     // Add any remaining text
     if last_end < text.len() {
         events.push(Event::Text(text[last_end..].to_string().into()));
@@ -642,34 +665,44 @@ fn process_regex_matches<F>(
 
 fn convert_url_to_dialectic(url: &str) -> String {
     // Handle path?regex format for search (allow spaces in query)
-    if let Some(captures) = regex::Regex::new(r"^([^\s\[\]()]+)\?(.+)$").unwrap().captures(url) {
+    if let Some(captures) = regex::Regex::new(r"^([^\s\[\]()]+)\?(.+)$")
+        .unwrap()
+        .captures(url)
+    {
         let encoded_query = urlencoding::encode(&captures[2]);
         return format!("dialectic:{}?regex={}", &captures[1], encoded_query);
     }
-    
+
     // Handle path#L42-L50 format for line ranges
-    if let Some(captures) = regex::Regex::new(r"^([^\s\[\]()]+)#L(\d+)-L(\d+)$").unwrap().captures(url) {
-        return format!("dialectic:{}?line={}-{}", &captures[1], &captures[2], &captures[3]);
+    if let Some(captures) = regex::Regex::new(r"^([^\s\[\]()]+)#L(\d+)-L(\d+)$")
+        .unwrap()
+        .captures(url)
+    {
+        return format!(
+            "dialectic:{}?line={}-{}",
+            &captures[1], &captures[2], &captures[3]
+        );
     }
-    
+
     // Handle path#L42 format for single lines
-    if let Some(captures) = regex::Regex::new(r"^([^\s\[\]()]+)#L(\d+)$").unwrap().captures(url) {
+    if let Some(captures) = regex::Regex::new(r"^([^\s\[\]()]+)#L(\d+)$")
+        .unwrap()
+        .captures(url)
+    {
         return format!("dialectic:{}?line={}", &captures[1], &captures[2]);
     }
-    
+
     // Handle bare filenames (including those with spaces or special chars)
     if !url.contains("://") && !url.starts_with("dialectic:") {
         return format!("dialectic:{}", url);
     }
-    
+
     // Return unchanged if no patterns match
     url.to_string()
 }
 
-
-
 /// Resolved git diff output from the [`GitDiff`] dialect function.
-/// 
+///
 /// This is the processed result containing file changes from a git commit range,
 /// with each file's additions, deletions, and diff hunks.
 #[derive(Serialize, Deserialize, Debug)]
@@ -678,12 +711,12 @@ pub struct GitDiffElement {
 }
 
 /// Resolved walkthrough element output from various dialect functions.
-/// 
+///
 /// This enum represents the processed results from executing Dialect programs
 /// in walkthrough sections. Each variant corresponds to a different type of
 /// input that can be resolved:
 /// - Plain strings → [`ResolvedMarkdownElement`]
-/// - [`Comment`] dialect function → [`ResolvedComment`] 
+/// - [`Comment`] dialect function → [`ResolvedComment`]
 /// - [`GitDiff`] dialect function → [`GitDiffElement`]
 /// - [`Action`] dialect function → [`ResolvedAction`]
 #[derive(Serialize, Deserialize, Debug)]
@@ -701,22 +734,22 @@ pub enum ResolvedWalkthroughElement {
 #[cfg(test)]
 mod url_conversion_tests {
     use super::*;
-    use pulldown_cmark::{Parser, Event, Tag};
-    use expect_test::{expect, Expect};
+    use expect_test::{Expect, expect};
+    use pulldown_cmark::{Event, Parser, Tag};
 
     fn check_extracted_urls(input: &str, expected: Expect) {
         let processed = process_markdown_links(input.to_string());
-        
+
         // Extract URLs using pulldown-cmark parser
         let parser = Parser::new(&processed);
         let mut urls = Vec::new();
-        
+
         for event in parser {
             if let Event::Start(Tag::Link { dest_url, .. }) = event {
                 urls.push(dest_url.to_string());
             }
         }
-        
+
         expected.assert_debug_eq(&urls);
     }
 
@@ -727,8 +760,10 @@ Check out [this function](src/auth.ts?validateToken) and
 [this line](src/auth.ts#L42) or [this range](src/auth.ts#L42-L50).
 Also see [the whole file](src/auth.ts) and [this function with spaces](src/auth.rs?fn foo).
 "#;
-        
-        check_extracted_urls(markdown, expect![[r#"
+
+        check_extracted_urls(
+            markdown,
+            expect![[r#"
             [
                 "dialectic:src/auth.ts?regex=validateToken",
                 "dialectic:src/auth.ts?line=42",
@@ -736,7 +771,8 @@ Also see [the whole file](src/auth.ts) and [this function with spaces](src/auth.
                 "dialectic:src/auth.ts",
                 "dialectic:src/auth.rs?regex=fn%20foo",
             ]
-        "#]]);
+        "#]],
+        );
     }
 
     #[test]
@@ -752,12 +788,15 @@ But this should be ignored:
 
 And this inline code too: `[another fake](src/inline.ts)`
 "#;
-        
-        check_extracted_urls(markdown, expect![[r#"
+
+        check_extracted_urls(
+            markdown,
+            expect![[r#"
             [
                 "dialectic:src/real.ts?regex=pattern",
             ]
-        "#]]);
+        "#]],
+        );
     }
 
     #[test]
@@ -766,15 +805,18 @@ And this inline code too: `[another fake](src/inline.ts)`
 Check [file with spaces](src/auth.rs?fn foo) and [file with bracket](src/auth.rs?fn{bar).
 Also [main.rs][] and [utils.ts:42][].
 "#;
-        
-        check_extracted_urls(markdown, expect![[r#"
+
+        check_extracted_urls(
+            markdown,
+            expect![[r#"
             [
                 "dialectic:src/auth.rs?regex=fn%20foo",
                 "dialectic:src/auth.rs?regex=fn%7Bbar",
                 "dialectic:main.rs",
                 "dialectic:utils.ts#L42",
             ]
-        "#]]);
+        "#]],
+        );
     }
 
     #[test]
@@ -782,13 +824,79 @@ Also [main.rs][] and [utils.ts:42][].
         let markdown = r#"
 Check [foo.rs][], [foo](foo.rs?a b), [bar.rs][].
 "#;
-        
-        check_extracted_urls(markdown, expect![[r#"
+
+        check_extracted_urls(
+            markdown,
+            expect![[r#"
             [
                 "dialectic:foo.rs",
                 "dialectic:foo.rs?regex=a%20b",
                 "dialectic:bar.rs",
             ]
-        "#]]);
+        "#]],
+        );
+    }
+
+    #[test]
+    fn test_resolved_comment_deserialization() {
+        // Test each part separately
+
+        // 1. Test the content array element
+        let content_json = r#""This should find exactly one location with no icon!""#;
+        let content_result: Result<ResolvedWalkthroughElement, _> =
+            serde_json::from_str(content_json);
+        match content_result {
+            Ok(_) => println!("✅ Content element deserialized successfully"),
+            Err(e) => println!("❌ Content element failed: {}", e),
+        }
+
+        // 1b. Test the content array element
+        let content_json = r#""This should find exactly one location with no icon!""#;
+        let content_result: Result<ResolvedMarkdownElement, _> = serde_json::from_str(content_json);
+        match content_result {
+            Ok(_) => println!("✅ Markdown element deserialized successfully"),
+            Err(e) => println!("❌ Markdown element failed: {}", e),
+        }
+
+        // 2. Test the location object
+        let location_json = r#"{
+            "content": "ResolvedLocation::FileRange(range) => vec![range],",
+            "end": {"column": 63, "line": 325},
+            "path": "server/src/ide.rs",
+            "start": {"column": 13, "line": 325}
+        }"#;
+        let location_result: Result<FileRange, _> = serde_json::from_str(location_json);
+        match location_result {
+            Ok(_) => println!("✅ Location deserialized successfully"),
+            Err(e) => println!("❌ Location failed: {}", e),
+        }
+
+        // 3. Test the full ResolvedComment
+        let json = r#"{
+            "content": ["This should find exactly one location with no icon!"],
+            "icon": null,
+            "locations": [{
+                "content": "ResolvedLocation::FileRange(range) => vec![range],",
+                "end": {"column": 63, "line": 325},
+                "path": "server/src/ide.rs",
+                "start": {"column": 13, "line": 325}
+            }]
+        }"#;
+
+        let comment_result: Result<ResolvedComment, _> = serde_json::from_str(json);
+        match comment_result {
+            Ok(comment) => println!(
+                "✅ ResolvedComment deserialized with {} locations",
+                comment.locations.len()
+            ),
+            Err(e) => println!("❌ ResolvedComment failed: {}", e),
+        }
+
+        // 4. Test as ResolvedWalkthroughElement
+        let result: Result<ResolvedWalkthroughElement, _> = serde_json::from_str(json);
+        match result {
+            Ok(_) => println!("✅ ResolvedWalkthroughElement deserialized successfully"),
+            Err(e) => println!("❌ ResolvedWalkthroughElement failed: {}", e),
+        }
     }
 }

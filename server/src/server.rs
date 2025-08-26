@@ -17,7 +17,9 @@ use tracing::info;
 
 use crate::dialect::DialectInterpreter;
 use crate::ipc::IPCCommunicator;
-use crate::synthetic_pr::{CompletionAction, RequestReviewParams, UpdateReviewParams, UserFeedback};
+use crate::synthetic_pr::{
+    CompletionAction, RequestReviewParams, UpdateReviewParams, UserFeedback,
+};
 use crate::types::{LogLevel, PresentReviewParams, PresentWalkthroughParams};
 use serde::{Deserialize, Serialize};
 
@@ -116,11 +118,7 @@ impl DialecticServer {
                     - action: AddComment\n\
                     - comment: {{ response: 'Your response text here' }}\n\n\
                     After responding, invoke update_review again with action: WaitForFeedback to continue the conversation.",
-                    file_path,
-                    line_number,
-                    comment_text,
-                    context,
-                    &feedback.review_id
+                    file_path, line_number, comment_text, context, &feedback.review_id
                 )
             }
             crate::synthetic_pr::FeedbackData::CompleteReview {
@@ -141,15 +139,13 @@ impl DialecticServer {
                         Based on the review discussion, please implement the requested changes. \
                         You may now edit files as needed.\n\n\
                         When finished, invoke: update_review(review_id: '{}', action: Approve)",
-                        notes_section,
-                        &feedback.review_id
+                        notes_section, &feedback.review_id
                     ),
                     CompletionAction::Checkpoint => format!(
                         "User completed their review and selected: 'Request agent to checkpoint this work'{}\n\
                         Please commit the current changes and document the work completed.\n\n\
                         When finished, invoke: update_review(review_id: '{}', action: Approve)",
-                        notes_section,
-                        &feedback.review_id
+                        notes_section, &feedback.review_id
                     ),
                     CompletionAction::Return => format!(
                         "User completed their review and selected: 'Return to agent without explicit request'{}\n\
@@ -278,19 +274,29 @@ impl DialecticServer {
 
         // Execute Dialect programs to resolve locations and render walkthrough
         let resolved = crate::ide::ResolvedWalkthrough {
-            introduction: self.process_walkthrough_elements(params.introduction.as_ref()).await?,
-            highlights: self.process_walkthrough_elements(params.highlights.as_ref()).await?,
-            changes: self.process_walkthrough_elements(params.changes.as_ref()).await?,
-            actions: self.process_walkthrough_elements(params.actions.as_ref()).await?,
+            introduction: self
+                .process_walkthrough_elements(params.introduction.as_ref())
+                .await?,
+            highlights: self
+                .process_walkthrough_elements(params.highlights.as_ref())
+                .await?,
+            changes: self
+                .process_walkthrough_elements(params.changes.as_ref())
+                .await?,
+            actions: self
+                .process_walkthrough_elements(params.actions.as_ref())
+                .await?,
             base_uri: params.base_uri.clone(),
         };
-        
+
         // Send resolved walkthrough to VSCode extension
-        self.ipc
-            .present_walkthrough(resolved)
-            .await
-            .map_err(|e| McpError::internal_error("Failed to present walkthrough", Some(serde_json::json!({"error": e.to_string()}))))?;
-        
+        self.ipc.present_walkthrough(resolved).await.map_err(|e| {
+            McpError::internal_error(
+                "Failed to present walkthrough",
+                Some(serde_json::json!({"error": e.to_string()})),
+            )
+        })?;
+
         // Log success
         self.ipc
             .send_log(
@@ -313,7 +319,8 @@ impl DialecticServer {
             Some(elements) => {
                 let mut resolved_elements = Vec::new();
                 for element in elements {
-                    resolved_elements.push(self.process_walkthrough_element(element.clone()).await?);
+                    resolved_elements
+                        .push(self.process_walkthrough_element(element.clone()).await?);
                 }
                 Ok(Some(resolved_elements))
             }
@@ -327,32 +334,56 @@ impl DialecticServer {
         element: serde_json::Value,
     ) -> Result<crate::ide::ResolvedWalkthroughElement, McpError> {
         use crate::ide::ResolvedWalkthroughElement;
-        
+
         match element {
             serde_json::Value::String(text) => {
                 // Process dialectic links manually since we're not going through deserializer
                 let processed_content = crate::ide::process_markdown_links(text);
-                Ok(ResolvedWalkthroughElement::Markdown(crate::ide::ResolvedMarkdownElement { content: processed_content }))
+                Ok(ResolvedWalkthroughElement::Markdown(
+                    crate::ide::ResolvedMarkdownElement {
+                        markdown: processed_content,
+                    },
+                ))
             }
             serde_json::Value::Object(_) => {
                 // Clone interpreter and execute Dialect program (same pattern as ide_operation)
                 let mut interpreter = self.interpreter.clone();
-                
+
                 let result = tokio::task::spawn_blocking(move || {
                     tokio::runtime::Handle::current()
                         .block_on(async move { interpreter.evaluate(element).await })
                 })
                 .await
-                .map_err(|e| McpError::internal_error("Task execution failed", Some(serde_json::json!({"error": e.to_string()}))))?
-                .map_err(|e| McpError::internal_error("Dialect execution failed", Some(serde_json::json!({"error": e.to_string()}))))?;
-                
+                .map_err(|e| {
+                    McpError::internal_error(
+                        "Task execution failed",
+                        Some(serde_json::json!({"error": e.to_string()})),
+                    )
+                })?
+                .map_err(|e| {
+                    McpError::internal_error(
+                        "Dialect execution failed",
+                        Some(serde_json::json!({"error": e.to_string()})),
+                    )
+                })?;
+
                 // Deserialize directly using serde(untagged)
-                serde_json::from_value(result)
-                    .map_err(|e| McpError::internal_error("Failed to deserialize result", Some(serde_json::json!({"error": e.to_string()}))))
+                serde_json::from_value(result.clone()).map_err(|e| {
+                    McpError::internal_error(
+                        format!(
+                            "Failed to deserialize as type `ResolvedWalkthroughElement`: {result}"
+                        ),
+                        Some(serde_json::json!({"error": e.to_string()})),
+                    )
+                })
             }
             _ => {
                 // Convert other types to markdown
-                Ok(ResolvedWalkthroughElement::Markdown(crate::ide::ResolvedMarkdownElement { content: element.to_string() }))
+                Ok(ResolvedWalkthroughElement::Markdown(
+                    crate::ide::ResolvedMarkdownElement {
+                        markdown: element.to_string(),
+                    },
+                ))
             }
         }
     }
