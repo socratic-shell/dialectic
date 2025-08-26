@@ -338,7 +338,7 @@ export class WalkthroughWebviewProvider implements vscode.WebviewViewProvider {
      * Create a new ambiguous comment at the selected location
      */
     private async createAmbiguousComment(commentHash: string, comment: any, location: any): Promise<void> {
-        const thread = await this.createCommentThreadOnly(location.path, location, comment);
+        const thread = await this.createCommentThread(location.path, location, comment);
         if (thread) {
             this.ambiguousComments.set(commentHash, { thread, location });
         }
@@ -355,7 +355,7 @@ export class WalkthroughWebviewProvider implements vscode.WebviewViewProvider {
         existing.thread.dispose();
         
         // Create new thread at new location
-        const newThread = await this.createCommentThreadOnly(newLocation.path, newLocation, comment);
+        const newThread = await this.createCommentThread(newLocation.path, newLocation, comment);
         if (newThread) {
             this.ambiguousComments.set(commentHash, { thread: newThread, location: newLocation });
         }
@@ -389,9 +389,9 @@ export class WalkthroughWebviewProvider implements vscode.WebviewViewProvider {
     }
 
     /**
-     * Create comment thread and return it (for ambiguous comment tracking)
+     * Create comment thread using VSCode CommentController
      */
-    private async createCommentThreadOnly(filePath: string, location: any, comment: any): Promise<vscode.CommentThread | undefined> {
+    private async createCommentThread(filePath: string, location: any, comment: any): Promise<vscode.CommentThread | undefined> {
         console.log(`[WALKTHROUGH COMMENT] Creating comment thread for ${filePath}:${location.start.line}`);
         
         if (!this.baseUri) {
@@ -443,66 +443,6 @@ export class WalkthroughWebviewProvider implements vscode.WebviewViewProvider {
             console.error(`[WALKTHROUGH COMMENT] Failed to create comment thread:`, error);
             vscode.window.showErrorMessage(`Failed to create comment: ${error}`);
             return undefined;
-        }
-    }
-
-    /**
-     * Create comment thread using VSCode CommentController
-     */
-    private async createCommentThread(filePath: string, location: any, comment: any): Promise<void> {
-        console.log(`[WALKTHROUGH COMMENT] Creating comment thread for ${filePath}:${location.start.line}`);
-        
-        if (!this.baseUri) {
-            console.error('[WALKTHROUGH COMMENT] No baseUri set');
-            vscode.window.showErrorMessage('Cannot create comment: no base URI set');
-            return;
-        }
-        
-        try {
-            // Open the file first
-            const uri = vscode.Uri.file(path.resolve(this.baseUri.fsPath, filePath));
-            const document = await vscode.workspace.openTextDocument(uri);
-            await vscode.window.showTextDocument(document);
-            
-            // Create comment controller if it doesn't exist
-            if (!this.commentController) {
-                this.commentController = vscode.comments.createCommentController(
-                    'dialectic-walkthrough',
-                    'Dialectic Walkthrough Comments'
-                );
-            }
-            
-            // Create range for the comment (convert to 0-based)
-            const startLine = Math.max(0, location.start.line - 1);
-            const endLine = Math.max(0, (location.end?.line || location.start.line) - 1);
-            const range = new vscode.Range(startLine, 0, endLine, Number.MAX_SAFE_INTEGER);
-            
-            // Create comment thread
-            const thread = this.commentController.createCommentThread(uri, range, []);
-            thread.label = 'Walkthrough Comment';
-            thread.collapsibleState = vscode.CommentThreadCollapsibleState.Expanded; // Make visible immediately
-            
-            // Add the comment content as the initial comment
-            if (comment.comment && comment.comment.length > 0) {
-                const commentBody = new vscode.MarkdownString(comment.comment.join('\n\n'));
-                const vscodeComment: vscode.Comment = {
-                    body: commentBody,
-                    mode: vscode.CommentMode.Preview,
-                    author: { name: 'Dialectic Walkthrough' },
-                    timestamp: new Date()
-                };
-                thread.comments = [vscodeComment];
-            }
-            
-            // Track the thread
-            const locationKey = `${filePath}:${location.start.line}`;
-            this.commentThreads.set(locationKey, thread);
-            
-            console.log(`[WALKTHROUGH COMMENT] Created comment thread at ${filePath}:${startLine + 1}`);
-            
-        } catch (error) {
-            console.error(`[WALKTHROUGH COMMENT] Failed to create comment thread:`, error);
-            vscode.window.showErrorMessage(`Failed to create comment: ${error}`);
         }
     }
 
