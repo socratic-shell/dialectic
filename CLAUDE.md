@@ -38,6 +38,7 @@ This project uses [proto](https://moonrepo.dev/proto) for managing development t
 ## Working Style
 
 * **Auto-commit completed work**: After completing a series of related changes, automatically commit them with a descriptive message. This makes it easier for the user to review progress.
+* **Co-authorship**: Include "Co-authored-by: Claude <claude@anthropic.com>" in commit messages to indicate AI collaboration.
 
 ## Checkpointing
 
