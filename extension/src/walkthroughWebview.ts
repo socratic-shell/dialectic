@@ -74,6 +74,7 @@ export class WalkthroughWebviewProvider implements vscode.WebviewViewProvider {
     private placementMemory = new Map<string, PlacementState>(); // Unified placement memory
     private commentController?: vscode.CommentController;
     private commentThreads = new Map<string, vscode.CommentThread>(); // Track comment threads by location key
+    private ambiguousComments = new Map<string, {thread: vscode.CommentThread, location: any}>(); // Track ambiguous comments by comment hash
 
     constructor(
         private readonly _extensionUri: vscode.Uri,
@@ -260,9 +261,62 @@ export class WalkthroughWebviewProvider implements vscode.WebviewViewProvider {
         if (comment.locations.length === 1) {
             // Unambiguous - use the single location
             selectedLocation = comment.locations[0];
+            await this.placeComment(comment, selectedLocation);
         } else {
-            // Ambiguous - show disambiguation dialog
-            const locationItems = comment.locations.map((loc: any, index: number) => ({
+            // Ambiguous - handle specially
+            await this.handleAmbiguousComment(comment);
+        }
+    }
+
+    /**
+     * Handle ambiguous comments with relocation support
+     */
+    private async handleAmbiguousComment(comment: any): Promise<void> {
+        const commentHash = JSON.stringify(comment.comment); // Use comment content as hash
+        
+        // Check if this ambiguous comment already exists
+        const existing = this.ambiguousComments.get(commentHash);
+        if (existing) {
+            console.log('[WALKTHROUGH] Ambiguous comment exists, showing relocation dialog');
+            
+            // Show dialog with current location + other options
+            const currentLocation = existing.location;
+            const otherLocations = comment.locations.filter((loc: any) => 
+                !(loc.path === currentLocation.path && loc.start.line === currentLocation.start.line)
+            );
+            
+            const locationItems = [
+                {
+                    label: `${currentLocation.path}:${currentLocation.start.line} (current)`,
+                    description: currentLocation.content.substring(0, 80) + (currentLocation.content.length > 80 ? '...' : ''),
+                    location: currentLocation,
+                    isCurrent: true
+                },
+                ...otherLocations.map((loc: any) => ({
+                    label: `${loc.path}:${loc.start.line}`,
+                    description: loc.content.substring(0, 80) + (loc.content.length > 80 ? '...' : ''),
+                    location: loc,
+                    isCurrent: false
+                }))
+            ];
+            
+            const selected = await vscode.window.showQuickPick(locationItems, {
+                placeHolder: 'Choose location for this comment (current location marked)',
+                matchOnDescription: true
+            }) as { label: string; description: string; location: any; isCurrent: boolean } | undefined;
+            
+            if (!selected) return; // User cancelled
+            
+            if (selected.isCurrent) {
+                // Navigate to existing comment
+                await this.navigateToExistingComment(currentLocation.path, currentLocation);
+            } else {
+                // Relocate comment to new location
+                await this.relocateAmbiguousComment(commentHash, comment, selected.location);
+            }
+        } else {
+            // First time - show all locations
+            const locationItems = comment.locations.map((loc: any) => ({
                 label: `${loc.path}:${loc.start.line}`,
                 description: loc.content.substring(0, 80) + (loc.content.length > 80 ? '...' : ''),
                 location: loc
@@ -273,15 +327,38 @@ export class WalkthroughWebviewProvider implements vscode.WebviewViewProvider {
                 matchOnDescription: true
             }) as { label: string; description: string; location: any } | undefined;
             
-            if (!selected) {
-                return; // User cancelled
-            }
+            if (!selected) return; // User cancelled
             
-            selectedLocation = selected.location;
+            // Create new ambiguous comment
+            await this.createAmbiguousComment(commentHash, comment, selected.location);
         }
+    }
 
-        // Use placeComment to handle duplicates
-        await this.placeComment(comment, selectedLocation);
+    /**
+     * Create a new ambiguous comment at the selected location
+     */
+    private async createAmbiguousComment(commentHash: string, comment: any, location: any): Promise<void> {
+        const thread = await this.createCommentThreadOnly(location.path, location, comment);
+        if (thread) {
+            this.ambiguousComments.set(commentHash, { thread, location });
+        }
+    }
+
+    /**
+     * Relocate an existing ambiguous comment to a new location
+     */
+    private async relocateAmbiguousComment(commentHash: string, comment: any, newLocation: any): Promise<void> {
+        const existing = this.ambiguousComments.get(commentHash);
+        if (!existing) return;
+        
+        // Dispose old thread
+        existing.thread.dispose();
+        
+        // Create new thread at new location
+        const newThread = await this.createCommentThreadOnly(newLocation.path, newLocation, comment);
+        if (newThread) {
+            this.ambiguousComments.set(commentHash, { thread: newThread, location: newLocation });
+        }
     }
 
     /**
@@ -309,6 +386,64 @@ export class WalkthroughWebviewProvider implements vscode.WebviewViewProvider {
         }
 
         return filesInDiff;
+    }
+
+    /**
+     * Create comment thread and return it (for ambiguous comment tracking)
+     */
+    private async createCommentThreadOnly(filePath: string, location: any, comment: any): Promise<vscode.CommentThread | undefined> {
+        console.log(`[WALKTHROUGH COMMENT] Creating comment thread for ${filePath}:${location.start.line}`);
+        
+        if (!this.baseUri) {
+            console.error('[WALKTHROUGH COMMENT] No baseUri set');
+            vscode.window.showErrorMessage('Cannot create comment: no base URI set');
+            return undefined;
+        }
+        
+        try {
+            // Open the file first
+            const uri = vscode.Uri.file(path.resolve(this.baseUri.fsPath, filePath));
+            const document = await vscode.workspace.openTextDocument(uri);
+            await vscode.window.showTextDocument(document);
+            
+            // Create comment controller if it doesn't exist
+            if (!this.commentController) {
+                this.commentController = vscode.comments.createCommentController(
+                    'dialectic-walkthrough',
+                    'Dialectic Walkthrough Comments'
+                );
+            }
+            
+            // Create range for the comment (convert to 0-based)
+            const startLine = Math.max(0, location.start.line - 1);
+            const endLine = Math.max(0, (location.end?.line || location.start.line) - 1);
+            const range = new vscode.Range(startLine, 0, endLine, Number.MAX_SAFE_INTEGER);
+            
+            // Create comment thread
+            const thread = this.commentController.createCommentThread(uri, range, []);
+            thread.label = 'Walkthrough Comment';
+            thread.collapsibleState = vscode.CommentThreadCollapsibleState.Expanded; // Make visible immediately
+            
+            // Add the comment content as the initial comment
+            if (comment.comment && comment.comment.length > 0) {
+                const commentBody = new vscode.MarkdownString(comment.comment.join('\n\n'));
+                const vscodeComment: vscode.Comment = {
+                    body: commentBody,
+                    mode: vscode.CommentMode.Preview,
+                    author: { name: 'Dialectic Walkthrough' },
+                    timestamp: new Date()
+                };
+                thread.comments = [vscodeComment];
+            }
+            
+            console.log(`[WALKTHROUGH COMMENT] Created comment thread at ${filePath}:${startLine + 1}`);
+            return thread;
+            
+        } catch (error) {
+            console.error(`[WALKTHROUGH COMMENT] Failed to create comment thread:`, error);
+            vscode.window.showErrorMessage(`Failed to create comment: ${error}`);
+            return undefined;
+        }
     }
 
     /**
@@ -700,6 +835,7 @@ export class WalkthroughWebviewProvider implements vscode.WebviewViewProvider {
             this.commentController = undefined;
         }
         this.commentThreads.clear();
+        this.ambiguousComments.clear();
     }
 
     /**
