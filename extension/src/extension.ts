@@ -75,7 +75,7 @@ interface PresentWalkthroughPayload {
 }
 
 type WalkthroughElement = 
-    | { content: string }  // ResolvedMarkdownElement with processed dialectic: URLs
+    | string  // ResolvedMarkdownElement (now serialized as plain string)
     | { comment: ResolvedComment }
     | { files: FileChange[] }  // GitDiffElement - named field serializes as {"files": [...]}
     | { action: ResolvedAction };

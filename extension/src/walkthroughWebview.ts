@@ -51,7 +51,7 @@ class WalkthroughDiffContentProvider implements vscode.TextDocumentContentProvid
 }
 
 type WalkthroughElement =
-    | { content: string }  // ResolvedMarkdownElement with processed dialectic: URLs
+    | string  // ResolvedMarkdownElement (now serialized as plain string)
     | { comment: any }  // Simplified for now
     | { files: FileChange[] }  // GitDiffElement - named field serializes as {"files": [...]}
     | { action: { button: string; description?: string; tell_agent?: string } };
@@ -651,8 +651,9 @@ export class WalkthroughWebviewProvider implements vscode.WebviewViewProvider {
         const processSection = (items?: WalkthroughElement[]) => {
             if (!items) return items;
             return items.map(item => {
-                if (typeof item === 'object' && 'content' in item) {
-                    return { content: this.sanitizeHtml(this.md.render(item.content)) };
+                if (typeof item === 'string') {
+                    // Process plain markdown strings
+                    return this.sanitizeHtml(this.md.render(item));
                 } else if (typeof item === 'object' && 'files' in item) {
                     // Handle GitDiffElement named field - {"files": FileChange[]}
                     return item; // Keep as-is, will be handled in rendering
