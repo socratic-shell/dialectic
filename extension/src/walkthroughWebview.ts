@@ -683,7 +683,7 @@ export class WalkthroughWebviewProvider implements vscode.WebviewViewProvider {
             });
             console.log('Message posted to webview');
 
-            // Auto-place unambiguous comments
+            // Auto-place unambiguous comments using original walkthrough data
             this.autoPlaceUnambiguousComments(walkthrough);
         } else {
             console.log('ERROR: No webview available');
@@ -706,6 +706,8 @@ export class WalkthroughWebviewProvider implements vscode.WebviewViewProvider {
      * Auto-place comments that have unambiguous locations (exactly one location)
      */
     private async autoPlaceUnambiguousComments(walkthrough: WalkthroughData): Promise<void> {
+        console.log('[WALKTHROUGH] Starting auto-placement of unambiguous comments');
+        
         const allSections = [
             ...(walkthrough.introduction || []),
             ...(walkthrough.highlights || []),
@@ -713,15 +715,24 @@ export class WalkthroughWebviewProvider implements vscode.WebviewViewProvider {
             ...(walkthrough.actions || [])
         ];
 
+        console.log('[WALKTHROUGH] Found', allSections.length, 'total items to check');
+
         for (const item of allSections) {
+            console.log('[WALKTHROUGH] Checking item:', typeof item, item);
+            
             if (typeof item === 'object' && 'comment' in item) {
+                console.log('[WALKTHROUGH] Found comment item:', item);
                 const comment = (item as any).comment;
                 if (comment.locations && comment.locations.length === 1) {
                     console.log('[WALKTHROUGH] Auto-placing unambiguous comment:', comment);
                     await this.placeComment(comment, comment.locations[0]);
+                } else {
+                    console.log('[WALKTHROUGH] Comment has', comment.locations?.length || 0, 'locations, skipping auto-placement');
                 }
             }
         }
+        
+        console.log('[WALKTHROUGH] Auto-placement complete');
     }
 
     public setBaseUri(baseUri: string) {
