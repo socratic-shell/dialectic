@@ -73,8 +73,7 @@ export class WalkthroughWebviewProvider implements vscode.WebviewViewProvider {
     private currentWalkthrough?: WalkthroughData;
     private placementMemory = new Map<string, PlacementState>(); // Unified placement memory
     private commentController?: vscode.CommentController;
-    private commentThreads = new Map<string, vscode.CommentThread>(); // Track comment threads by location key
-    private ambiguousComments = new Map<string, {thread: vscode.CommentThread, location: any}>(); // Track ambiguous comments by comment hash
+    private commentThreads = new Map<string, vscode.CommentThread>(); // Track comment threads by comment ID
 
     constructor(
         private readonly _extensionUri: vscode.Uri,
@@ -211,43 +210,6 @@ export class WalkthroughWebviewProvider implements vscode.WebviewViewProvider {
     /**
      * Show comment using VSCode CommentController with context-aware file opening
      */
-    /**
-     * Place a comment at a specific location, avoiding duplicates
-     */
-    private async placeComment(comment: any, location: any): Promise<void> {
-        const locationKey = `${location.path}:${location.start.line}`;
-        
-        // Check if comment already exists at this location
-        if (this.commentThreads.has(locationKey)) {
-            console.log(`[WALKTHROUGH] Comment already exists at ${locationKey}, navigating to it`);
-            await this.navigateToExistingComment(location.path, location);
-            return;
-        }
-
-        await this.createCommentThread(location.path, location, comment);
-    }
-
-    /**
-     * Navigate to existing comment instead of creating duplicate
-     */
-    private async navigateToExistingComment(filePath: string, location: any): Promise<void> {
-        if (!this.baseUri) return;
-        
-        try {
-            const uri = vscode.Uri.file(path.resolve(this.baseUri.fsPath, filePath));
-            const document = await vscode.workspace.openTextDocument(uri);
-            const editor = await vscode.window.showTextDocument(document);
-            
-            // Navigate to the line
-            const line = Math.max(0, location.start.line - 1);
-            const position = new vscode.Position(line, 0);
-            editor.selection = new vscode.Selection(position, position);
-            editor.revealRange(new vscode.Range(position, position));
-        } catch (error) {
-            console.error(`[WALKTHROUGH] Failed to navigate to comment:`, error);
-        }
-    }
-
     private async showComment(comment: any): Promise<void> {
         console.log(`[WALKTHROUGH COMMENT] Starting showComment:`, comment);
 
@@ -256,109 +218,110 @@ export class WalkthroughWebviewProvider implements vscode.WebviewViewProvider {
             return;
         }
 
-        let selectedLocation;
-        
-        if (comment.locations.length === 1) {
-            // Unambiguous - use the single location
-            selectedLocation = comment.locations[0];
-            await this.placeComment(comment, selectedLocation);
-        } else {
-            // Ambiguous - handle specially
-            await this.handleAmbiguousComment(comment);
-        }
-    }
-
-    /**
-     * Handle ambiguous comments with relocation support
-     */
-    private async handleAmbiguousComment(comment: any): Promise<void> {
-        const commentHash = JSON.stringify(comment.comment); // Use comment content as hash
-        
-        // Check if this ambiguous comment already exists
-        const existing = this.ambiguousComments.get(commentHash);
-        if (existing) {
-            console.log('[WALKTHROUGH] Ambiguous comment exists, showing relocation dialog');
-            
-            // Show dialog with current location + other options
-            const currentLocation = existing.location;
-            const otherLocations = comment.locations.filter((loc: any) => 
-                !(loc.path === currentLocation.path && loc.start.line === currentLocation.start.line)
-            );
-            
-            const locationItems = [
-                {
-                    label: `${currentLocation.path}:${currentLocation.start.line} (current)`,
-                    description: currentLocation.content.substring(0, 80) + (currentLocation.content.length > 80 ? '...' : ''),
-                    location: currentLocation,
-                    isCurrent: true
-                },
-                ...otherLocations.map((loc: any) => ({
-                    label: `${loc.path}:${loc.start.line}`,
-                    description: loc.content.substring(0, 80) + (loc.content.length > 80 ? '...' : ''),
-                    location: loc,
-                    isCurrent: false
-                }))
-            ];
-            
-            const selected = await vscode.window.showQuickPick(locationItems, {
-                placeHolder: 'Choose location for this comment (current location marked)',
-                matchOnDescription: true
-            }) as { label: string; description: string; location: any; isCurrent: boolean } | undefined;
-            
-            if (!selected) return; // User cancelled
-            
-            if (selected.isCurrent) {
-                // Navigate to existing comment
-                await this.navigateToExistingComment(currentLocation.path, currentLocation);
+        // Check if comment already exists (by ID)
+        const existingThread = this.commentThreads.get(comment.id);
+        if (existingThread) {
+            if (comment.locations.length === 1) {
+                // Unambiguous - just navigate to existing
+                await this.navigateToThread(existingThread);
             } else {
-                // Relocate comment to new location
-                await this.relocateAmbiguousComment(commentHash, comment, selected.location);
+                // Ambiguous - show relocation dialog
+                await this.showRelocationDialog(comment, existingThread);
             }
+            return;
+        }
+
+        // New comment - show location picker if ambiguous
+        let selectedLocation;
+        if (comment.locations.length === 1) {
+            selectedLocation = comment.locations[0];
         } else {
-            // First time - show all locations
-            const locationItems = comment.locations.map((loc: any) => ({
-                label: `${loc.path}:${loc.start.line}`,
-                description: loc.content.substring(0, 80) + (loc.content.length > 80 ? '...' : ''),
-                location: loc
-            }));
-            
-            const selected = await vscode.window.showQuickPick(locationItems, {
-                placeHolder: 'Choose the location for this comment',
-                matchOnDescription: true
-            }) as { label: string; description: string; location: any } | undefined;
-            
-            if (!selected) return; // User cancelled
-            
-            // Create new ambiguous comment
-            await this.createAmbiguousComment(commentHash, comment, selected.location);
+            selectedLocation = await this.pickLocation(comment.locations, 'Choose the location for this comment');
+            if (!selectedLocation) return; // User cancelled
         }
-    }
 
-    /**
-     * Create a new ambiguous comment at the selected location
-     */
-    private async createAmbiguousComment(commentHash: string, comment: any, location: any): Promise<void> {
-        const thread = await this.createCommentThread(location.path, location, comment);
+        // Create new comment
+        const thread = await this.createCommentThread(selectedLocation.path, selectedLocation, comment);
         if (thread) {
-            this.ambiguousComments.set(commentHash, { thread, location });
+            this.commentThreads.set(comment.id, thread);
         }
     }
 
     /**
-     * Relocate an existing ambiguous comment to a new location
+     * Navigate to existing comment thread
      */
-    private async relocateAmbiguousComment(commentHash: string, comment: any, newLocation: any): Promise<void> {
-        const existing = this.ambiguousComments.get(commentHash);
-        if (!existing) return;
-        
-        // Dispose old thread
-        existing.thread.dispose();
-        
-        // Create new thread at new location
-        const newThread = await this.createCommentThread(newLocation.path, newLocation, comment);
-        if (newThread) {
-            this.ambiguousComments.set(commentHash, { thread: newThread, location: newLocation });
+    private async navigateToThread(thread: vscode.CommentThread): Promise<void> {
+        try {
+            const document = await vscode.workspace.openTextDocument(thread.uri);
+            const editor = await vscode.window.showTextDocument(document);
+            
+            const range = thread.range;
+            if (range) {
+                const position = range.start;
+                editor.selection = new vscode.Selection(position, position);
+                editor.revealRange(range);
+            }
+        } catch (error) {
+            console.error('[WALKTHROUGH] Failed to navigate to thread:', error);
         }
+    }
+
+    /**
+     * Show relocation dialog for ambiguous comments
+     */
+    private async showRelocationDialog(comment: any, existingThread: vscode.CommentThread): Promise<void> {
+        // Find current location
+        const currentRange = existingThread.range;
+        const currentPath = vscode.workspace.asRelativePath(existingThread.uri);
+        const currentLine = currentRange ? currentRange.start.line + 1 : 0;
+        
+        // Build location options
+        const locationItems = comment.locations.map((loc: any) => {
+            const isCurrent = loc.path === currentPath && loc.start.line === currentLine;
+            return {
+                label: `${loc.path}:${loc.start.line}${isCurrent ? ' (current)' : ''}`,
+                description: loc.content.substring(0, 80) + (loc.content.length > 80 ? '...' : ''),
+                location: loc,
+                isCurrent
+            };
+        });
+
+        const selected = await vscode.window.showQuickPick(locationItems, {
+            placeHolder: 'Choose location for this comment (current location marked)',
+            matchOnDescription: true
+        }) as { label: string; description: string; location: any; isCurrent: boolean } | undefined;
+
+        if (!selected) return; // User cancelled
+
+        if (selected.isCurrent) {
+            // Navigate to existing
+            await this.navigateToThread(existingThread);
+        } else {
+            // Relocate to new location
+            existingThread.dispose();
+            const newThread = await this.createCommentThread(selected.location.path, selected.location, comment);
+            if (newThread) {
+                this.commentThreads.set(comment.id, newThread);
+            }
+        }
+    }
+
+    /**
+     * Show location picker for ambiguous comments
+     */
+    private async pickLocation(locations: any[], placeholder: string): Promise<any> {
+        const locationItems = locations.map((loc: any) => ({
+            label: `${loc.path}:${loc.start.line}`,
+            description: loc.content.substring(0, 80) + (loc.content.length > 80 ? '...' : ''),
+            location: loc
+        }));
+
+        const selected = await vscode.window.showQuickPick(locationItems, {
+            placeHolder: placeholder,
+            matchOnDescription: true
+        }) as { label: string; description: string; location: any } | undefined;
+
+        return selected?.location;
     }
 
     /**
@@ -775,7 +738,6 @@ export class WalkthroughWebviewProvider implements vscode.WebviewViewProvider {
             this.commentController = undefined;
         }
         this.commentThreads.clear();
-        this.ambiguousComments.clear();
     }
 
     /**
@@ -793,7 +755,11 @@ export class WalkthroughWebviewProvider implements vscode.WebviewViewProvider {
             if (typeof item === 'object' && 'comment' in item) {
                 const commentItem = item as any;
                 if (commentItem.locations && commentItem.locations.length === 1) {
-                    await this.placeComment(commentItem, commentItem.locations[0]);
+                    // Auto-place unambiguous comments
+                    const thread = await this.createCommentThread(commentItem.locations[0].path, commentItem.locations[0], commentItem);
+                    if (thread) {
+                        this.commentThreads.set(commentItem.id, thread);
+                    }
                 }
             }
         }
