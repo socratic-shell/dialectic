@@ -3,7 +3,6 @@ import * as net from 'net';
 import * as path from 'path';
 import * as fs from 'fs';
 import * as crypto from 'crypto';
-import { ReviewWebviewProvider } from './reviewWebview';
 import { SyntheticPRProvider } from './syntheticPRProvider';
 import { WalkthroughWebviewProvider } from './walkthroughWebview';
 
@@ -13,16 +12,9 @@ import { WalkthroughWebviewProvider } from './walkthroughWebview';
 // 💡: Types for IPC communication with MCP server
 interface IPCMessage {
     shellPid: number;
-    type: 'present_review' | 'present_walkthrough' | 'log' | 'get_selection' | 'response' | 'marco' | 'polo' | 'goodbye' | 'resolve_symbol_by_name' | 'find_all_references' | 'create_synthetic_pr' | 'update_synthetic_pr' | string; // string allows unknown types
-    payload: PresentReviewPayload | PresentWalkthroughPayload | LogPayload | GetSelectionPayload | PoloPayload | GoodbyePayload | ResolveSymbolPayload | FindReferencesPayload | ResponsePayload | SyntheticPRPayload | unknown; // unknown allows any payload
+    type: 'present_walkthrough' | 'log' | 'get_selection' | 'response' | 'marco' | 'polo' | 'goodbye' | 'resolve_symbol_by_name' | 'find_all_references' | 'create_synthetic_pr' | 'update_synthetic_pr' | string; // string allows unknown types
+    payload: PresentWalkthroughPayload | LogPayload | GetSelectionPayload | PoloPayload | GoodbyePayload | ResolveSymbolPayload | FindReferencesPayload | ResponsePayload | SyntheticPRPayload | unknown; // unknown allows any payload
     id: string;
-}
-
-interface PresentReviewPayload {
-    content: string;
-    mode: 'replace' | 'update-section' | 'append';
-    section?: string;
-    baseUri?: string;
 }
 
 interface LogPayload {
@@ -191,7 +183,6 @@ class DaemonClient implements vscode.Disposable {
 
     constructor(
         private context: vscode.ExtensionContext,
-        private reviewProvider: ReviewWebviewProvider,
         private outputChannel: vscode.OutputChannel,
         private syntheticPRProvider: SyntheticPRProvider,
         private walkthroughProvider: WalkthroughWebviewProvider
@@ -272,26 +263,7 @@ class DaemonClient implements vscode.Disposable {
         }
 
         // Forward compatibility: only process known message types
-        if (message.type === 'present_review') {
-            try {
-                const reviewPayload = message.payload as PresentReviewPayload;
-
-                this.reviewProvider.updateReview(
-                    reviewPayload.content,
-                    reviewPayload.mode,
-                    reviewPayload.baseUri
-                );
-
-                // Send success response back through daemon
-                this.sendResponse(message.id, { success: true });
-            } catch (error) {
-                this.outputChannel.appendLine(`Error handling present_review: ${error}`);
-                this.sendResponse(message.id, {
-                    success: false,
-                    error: error instanceof Error ? error.message : String(error)
-                });
-            }
-        } else if (message.type === 'present_walkthrough') {
+        if (message.type === 'present_walkthrough') {
             try {
                 const walkthroughPayload = message.payload as PresentWalkthroughPayload;
                 
@@ -855,9 +827,6 @@ export function activate(context: vscode.ExtensionContext) {
         outputChannel.appendLine(`Error in PID discovery: ${error}`);
     });
 
-    // Create the webview review provider
-    const reviewProvider = new ReviewWebviewProvider(context, outputChannel);
-
     // Create synthetic PR provider for AI-generated pull requests
     const syntheticPRProvider = new SyntheticPRProvider(context);
 
@@ -876,7 +845,7 @@ export function activate(context: vscode.ExtensionContext) {
     console.log('Webview provider created successfully');
 
     // 💡: Set up daemon client connection for message bus communication
-    const daemonClient = new DaemonClient(context, reviewProvider, outputChannel, syntheticPRProvider, walkthroughProvider);
+    const daemonClient = new DaemonClient(context, outputChannel, syntheticPRProvider, walkthroughProvider);
     
     // Set daemon client on walkthrough provider for terminal access
     walkthroughProvider.setDaemonClient(daemonClient);
@@ -889,11 +858,6 @@ export function activate(context: vscode.ExtensionContext) {
 
     // 💡: Set up universal selection detection for interactive code review
     setupSelectionDetection(context, outputChannel, daemonClient);
-
-    // Register commands
-    const showReviewCommand = vscode.commands.registerCommand('dialectic.showReview', () => {
-        reviewProvider.showReview();
-    });
 
     // Register review action command for tree view buttons
     const reviewActionCommand = vscode.commands.registerCommand('dialectic.reviewAction', (action: string) => {
@@ -912,7 +876,7 @@ export function activate(context: vscode.ExtensionContext) {
         vscode.window.showInformationMessage('PID information logged to Dialectic output channel');
     });
 
-    context.subscriptions.push(showReviewCommand, reviewActionCommand, copyReviewCommand, logPIDsCommand, reviewProvider, syntheticPRProvider, daemonClient);
+    context.subscriptions.push(reviewActionCommand, copyReviewCommand, logPIDsCommand, syntheticPRProvider, daemonClient);
 
     // Return API for Ask Socratic Shell integration
     return {
