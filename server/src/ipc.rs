@@ -6,7 +6,7 @@
 use crate::synthetic_pr::UserFeedback;
 use crate::types::{
     FindAllReferencesPayload, GetSelectionResult, GoodbyePayload, IPCMessage, IPCMessageType,
-    LogLevel, LogParams, PoloPayload, PresentReviewParams, ResolveSymbolByNamePayload,
+    LogLevel, LogParams, PoloPayload, ResolveSymbolByNamePayload,
     ResponsePayload, UserFeedbackPayload,
 };
 use anyhow::Context;
@@ -139,44 +139,6 @@ impl IPCCommunicator {
         IPCCommunicatorInner::ensure_connection(Arc::clone(&self.inner)).await?;
 
         info!("Connected to message bus daemon via IPC");
-        Ok(())
-    }
-
-    pub async fn (&self, params: PresentReviewParams) -> Result<()> {
-        if self.test_mode {
-            info!("Present review called (test mode): {:?}", params);
-            return Ok(());
-        }
-
-        // Ensure connection is established before proceeding
-        IPCCommunicatorInner::ensure_connection(Arc::clone(&self.inner)).await?;
-
-        // Create message payload
-        let payload = serde_json::to_value(params)?;
-
-        let shell_pid = {
-            let inner = self.inner.lock().await;
-            inner.terminal_shell_pid
-        };
-
-        let message = IPCMessage {
-            shell_pid,
-            message_type: IPCMessageType::PresentReview,
-            payload,
-            id: Uuid::new_v4().to_string(),
-        };
-
-        debug!("Sending  message: {:?}", message);
-        trace!("About to call send_message_with_reply for ");
-
-        let response: () = self.send_message_with_reply(message).await?;
-
-        trace!(
-            "Received response from send_message_with_reply: {:?}",
-            response
-        );
-
-        // Convert response to PresentReviewResult
         Ok(())
     }
 
@@ -1053,30 +1015,8 @@ mod test {
     //! Tests the IPC communication layer and message structure
 
     use crate::ipc::IPCCommunicator;
-    use crate::types::{IPCMessage, IPCMessageType, PresentReviewParams, ReviewMode};
+    use crate::types::{IPCMessage, IPCMessageType};
     use serde_json;
-
-    #[tokio::test]
-    async fn test_ipc_communicator_test_mode() {
-        // Initialize tracing for test output
-        let _ = tracing_subscriber::fmt::try_init();
-
-        // Create IPC communicator in test mode
-        let ipc = IPCCommunicator::new_test();
-
-        let params = PresentReviewParams {
-            content: "# Test Review\n\nThis is a test review with some content.".to_string(),
-            mode: ReviewMode::Replace,
-            section: None,
-            base_uri: "/test/project".to_string(),
-        };
-
-        // Test  in test mode
-        let result = ipc.(params).await;
-        assert!(result.is_ok());
-
-        result.unwrap();
-    }
 
     #[tokio::test]
     async fn test_get_selection_test_mode() {
@@ -1092,25 +1032,6 @@ mod test {
         assert!(selection_result.selected_text.is_none());
         assert!(selection_result.message.is_some());
         assert!(selection_result.message.unwrap().contains("test mode"));
-    }
-
-    #[tokio::test]
-    async fn test__with_update_section_mode() {
-        let _ = tracing_subscriber::fmt::try_init();
-
-        let ipc = IPCCommunicator::new_test();
-
-        let params = PresentReviewParams {
-            content: "## Updated Section\n\nThis section has been updated.".to_string(),
-            mode: ReviewMode::UpdateSection,
-            section: Some("Summary".to_string()),
-            base_uri: "/test/project".to_string(),
-        };
-
-        let result = ipc.(params).await;
-        assert!(result.is_ok());
-
-        result.unwrap();
     }
 
     #[tokio::test]

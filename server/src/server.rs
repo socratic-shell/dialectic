@@ -184,67 +184,6 @@ impl DialecticServer {
         }
     }
 
-    /// Present a code review in the VSCode review panel
-    ///
-    /// This tool allows AI assistants to display structured markdown reviews
-    /// with clickable file references in the VSCode extension.
-    // ANCHOR: _tool
-    #[tool(description = "Display a code review in the VSCode review panel. \
-                       Reviews should be structured markdown with clear sections and actionable feedback. \
-                       The Dialectic guidance in your context describe link format and overall structure.")]
-    async fn (
-        &self,
-        Parameters(params): Parameters<PresentReviewParams>,
-    ) -> Result<CallToolResult, McpError> {
-        // ANCHOR_END: _tool
-        // Log the tool call via IPC (also logs locally)
-        self.ipc
-            .send_log(
-                LogLevel::Debug,
-                format!(
-                    "Received  tool call with params: {:?}",
-                    params
-                ),
-            )
-            .await;
-
-        self.ipc
-            .send_log(
-                LogLevel::Debug,
-                format!(
-                    "Parameters: mode={:?}, content length={}",
-                    params.mode,
-                    params.content.len()
-                ),
-            )
-            .await;
-
-        // Forward to VSCode extension via IPC
-        self.ipc
-            .send_log(
-                LogLevel::Info,
-                "Forwarding review to VSCode extension via IPC...".to_string(),
-            )
-            .await;
-
-        self.ipc.(params).await.map_err(|e| {
-            McpError::internal_error(
-                "IPC communication failed",
-                Some(serde_json::json!({
-                    "error": e.to_string()
-                })),
-            )
-        })?;
-
-        self.ipc
-            .send_log(
-                LogLevel::Info,
-                "Review successfully displayed in VSCode".to_string(),
-            )
-            .await;
-
-    }
-
     /// Display a code walkthrough in VSCode
     ///
     /// Walkthroughs are structured guides with introduction, highlights, changes, and actions.
