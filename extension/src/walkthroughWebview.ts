@@ -79,7 +79,7 @@ export class WalkthroughWebviewProvider implements vscode.WebviewViewProvider {
     constructor(
         private readonly _extensionUri: vscode.Uri,
         private readonly outputChannel: vscode.OutputChannel,
-        private daemonClient?: DaemonClient, // Will be set after daemon client is created
+        private daemonClient: DaemonClient | undefined, // Set after daemon client is created
         private context?: vscode.ExtensionContext
     ) {
         this.md = this.setupMarkdownRenderer();
@@ -683,8 +683,7 @@ export class WalkthroughWebviewProvider implements vscode.WebviewViewProvider {
      */
     private async sendToActiveShell(message: string): Promise<void> {
         if (!this.daemonClient) {
-            vscode.window.showErrorMessage('Daemon client not available. Please ensure Dialectic is properly connected.');
-            return;
+            throw new Error('DaemonClient not initialized - setDaemonClient must be called first');
         }
 
         const terminals = vscode.window.terminals;
@@ -847,14 +846,15 @@ export class WalkthroughWebviewProvider implements vscode.WebviewViewProvider {
             const referenceId = crypto.randomUUID();
             
             // Store reference context via IPC
-            if (this.daemonClient) {
-                await this.daemonClient.sendReferenceToActiveShell(referenceId, {
-                    file: filePath,
-                    line: lineNumber,
-                    selection: undefined,
-                    user_comment: text
-                });
+            if (!this.daemonClient) {
+                throw new Error('DaemonClient not initialized - setDaemonClient must be called first');
             }
+            await this.daemonClient.sendReferenceToActiveShell(referenceId, {
+                file: filePath,
+                line: lineNumber,
+                selection: undefined,
+                user_comment: text
+            });
             
             // Send compact ssref tag to terminal
             const compactRef = `<ssref id="${referenceId}"/>\n\n`;
