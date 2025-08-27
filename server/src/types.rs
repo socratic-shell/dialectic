@@ -204,12 +204,3 @@ pub struct UserFeedbackPayload {
     pub context_lines: Option<Vec<String>>,
 }
 
-/// Payload for storing reference context in compact ssref system
-#[derive(Debug, Clone, Deserialize, Serialize)]
-pub struct StoreReferencePayload {
-    pub id: String,
-    pub file: Option<String>,
-    pub line: Option<u32>,
-    pub selection: Option<String>,
-    pub user_comment: Option<String>,
-}

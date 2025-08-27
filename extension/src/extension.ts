@@ -13,7 +13,7 @@ import { WalkthroughWebviewProvider } from './walkthroughWebview';
 interface IPCMessage {
     shellPid: number;
     type: 'present_walkthrough' | 'log' | 'get_selection' | 'store_reference' | 'response' | 'marco' | 'polo' | 'goodbye' | 'resolve_symbol_by_name' | 'find_all_references' | 'create_synthetic_pr' | 'update_synthetic_pr' | string; // string allows unknown types
-    payload: PresentWalkthroughPayload | LogPayload | GetSelectionPayload | StoreReferencePayload | PoloPayload | GoodbyePayload | ResolveSymbolPayload | FindReferencesPayload | ResponsePayload | SyntheticPRPayload | unknown; // unknown allows any payload
+    payload: PresentWalkthroughPayload | LogPayload | GetSelectionPayload | PoloPayload | GoodbyePayload | ResolveSymbolPayload | FindReferencesPayload | ResponsePayload | SyntheticPRPayload | unknown; // unknown allows any payload
     id: string;
 }
 
@@ -24,14 +24,6 @@ interface LogPayload {
 
 interface GetSelectionPayload {
     // Empty payload
-}
-
-interface StoreReferencePayload {
-    id: string;
-    file?: string;
-    line?: number;
-    selection?: string;
-    user_comment?: string;
 }
 
 interface PoloPayload {
@@ -663,7 +655,7 @@ class DaemonClient implements vscode.Disposable {
                 line,
                 selection,
                 user_comment: userComment
-            } as StoreReferencePayload,
+            },
             id: crypto.randomUUID()
         };
 
