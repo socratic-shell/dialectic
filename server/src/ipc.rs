@@ -6,8 +6,8 @@
 use crate::synthetic_pr::UserFeedback;
 use crate::types::{
     FindAllReferencesPayload, GetSelectionResult, GoodbyePayload, IPCMessage, IPCMessageType,
-    LogLevel, LogParams, PoloPayload, ResolveSymbolByNamePayload,
-    ResponsePayload, UserFeedbackPayload,
+    LogLevel, LogParams, PoloPayload, PresentReviewParams, ResolveSymbolByNamePayload,
+    ResponsePayload, ReviewMode, UserFeedbackPayload,
 };
 use anyhow::Context;
 use futures::FutureExt;
@@ -965,7 +965,15 @@ impl IPCCommunicator {
                 };
 
                 // Store the value in the reference store
-                match reference_store.store_with_id(key, value).await {
+                let context: crate::types::ReferenceContext = match serde_json::from_value(value) {
+                    Ok(context) => context,
+                    Err(e) => {
+                        error!("Failed to deserialize reference context: {}", e);
+                        return;
+                    }
+                };
+                
+                match reference_store.store_with_id(key, context).await {
                     Ok(()) => {
                         info!("Successfully stored reference {}", key);
                     }
@@ -1067,14 +1075,16 @@ mod test {
     //! Tests the IPC communication layer and message structure
 
     use crate::ipc::IPCCommunicator;
-    use crate::types::{IPCMessage, IPCMessageType};
+    use crate::types::{IPCMessage, IPCMessageType, PresentReviewParams, ReviewMode};
     use serde_json;
+    use std::sync::Arc;
 
     #[tokio::test]
     async fn test_get_selection_test_mode() {
         let _ = tracing_subscriber::fmt::try_init();
 
-        let ipc = IPCCommunicator::new_test();
+        let reference_store = Arc::new(crate::reference_store::ReferenceStore::new());
+        let ipc = IPCCommunicator::new_test(reference_store);
 
         // Test get_selection in test mode
         let result = ipc.get_selection().await;

@@ -1,4 +1,5 @@
 use anyhow::Result;
+use crate::types::ReferenceContext;
 use serde_json::Value;
 use std::collections::HashMap;
 use std::sync::Arc;
@@ -20,23 +21,30 @@ impl ReferenceStore {
     }
 
     /// Store a reference context and return a unique ID
-    pub async fn store(&self, context: Value) -> Result<String> {
+    pub async fn store(&self, context: ReferenceContext) -> Result<String> {
         let id = Uuid::new_v4().to_string();
         self.store_with_id(&id, context).await?;
         Ok(id)
     }
 
     /// Store a reference context with a specific ID
-    pub async fn store_with_id(&self, id: &str, context: Value) -> Result<()> {
+    pub async fn store_with_id(&self, id: &str, context: ReferenceContext) -> Result<()> {
         let mut refs = self.references.write().await;
-        refs.insert(id.to_string(), context);
+        let value = serde_json::to_value(context)?;
+        refs.insert(id.to_string(), value);
         Ok(())
     }
 
     /// Retrieve a reference context by ID
-    pub async fn get(&self, id: &str) -> Result<Option<Value>> {
+    pub async fn get(&self, id: &str) -> Result<Option<ReferenceContext>> {
         let refs = self.references.read().await;
-        Ok(refs.get(id).cloned())
+        match refs.get(id) {
+            Some(value) => {
+                let context: ReferenceContext = serde_json::from_value(value.clone())?;
+                Ok(Some(context))
+            }
+            None => Ok(None),
+        }
     }
 
     /// Get the number of stored references

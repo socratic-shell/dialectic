@@ -204,3 +204,30 @@ pub struct UserFeedbackPayload {
     pub context_lines: Option<Vec<String>>,
 }
 
+/// Parameters for presenting a review to the user
+#[derive(Debug, Clone, Deserialize, Serialize)]
+pub struct PresentReviewParams {
+    pub content: String,
+    pub mode: ReviewMode,
+    pub section: Option<String>,
+    pub base_uri: String,
+}
+
+/// Mode for presenting reviews
+#[derive(Debug, Clone, Deserialize, Serialize)]
+pub enum ReviewMode {
+    Replace,
+    Append,
+    UpdateSection,
+}
+
+/// Context for reference storage
+#[derive(Debug, Clone, Deserialize, Serialize)]
+pub struct ReferenceContext {
+    pub file: Option<String>,
+    pub line: Option<u32>,
+    pub selection: Option<String>,
+    pub user_comment: Option<String>,
+    pub metadata: std::collections::HashMap<String, serde_json::Value>,
+}
+
