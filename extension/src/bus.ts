@@ -59,6 +59,78 @@ export class Bus {
         return this.daemonClient.sendReferenceToActiveShell(referenceId, referenceData);
     }
 
+    /**
+     * Send reference data to active terminal with consolidated logic
+     * Handles terminal finding, reference creation, and XML generation
+     */
+    async sendToActiveTerminal(referenceData: any, includeNewline: boolean = true): Promise<void> {
+        // Find active terminal using existing heuristics
+        const terminals = vscode.window.terminals;
+        if (terminals.length === 0) {
+            vscode.window.showWarningMessage('No terminals found. Please open a terminal with an active AI assistant.');
+            return;
+        }
+
+        // Get active terminals with MCP servers from registry
+        const activeTerminals = this.getActiveTerminals();
+        this.log(`Active MCP server terminals: [${Array.from(activeTerminals).join(', ')}]`);
+
+        if (activeTerminals.size === 0) {
+            vscode.window.showWarningMessage('No terminals with active MCP servers found. Please ensure you have a terminal with an active AI assistant (like Q chat or Claude CLI) running.');
+            return;
+        }
+
+        // Filter terminals to only those with active MCP servers
+        const terminalChecks = await Promise.all(
+            terminals.map(async (terminal) => {
+                const shellPID = await terminal.processId;
+                const isAiEnabled = shellPID && activeTerminals.has(shellPID);
+                return { terminal, shellPID, isAiEnabled };
+            })
+        );
+
+        const aiEnabledTerminals = terminalChecks
+            .filter(check => check.isAiEnabled)
+            .map(check => ({ terminal: check.terminal, shellPID: check.shellPID }));
+
+        if (aiEnabledTerminals.length === 0) {
+            vscode.window.showWarningMessage('No AI-enabled terminals found. Please ensure you have a terminal with an active MCP server running.');
+            return;
+        }
+
+        let selectedTerminal;
+
+        // Simple case - exactly one AI-enabled terminal
+        if (aiEnabledTerminals.length === 1) {
+            selectedTerminal = aiEnabledTerminals[0];
+        } else {
+            // Multiple terminals - show picker for ambiguity resolution
+            const terminalItems = aiEnabledTerminals.map(({ terminal, shellPID }) => ({
+                label: terminal.name,
+                description: `PID: ${shellPID}`,
+                terminal,
+                shellPID
+            }));
+
+            const selected = await vscode.window.showQuickPick(terminalItems, {
+                placeHolder: 'Select terminal to send reference to'
+            });
+
+            if (!selected) {
+                return; // User cancelled
+            }
+
+            selectedTerminal = { terminal: selected.terminal, shellPID: selected.shellPID };
+        }
+
+        // TODO: Generate fresh UUID for reference
+        // TODO: Send reference data to MCP server for selected terminal
+        // TODO: Generate <socratic-reference key="..."/> XML
+        // TODO: Send XML to terminal with optional newline
+
+        this.log(`Selected terminal ${selectedTerminal.terminal.name} (PID: ${selectedTerminal.shellPID}) for reference`);
+    }
+
     getActiveTerminals(): Set<number> {
         return this.daemonClient.getActiveTerminals();
     }
