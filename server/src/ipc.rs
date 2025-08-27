@@ -957,14 +957,13 @@ impl IPCCommunicator {
                         }
                     };
 
-                // Create reference context
-                let context = crate::reference_store::ReferenceContext {
-                    file: store_payload.file.clone(),
-                    line: store_payload.line,
-                    selection: store_payload.selection.clone(),
-                    user_comment: store_payload.user_comment.clone(),
-                    metadata: std::collections::HashMap::new(),
-                };
+                // Create reference context as JSON
+                let context = serde_json::json!({
+                    "file": store_payload.file,
+                    "line": store_payload.line,
+                    "selection": store_payload.selection,
+                    "user_comment": store_payload.user_comment
+                });
 
                 // Store the reference in the reference store
                 match reference_store.store_with_id(&store_payload.id, context).await {

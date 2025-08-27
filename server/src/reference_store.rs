@@ -1,29 +1,14 @@
 use anyhow::Result;
-use serde::{Deserialize, Serialize};
+use serde_json::Value;
 use std::collections::HashMap;
 use std::sync::Arc;
 use tokio::sync::RwLock;
 use uuid::Uuid;
 
-/// Context data that can be referenced by a compact ssref
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct ReferenceContext {
-    /// File path relative to workspace
-    pub file: Option<String>,
-    /// Line number (1-based)
-    pub line: Option<u32>,
-    /// Selected text content
-    pub selection: Option<String>,
-    /// User comment or question
-    pub user_comment: Option<String>,
-    /// Additional context data
-    pub metadata: HashMap<String, String>,
-}
-
 /// In-memory reference storage
 #[derive(Debug, Clone)]
 pub struct ReferenceStore {
-    references: Arc<RwLock<HashMap<String, ReferenceContext>>>,
+    references: Arc<RwLock<HashMap<String, Value>>>,
 }
 
 impl ReferenceStore {
@@ -35,21 +20,21 @@ impl ReferenceStore {
     }
 
     /// Store a reference context and return a unique ID
-    pub async fn store(&self, context: ReferenceContext) -> Result<String> {
+    pub async fn store(&self, context: Value) -> Result<String> {
         let id = Uuid::new_v4().to_string();
         self.store_with_id(&id, context).await?;
         Ok(id)
     }
 
     /// Store a reference context with a specific ID
-    pub async fn store_with_id(&self, id: &str, context: ReferenceContext) -> Result<()> {
+    pub async fn store_with_id(&self, id: &str, context: Value) -> Result<()> {
         let mut refs = self.references.write().await;
         refs.insert(id.to_string(), context);
         Ok(())
     }
 
     /// Retrieve a reference context by ID
-    pub async fn get(&self, id: &str) -> Result<Option<ReferenceContext>> {
+    pub async fn get(&self, id: &str) -> Result<Option<Value>> {
         let refs = self.references.read().await;
         Ok(refs.get(id).cloned())
     }
