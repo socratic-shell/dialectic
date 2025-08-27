@@ -947,22 +947,30 @@ impl IPCCommunicator {
             IPCMessageType::StoreReference => {
                 info!("Received store reference message");
 
-                // Extract ID from payload and store the rest as-is
-                let id = match message.payload.get("id").and_then(|v| v.as_str()) {
-                    Some(id) => id.to_string(),
+                // Extract key and value from payload
+                let key = match message.payload.get("key").and_then(|v| v.as_str()) {
+                    Some(key) => key,
                     None => {
-                        error!("Store reference payload missing 'id' field");
+                        error!("Store reference payload missing 'key' field");
                         return;
                     }
                 };
 
-                // Store the entire payload in the reference store
-                match reference_store.store_with_id(&id, message.payload).await {
+                let value = match message.payload.get("value") {
+                    Some(value) => value.clone(),
+                    None => {
+                        error!("Store reference payload missing 'value' field");
+                        return;
+                    }
+                };
+
+                // Store the value in the reference store
+                match reference_store.store_with_id(key, value).await {
                     Ok(()) => {
-                        info!("Successfully stored reference {}", id);
+                        info!("Successfully stored reference {}", key);
                     }
                     Err(e) => {
-                        error!("Failed to store reference {}: {}", id, e);
+                        error!("Failed to store reference {}: {}", key, e);
                     }
                 }
             }

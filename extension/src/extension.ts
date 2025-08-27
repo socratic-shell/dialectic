@@ -640,7 +640,7 @@ export class DaemonClient implements vscode.Disposable {
         }
     }
 
-    public sendStoreReference(payload: any): void {
+    public sendStoreReference(key: string, value: any): void {
         if (!this.socket || this.socket.destroyed) {
             this.outputChannel.appendLine(`Cannot send store_reference - socket not connected`);
             return;
@@ -649,13 +649,16 @@ export class DaemonClient implements vscode.Disposable {
         const storeMessage: IPCMessage = {
             shellPid: 0, // Not shell-specific
             type: 'store_reference',
-            payload,
+            payload: {
+                key,
+                value
+            },
             id: crypto.randomUUID()
         };
 
         try {
             this.socket.write(JSON.stringify(storeMessage) + '\n');
-            this.outputChannel.appendLine(`[REFERENCE] Stored reference ${payload.id} with context`);
+            this.outputChannel.appendLine(`[REFERENCE] Stored reference ${key} with context`);
         } catch (error) {
             this.outputChannel.appendLine(`Failed to send store_reference: ${error}`);
         }

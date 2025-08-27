@@ -848,8 +848,7 @@ export class WalkthroughWebviewProvider implements vscode.WebviewViewProvider {
             
             // Store reference context via IPC
             if (this.daemonClient && this.daemonClient.sendStoreReference) {
-                this.daemonClient.sendStoreReference({
-                    id: referenceId,
+                this.daemonClient.sendStoreReference(referenceId, {
                     file: filePath,
                     line: lineNumber,
                     selection: undefined,
