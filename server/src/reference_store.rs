@@ -5,14 +5,6 @@ use std::sync::Arc;
 use tokio::sync::RwLock;
 use uuid::Uuid;
 
-/// Global reference store instance
-static GLOBAL_REFERENCE_STORE: std::sync::OnceLock<ReferenceStore> = std::sync::OnceLock::new();
-
-/// Get the global reference store instance
-pub fn global_reference_store() -> &'static ReferenceStore {
-    GLOBAL_REFERENCE_STORE.get_or_init(|| ReferenceStore::new())
-}
-
 /// Context data that can be referenced by a compact ssref
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ReferenceContext {

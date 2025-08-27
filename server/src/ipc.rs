@@ -63,6 +63,7 @@ pub type Result<T> = std::result::Result<T, IPCError>;
 #[derive(Clone)]
 pub struct IPCCommunicator {
     inner: Arc<Mutex<IPCCommunicatorInner>>,
+    reference_store: Arc<crate::reference_store::ReferenceStore>,
 
     /// When true, disables actual IPC communication and uses only local logging.
     /// Used during unit testing to avoid requiring a running VSCode extension.
@@ -97,7 +98,7 @@ struct IPCCommunicatorInner {
 }
 
 impl IPCCommunicator {
-    pub async fn new(vscode_pid: u32, shell_pid: u32) -> Result<Self> {
+    pub async fn new(vscode_pid: u32, shell_pid: u32, reference_store: Arc<crate::reference_store::ReferenceStore>) -> Result<Self> {
         info!("Creating IPC communicator for VSCode PID {vscode_pid} and shell PID {shell_pid}");
 
         Ok(Self {
@@ -109,13 +110,14 @@ impl IPCCommunicator {
                 vscode_pid,
                 terminal_shell_pid: shell_pid,
             })),
+            reference_store,
             test_mode: false,
         })
     }
 
     /// Creates a new IPCCommunicator in test mode
     /// In test mode, all IPC operations are mocked and only local logging occurs
-    pub fn new_test() -> Self {
+    pub fn new_test(reference_store: Arc<crate::reference_store::ReferenceStore>) -> Self {
         Self {
             inner: Arc::new(Mutex::new(IPCCommunicatorInner {
                 write_half: None,
@@ -125,6 +127,7 @@ impl IPCCommunicator {
                 vscode_pid: 0,         // Dummy PID for test mode
                 terminal_shell_pid: 0, // Dummy PID for test mode
             })),
+            reference_store,
             test_mode: true,
         }
     }
@@ -136,7 +139,7 @@ impl IPCCommunicator {
         }
 
         // Use ensure_connection for initial connection
-        IPCCommunicatorInner::ensure_connection(Arc::clone(&self.inner)).await?;
+        IPCCommunicatorInner::ensure_connection(Arc::clone(&self.inner), Arc::clone(&self.reference_store)).await?;
 
         info!("Connected to message bus daemon via IPC");
         Ok(())
@@ -197,7 +200,7 @@ impl IPCCommunicator {
         }
 
         // Ensure connection is established before proceeding
-        IPCCommunicatorInner::ensure_connection(Arc::clone(&self.inner)).await?;
+        IPCCommunicatorInner::ensure_connection(Arc::clone(&self.inner), Arc::clone(&self.reference_store)).await?;
 
         // Create message payload with shell PID for multi-window filtering
         let shell_pid = {
@@ -618,18 +621,24 @@ impl IPCCommunicator {
 impl IPCCommunicatorInner {
     /// Ensures connection is established, connecting if necessary
     /// Idempotent - safe to call multiple times, only connects if not already connected
-    async fn ensure_connection(this: Arc<Mutex<Self>>) -> Result<()> {
+    async fn ensure_connection(
+        this: Arc<Mutex<Self>>, 
+        reference_store: Arc<crate::reference_store::ReferenceStore>
+    ) -> Result<()> {
         let mut inner = this.lock().await;
         if inner.connected {
             return Ok(()); // Already connected, nothing to do
         }
 
-        inner.attempt_connection_with_backoff(&this).await
+        inner.attempt_connection_with_backoff(&this, reference_store).await
     }
 
     /// Clears dead connection state and attempts fresh reconnection
     /// Called by reader task as "parting gift" when connection dies
-    async fn clear_connection_and_reconnect(this: Arc<Mutex<Self>>) {
+    async fn clear_connection_and_reconnect(
+        this: Arc<Mutex<Self>>,
+        reference_store: Arc<crate::reference_store::ReferenceStore>
+    ) {
         info!("Clearing dead connection state and attempting reconnection");
 
         let mut inner = this.lock().await;
@@ -646,7 +655,7 @@ impl IPCCommunicatorInner {
         }
 
         // Attempt fresh connection
-        match inner.attempt_connection_with_backoff(&this).await {
+        match inner.attempt_connection_with_backoff(&this, reference_store).await {
             Ok(()) => {
                 info!("Reader task successfully reconnected");
             }
@@ -662,7 +671,11 @@ impl IPCCommunicatorInner {
     /// Runs while holding the lock to avoid races where multiple concurrent attempts
     /// try to re-establish the connection. This ensures only one connection attempt
     /// happens at a time, preventing duplicate reader tasks or connection state corruption.
-    async fn attempt_connection_with_backoff(&mut self, this: &Arc<Mutex<Self>>) -> Result<()> {
+    async fn attempt_connection_with_backoff(
+        &mut self, 
+        this: &Arc<Mutex<Self>>,
+        reference_store: Arc<crate::reference_store::ReferenceStore>
+    ) -> Result<()> {
         // Precondition: we should only be called when disconnected
         assert!(
             !self.connected,
@@ -697,8 +710,9 @@ impl IPCCommunicatorInner {
 
                     // Spawn new reader task with cloned Arc
                     let inner_clone = Arc::clone(this);
+                    let reference_store_clone = Arc::clone(&reference_store);
                     tokio::spawn(async move {
-                        IPCCommunicator::response_reader_task(read_half, inner_clone).await;
+                        IPCCommunicator::response_reader_task(read_half, inner_clone, reference_store_clone).await;
                     });
 
                     return Ok(());
@@ -730,6 +744,7 @@ impl IPCCommunicator {
     fn response_reader_task(
         mut read_half: tokio::net::unix::OwnedReadHalf,
         inner: Arc<Mutex<IPCCommunicatorInner>>,
+        reference_store: Arc<crate::reference_store::ReferenceStore>,
     ) -> Pin<Box<dyn Future<Output = ()> + Send>> {
         async move {
             info!("Starting IPC response reader task (Unix)");
@@ -763,7 +778,7 @@ impl IPCCommunicator {
                             }
                         };
 
-                        Self::handle_incoming_message(&inner, &message_str).await;
+                        Self::handle_incoming_message(&inner, &message_str, &reference_store).await;
                     }
                     Err(e) => {
                         error!("Error reading from IPC connection: {}", e);
@@ -777,8 +792,10 @@ impl IPCCommunicator {
 
             // Spawn the reconnection attempt to avoid blocking reader task termination
             let inner_for_reconnect = Arc::clone(&inner);
+            let reference_store_for_reconnect = Arc::clone(&reference_store);
             tokio::spawn(IPCCommunicatorInner::clear_connection_and_reconnect(
                 inner_for_reconnect,
+                reference_store_for_reconnect,
             ));
 
             info!("IPC response reader task terminated");
@@ -788,7 +805,11 @@ impl IPCCommunicator {
 
     /// Processes incoming messages from the daemon
     /// Handles both responses to our requests and incoming messages (like Marco)
-    async fn handle_incoming_message(inner: &Arc<Mutex<IPCCommunicatorInner>>, message_str: &str) {
+    async fn handle_incoming_message(
+        inner: &Arc<Mutex<IPCCommunicatorInner>>, 
+        message_str: &str,
+        reference_store: &Arc<crate::reference_store::ReferenceStore>,
+    ) {
         debug!(
             "Received IPC message (PID: {}): {}",
             std::process::id(),
@@ -846,6 +867,7 @@ impl IPCCommunicator {
                 // Create a temporary IPCCommunicator to send Polo response
                 let temp_communicator = IPCCommunicator {
                     inner: Arc::clone(inner),
+                    reference_store: Arc::clone(reference_store),
                     test_mode: false,
                 };
 
@@ -944,8 +966,8 @@ impl IPCCommunicator {
                     metadata: std::collections::HashMap::new(),
                 };
 
-                // Store the reference in the global reference store
-                match crate::reference_store::global_reference_store().store_with_id(&store_payload.id, context).await {
+                // Store the reference in the reference store
+                match reference_store.store_with_id(&store_payload.id, context).await {
                     Ok(()) => {
                         info!(
                             "Successfully stored reference {} with file: {:?}, line: {:?}, comment: {:?}",

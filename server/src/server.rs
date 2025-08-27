@@ -13,11 +13,12 @@ use rmcp::{
 };
 use serde_json;
 use std::future::Future;
+use std::sync::Arc;
 use tracing::info;
 
 use crate::dialect::DialectInterpreter;
 use crate::ipc::IPCCommunicator;
-use crate::reference_store::{global_reference_store, ReferenceContext};
+use crate::reference_store::ReferenceStore;
 use crate::synthetic_pr::{
     CompletionAction, RequestReviewParams, UpdateReviewParams, UserFeedback,
 };
@@ -51,6 +52,7 @@ pub struct DialecticServer {
     ipc: IPCCommunicator,
     interpreter: DialectInterpreter<IPCCommunicator>,
     tool_router: ToolRouter<DialecticServer>,
+    reference_store: Arc<ReferenceStore>,
 }
 
 #[tool_router]
@@ -69,7 +71,10 @@ impl DialecticServer {
         // Ensure the message bus daemon is running
         Self::ensure_daemon_running(vscode_pid).await?;
 
-        let mut ipc = IPCCommunicator::new(vscode_pid, shell_pid).await?;
+        // Create shared reference store
+        let reference_store = Arc::new(ReferenceStore::new());
+
+        let mut ipc = IPCCommunicator::new(vscode_pid, shell_pid, reference_store.clone()).await?;
 
         // Initialize IPC connection to message bus daemon (not directly to VSCode)
         ipc.initialize().await?;
@@ -92,6 +97,7 @@ impl DialecticServer {
             ipc: ipc.clone(),
             interpreter,
             tool_router: Self::tool_router(),
+            reference_store,
         })
     }
 
@@ -175,7 +181,8 @@ impl DialecticServer {
     /// Creates a new DialecticServer in test mode
     /// In test mode, IPC operations are mocked and don't require a VSCode connection
     pub fn new_test() -> Self {
-        let ipc = IPCCommunicator::new_test();
+        let reference_store = Arc::new(ReferenceStore::new());
+        let ipc = IPCCommunicator::new_test(reference_store.clone());
         info!("DialecticServer initialized in test mode");
 
         // Initialize Dialect interpreter with IDE functions for test mode
@@ -191,6 +198,7 @@ impl DialecticServer {
             ipc,
             interpreter,
             tool_router: Self::tool_router(),
+            reference_store,
         }
     }
 
@@ -653,7 +661,7 @@ impl DialecticServer {
             )
             .await;
 
-        match global_reference_store().get(&params.id).await {
+        match self.reference_store.get(&params.id).await {
             Ok(Some(context)) => {
                 self.ipc
                     .send_log(
