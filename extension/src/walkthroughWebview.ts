@@ -3,7 +3,7 @@ import * as crypto from 'crypto';
 import * as path from 'path';
 import * as MarkdownIt from 'markdown-it';
 import { openDialecticUrl } from './fileNavigation';
-import { DaemonClient } from './extension';
+import { Bus } from './bus';
 
 // Placement state for unified link and comment management
 interface PlacementState {
@@ -79,7 +79,7 @@ export class WalkthroughWebviewProvider implements vscode.WebviewViewProvider {
     constructor(
         private readonly _extensionUri: vscode.Uri,
         private readonly outputChannel: vscode.OutputChannel,
-        private daemonClient: DaemonClient | undefined, // Set after daemon client is created
+        private daemonClient: any | undefined, // Set after daemon client is created - using any to avoid circular import
         private context?: vscode.ExtensionContext
     ) {
         this.md = this.setupMarkdownRenderer();
@@ -672,9 +672,9 @@ export class WalkthroughWebviewProvider implements vscode.WebviewViewProvider {
     }
 
     /**
-     * Set the daemon client after it's created
+     * Set the daemon client after it's created (deprecated - using Bus now)
      */
-    setDaemonClient(daemonClient: DaemonClient): void {
+    setDaemonClient(daemonClient: any): void {
         this.daemonClient = daemonClient;
     }
 
@@ -682,10 +682,8 @@ export class WalkthroughWebviewProvider implements vscode.WebviewViewProvider {
      * Send a message to the active AI terminal (shared with Ask Socratic Shell)
      */
     private async sendToActiveShell(message: string): Promise<void> {
-        if (!this.daemonClient) {
-            throw new Error('DaemonClient not initialized - setDaemonClient must be called first');
-        }
-
+        const bus = Bus.getInstance();
+        
         const terminals = vscode.window.terminals;
         if (terminals.length === 0) {
             vscode.window.showWarningMessage('No terminals found. Please open a terminal with an active AI assistant.');
@@ -693,7 +691,7 @@ export class WalkthroughWebviewProvider implements vscode.WebviewViewProvider {
         }
 
         // Get active terminals with MCP servers from registry
-        const activeTerminals = this.daemonClient.getActiveTerminals();
+        const activeTerminals = bus.getActiveTerminals();
         this.outputChannel.appendLine(`Active MCP server terminals: [${Array.from(activeTerminals).join(', ')}]`);
 
         if (activeTerminals.size === 0) {
@@ -845,11 +843,9 @@ export class WalkthroughWebviewProvider implements vscode.WebviewViewProvider {
             // Generate compact reference instead of verbose XML
             const referenceId = crypto.randomUUID();
             
-            // Store reference context via IPC
-            if (!this.daemonClient) {
-                throw new Error('DaemonClient not initialized - setDaemonClient must be called first');
-            }
-            await this.daemonClient.sendReferenceToActiveShell(referenceId, {
+            // Store reference context via bus
+            const bus = Bus.getInstance();
+            await bus.sendReferenceToActiveShell(referenceId, {
                 file: filePath,
                 line: lineNumber,
                 selection: undefined,

@@ -5,6 +5,7 @@ import * as fs from 'fs';
 import * as crypto from 'crypto';
 import { SyntheticPRProvider } from './syntheticPRProvider';
 import { WalkthroughWebviewProvider } from './walkthroughWebview';
+import { Bus } from './bus';
 
 // TEST TEST TEST 
 
@@ -929,6 +930,10 @@ export function activate(context: vscode.ExtensionContext) {
     outputChannel.appendLine('Dialectic extension is now active');
     console.log('Dialectic extension is now active');
 
+    // Initialize the central bus
+    const bus = Bus.getInstance();
+    bus.init(context, outputChannel);
+
     // 💡: PID Discovery Testing - Log VSCode and terminal PIDs
     logPIDDiscovery(outputChannel).catch(error => {
         outputChannel.appendLine(`Error in PID discovery: ${error}`);
@@ -936,9 +941,11 @@ export function activate(context: vscode.ExtensionContext) {
 
     // Create synthetic PR provider for AI-generated pull requests
     const syntheticPRProvider = new SyntheticPRProvider(context);
+    bus.setSyntheticPRProvider(syntheticPRProvider);
 
     // Create walkthrough webview provider
     const walkthroughProvider = new WalkthroughWebviewProvider(context.extensionUri, outputChannel, undefined, context);
+    bus.setWalkthroughProvider(walkthroughProvider);
     context.subscriptions.push(
         vscode.window.registerWebviewViewProvider(WalkthroughWebviewProvider.viewType, walkthroughProvider)
     );
@@ -953,6 +960,7 @@ export function activate(context: vscode.ExtensionContext) {
 
     // 💡: Set up daemon client connection for message bus communication
     const daemonClient = new DaemonClient(context, outputChannel, syntheticPRProvider, walkthroughProvider);
+    bus.setDaemonClient(daemonClient);
     
     // Set daemon client on walkthrough provider for terminal access
     walkthroughProvider.setDaemonClient(daemonClient);
@@ -964,7 +972,7 @@ export function activate(context: vscode.ExtensionContext) {
     });
 
     // 💡: Set up universal selection detection for interactive code review
-    setupSelectionDetection(context, outputChannel, daemonClient);
+    setupSelectionDetection();
 
     // Register review action command for tree view buttons
     const reviewActionCommand = vscode.commands.registerCommand('dialectic.reviewAction', (action: string) => {
@@ -992,7 +1000,10 @@ export function activate(context: vscode.ExtensionContext) {
 }
 
 // 💡: Set up universal selection detection for interactive code review
-function setupSelectionDetection(context: vscode.ExtensionContext, outputChannel: vscode.OutputChannel, daemonClient: DaemonClient): void {
+function setupSelectionDetection(): void {
+    const bus = Bus.getInstance();
+    const { context, outputChannel } = bus;
+    
     outputChannel.appendLine('Setting up universal selection detection...');
 
     // 💡: Track current selection state
@@ -1058,11 +1069,10 @@ function setupSelectionDetection(context: vscode.ExtensionContext, outputChannel
             outputChannel.appendLine(`Location: ${filePath}:${startLine}:${startColumn}-${endLine}:${endColumn}`);
 
             // 💡: Use new compact reference system instead of verbose XML
-            const targetTerminal = await findQChatTerminal(outputChannel, daemonClient, context);
+            const targetTerminal = await findQChatTerminal();
             if (targetTerminal) {
                 const compactMessage = await createCompactSelectionReference(
-                    selectedText, filePath, startLine, startColumn, endLine, endColumn, 
-                    daemonClient, outputChannel
+                    selectedText, filePath, startLine, startColumn, endLine, endColumn
                 );
                 targetTerminal.sendText(compactMessage, false); // false = don't execute, just insert text
                 targetTerminal.show(); // Bring terminal into focus
@@ -1081,7 +1091,9 @@ function setupSelectionDetection(context: vscode.ExtensionContext, outputChannel
 }
 
 // 💡: Phase 4 - Intelligent terminal detection using registry
-async function findQChatTerminal(outputChannel: vscode.OutputChannel, daemonClient: DaemonClient, context: vscode.ExtensionContext): Promise<vscode.Terminal | null> {
+async function findQChatTerminal(): Promise<vscode.Terminal | null> {
+    const bus = Bus.getInstance();
+    const { outputChannel, context } = bus;
     const terminals = vscode.window.terminals;
     outputChannel.appendLine(`Found ${terminals.length} open terminals`);
 
@@ -1091,7 +1103,7 @@ async function findQChatTerminal(outputChannel: vscode.OutputChannel, daemonClie
     }
 
     // Get active terminals with MCP servers from registry
-    const activeTerminals = daemonClient.getActiveTerminals();
+    const activeTerminals = bus.getActiveTerminals();
     outputChannel.appendLine(`Active MCP server terminals: [${Array.from(activeTerminals).join(', ')}]`);
 
     if (activeTerminals.size === 0) {
@@ -1251,10 +1263,10 @@ async function createCompactSelectionReference(
     startLine: number,
     startColumn: number,
     endLine: number,
-    endColumn: number,
-    daemonClient: DaemonClient,
-    outputChannel: vscode.OutputChannel
+    endColumn: number
 ): Promise<string> {
+    const bus = Bus.getInstance();
+    
     try {
         const relativePath = vscode.workspace.asRelativePath(filePath);
         const referenceId = crypto.randomUUID();
@@ -1266,16 +1278,16 @@ async function createCompactSelectionReference(
             selection: selectedText.length > 0 ? selectedText : undefined
         };
 
-        // Store the reference using the daemon client
-        await daemonClient.sendReferenceToActiveShell(referenceId, referenceData);
+        // Store the reference using the bus
+        await bus.sendReferenceToActiveShell(referenceId, referenceData);
         
         // Return compact reference tag
         const compactRef = `<ssref id="${referenceId}"/>\n\n`;
-        outputChannel.appendLine(`Created compact reference ${referenceId} for ${relativePath}:${startLine}`);
+        bus.log(`Created compact reference ${referenceId} for ${relativePath}:${startLine}`);
         
         return compactRef;
     } catch (error) {
-        outputChannel.appendLine(`Failed to create compact reference: ${error}`);
+        bus.log(`Failed to create compact reference: ${error}`);
         // Fallback to old format if compact reference fails
         return formatSelectionMessageLegacy(selectedText, filePath, startLine, startColumn, endLine, endColumn);
     }
