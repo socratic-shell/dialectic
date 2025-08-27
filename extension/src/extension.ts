@@ -1064,18 +1064,20 @@ function setupSelectionDetection(bus: Bus): void {
             outputChannel.appendLine(`Selected: "${selectedText}"`);
             outputChannel.appendLine(`Location: ${filePath}:${startLine}:${startColumn}-${endLine}:${endColumn}`);
 
-            // 💡: Use new compact reference system instead of verbose XML
-            const targetTerminal = await findQChatTerminal(bus);
-            if (targetTerminal) {
-                const compactMessage = await createCompactSelectionReference(
-                    selectedText, filePath, startLine, startColumn, endLine, endColumn, bus
-                );
-                targetTerminal.sendText(compactMessage, false); // false = don't execute, just insert text
-                targetTerminal.show(); // Bring terminal into focus
-                outputChannel.appendLine(`Compact reference injected into terminal: ${targetTerminal.name}`);
-            } else {
-                outputChannel.appendLine('No suitable Q chat terminal found');
-                vscode.window.showWarningMessage('No suitable terminal found. Please ensure you have a terminal with an active MCP server (like Q chat) running.');
+            // Use new consolidated sendToActiveTerminal method
+            try {
+                const relativePath = vscode.workspace.asRelativePath(filePath);
+                const referenceData = {
+                    file: relativePath,
+                    line: startLine,
+                    selection: selectedText.length > 0 ? selectedText : undefined
+                };
+
+                await bus.sendToActiveTerminal(referenceData);
+                outputChannel.appendLine(`Compact reference sent for ${relativePath}:${startLine}`);
+            } catch (error) {
+                outputChannel.appendLine(`Failed to send reference: ${error}`);
+                vscode.window.showErrorMessage('Failed to send reference to terminal');
             }
         } else {
             outputChannel.appendLine('Chat action triggered but no current selection found');
