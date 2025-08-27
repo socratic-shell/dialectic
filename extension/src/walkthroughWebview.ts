@@ -679,67 +679,6 @@ export class WalkthroughWebviewProvider implements vscode.WebviewViewProvider {
     }
 
     /**
-     * Send a reference to the active AI terminal via IPC
-     */
-    private async sendReferenceToActiveShell(key: string, value: any): Promise<void> {
-        if (!this.daemonClient) {
-            vscode.window.showErrorMessage('Daemon client not available. Please ensure Dialectic is properly connected.');
-            return;
-        }
-
-        const terminals = vscode.window.terminals;
-        if (terminals.length === 0) {
-            vscode.window.showWarningMessage('No terminals found. Please open a terminal with an active AI assistant.');
-            return;
-        }
-
-        // Get active terminals with MCP servers from registry
-        const activeTerminals = this.daemonClient.getActiveTerminals();
-        this.outputChannel.appendLine(`Active MCP server terminals: [${Array.from(activeTerminals).join(', ')}]`);
-
-        if (activeTerminals.size === 0) {
-            vscode.window.showWarningMessage('No terminals with active MCP servers found. Please ensure you have a terminal with an active AI assistant (like Q chat or Claude CLI) running.');
-            return;
-        }
-
-        // Filter terminals to only those with active MCP servers
-        const terminalChecks = await Promise.all(
-            terminals.map(async (terminal) => {
-                const shellPID = await terminal.processId;
-                const isAiEnabled = shellPID && activeTerminals.has(shellPID);
-                return { terminal, shellPID, isAiEnabled };
-            })
-        );
-
-        const aiEnabledTerminals = terminalChecks
-            .filter(check => check.isAiEnabled)
-            .map(check => ({ terminal: check.terminal, shellPID: check.shellPID }));
-
-        if (aiEnabledTerminals.length === 0) {
-            vscode.window.showWarningMessage('No AI-enabled terminals found. Please ensure you have a terminal with an active MCP server running.');
-            return;
-        }
-
-        // Simple case - exactly one AI-enabled terminal
-        if (aiEnabledTerminals.length === 1) {
-            const { shellPID } = aiEnabledTerminals[0];
-            if (shellPID) {
-                this.daemonClient.sendStoreReferenceToShell(shellPID, key, value);
-                this.outputChannel.appendLine(`Reference ${key} sent to shell ${shellPID}`);
-            }
-            return;
-        }
-
-        // Multiple terminals - send to all (or we could show a picker)
-        for (const { shellPID } of aiEnabledTerminals) {
-            if (shellPID) {
-                this.daemonClient.sendStoreReferenceToShell(shellPID, key, value);
-                this.outputChannel.appendLine(`Reference ${key} sent to shell ${shellPID}`);
-            }
-        }
-    }
-
-    /**
      * Send a message to the active AI terminal (shared with Ask Socratic Shell)
      */
     private async sendToActiveShell(message: string): Promise<void> {
@@ -908,12 +847,14 @@ export class WalkthroughWebviewProvider implements vscode.WebviewViewProvider {
             const referenceId = crypto.randomUUID();
             
             // Store reference context via IPC
-            await this.sendReferenceToActiveShell(referenceId, {
-                file: filePath,
-                line: lineNumber,
-                selection: undefined,
-                user_comment: text
-            });
+            if (this.daemonClient) {
+                await this.daemonClient.sendReferenceToActiveShell(referenceId, {
+                    file: filePath,
+                    line: lineNumber,
+                    selection: undefined,
+                    user_comment: text
+                });
+            }
             
             // Send compact ssref tag to terminal
             const compactRef = `<ssref id="${referenceId}"/>\n\n`;
