@@ -1076,7 +1076,7 @@ function setupSelectionDetection(bus: Bus): void {
                     selectedText: selectedText,
                 };
 
-                await bus.sendToActiveTerminal(referenceData);
+                await bus.sendToActiveTerminal(referenceData, false);
                 outputChannel.appendLine(`Compact reference sent for ${relativePath}:${startLine}`);
             } catch (error) {
                 outputChannel.appendLine(`Failed to send reference: ${error}`);
