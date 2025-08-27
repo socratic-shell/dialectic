@@ -33,21 +33,6 @@ pub struct ExpandReferenceParams {
 }
 // ANCHOR_END: expand_reference_params
 
-/// Parameters for the store_reference tool
-// ANCHOR: store_reference_params
-#[derive(Debug, Serialize, Deserialize, schemars::JsonSchema)]
-pub struct StoreReferenceParams {
-    /// File path relative to workspace (optional)
-    pub file: Option<String>,
-    /// Line number (1-based, optional)
-    pub line: Option<u32>,
-    /// Selected text content (optional)
-    pub selection: Option<String>,
-    /// User comment or question (optional)
-    pub user_comment: Option<String>,
-}
-// ANCHOR_END: store_reference_params
-
 /// Parameters for the ide_operation tool
 // ANCHOR: ide_operation_params
 #[derive(Debug, Deserialize, Serialize, schemars::JsonSchema)]
@@ -648,64 +633,6 @@ impl DialecticServer {
         })?;
 
         Ok(CallToolResult::success(vec![json_content]))
-    }
-
-    /// Store context and generate a compact reference
-    ///
-    /// This tool allows the extension to store context data and get back a compact ssref ID.
-    /// The reference can later be expanded by LLMs using expand_reference.
-    // ANCHOR: store_reference_tool
-    #[tool(description = "Store context data (file, line, selection, comment) and generate a compact reference ID. \
-                       Returns an ssref tag that can be used in place of verbose XML.")]
-    async fn store_reference(
-        &self,
-        Parameters(params): Parameters<StoreReferenceParams>,
-    ) -> Result<CallToolResult, McpError> {
-    // ANCHOR_END: store_reference_tool
-        self.ipc
-            .send_log(
-                LogLevel::Debug,
-                format!("Storing reference with context: {:?}", params),
-            )
-            .await;
-
-        let context = ReferenceContext {
-            file: params.file,
-            line: params.line,
-            selection: params.selection,
-            user_comment: params.user_comment,
-            metadata: std::collections::HashMap::new(),
-        };
-
-        match global_reference_store().store(context).await {
-            Ok(id) => {
-                self.ipc
-                    .send_log(
-                        LogLevel::Info,
-                        format!("Reference stored with ID: {}", id),
-                    )
-                    .await;
-
-                // Return the compact ssref tag
-                let ssref_tag = format!("<ssref id=\"{}\"/>", id);
-                Ok(CallToolResult::success(vec![Content::text(ssref_tag)]))
-            }
-            Err(e) => {
-                self.ipc
-                    .send_log(
-                        LogLevel::Error,
-                        format!("Error storing reference: {}", e),
-                    )
-                    .await;
-
-                Err(McpError::internal_error(
-                    "Failed to store reference",
-                    Some(serde_json::json!({
-                        "error": e.to_string()
-                    })),
-                ))
-            }
-        }
     }
 
     /// Expand a compact reference to get full context
