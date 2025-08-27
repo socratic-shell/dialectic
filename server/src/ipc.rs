@@ -7,7 +7,7 @@ use crate::synthetic_pr::UserFeedback;
 use crate::types::{
     FindAllReferencesPayload, GetSelectionResult, GoodbyePayload, IPCMessage, IPCMessageType,
     LogLevel, LogParams, PoloPayload, ResolveSymbolByNamePayload,
-    ResponsePayload, StoreReferencePayload, UserFeedbackPayload,
+    ResponsePayload, UserFeedbackPayload,
 };
 use anyhow::Context;
 use futures::FutureExt;
@@ -947,34 +947,22 @@ impl IPCCommunicator {
             IPCMessageType::StoreReference => {
                 info!("Received store reference message");
 
-                // Parse the store reference payload
-                let store_payload: StoreReferencePayload =
-                    match serde_json::from_value(message.payload) {
-                        Ok(payload) => payload,
-                        Err(e) => {
-                            error!("Failed to parse store reference payload: {}", e);
-                            return;
-                        }
-                    };
+                // Extract ID from payload and store the rest as-is
+                let id = match message.payload.get("id").and_then(|v| v.as_str()) {
+                    Some(id) => id.to_string(),
+                    None => {
+                        error!("Store reference payload missing 'id' field");
+                        return;
+                    }
+                };
 
-                // Create reference context as JSON
-                let context = serde_json::json!({
-                    "file": store_payload.file,
-                    "line": store_payload.line,
-                    "selection": store_payload.selection,
-                    "user_comment": store_payload.user_comment
-                });
-
-                // Store the reference in the reference store
-                match reference_store.store_with_id(&store_payload.id, context).await {
+                // Store the entire payload in the reference store
+                match reference_store.store_with_id(&id, message.payload).await {
                     Ok(()) => {
-                        info!(
-                            "Successfully stored reference {} with file: {:?}, line: {:?}, comment: {:?}",
-                            store_payload.id, store_payload.file, store_payload.line, store_payload.user_comment
-                        );
+                        info!("Successfully stored reference {}", id);
                     }
                     Err(e) => {
-                        error!("Failed to store reference {}: {}", store_payload.id, e);
+                        error!("Failed to store reference {}: {}", id, e);
                     }
                 }
             }
