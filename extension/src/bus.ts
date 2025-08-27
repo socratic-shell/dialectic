@@ -1,4 +1,7 @@
 import * as vscode from 'vscode';
+import { DaemonClient } from './extension';
+import { SyntheticPRProvider } from './syntheticPRProvider';
+import { WalkthroughWebviewProvider } from './walkthroughWebview';
 
 /**
  * Central message bus for extension components
@@ -9,9 +12,9 @@ export class Bus {
     
     public context!: vscode.ExtensionContext;
     public outputChannel!: vscode.OutputChannel;
-    public daemonClient!: any; // Will be DaemonClient once created
-    public syntheticPRProvider!: any; // Will be SyntheticPRProvider once created
-    public walkthroughProvider!: any; // Will be WalkthroughWebviewProvider once created
+    private _daemonClient: DaemonClient | undefined;
+    private _syntheticPRProvider: SyntheticPRProvider | undefined;
+    private _walkthroughProvider: WalkthroughWebviewProvider | undefined;
 
     private constructor() {}
 
@@ -29,30 +32,46 @@ export class Bus {
     }
 
     // Register components as they're created
-    setDaemonClient(client: any) {
-        this.daemonClient = client;
+    setDaemonClient(client: DaemonClient) {
+        this._daemonClient = client;
     }
 
-    setSyntheticPRProvider(provider: any) {
-        this.syntheticPRProvider = provider;
+    setSyntheticPRProvider(provider: SyntheticPRProvider) {
+        this._syntheticPRProvider = provider;
     }
 
-    setWalkthroughProvider(provider: any) {
-        this.walkthroughProvider = provider;
+    setWalkthroughProvider(provider: WalkthroughWebviewProvider) {
+        this._walkthroughProvider = provider;
+    }
+
+    // Accessors with assertions
+    get daemonClient(): DaemonClient {
+        if (!this._daemonClient) {
+            throw new Error('DaemonClient not initialized on Bus');
+        }
+        return this._daemonClient;
+    }
+
+    get syntheticPRProvider(): SyntheticPRProvider {
+        if (!this._syntheticPRProvider) {
+            throw new Error('SyntheticPRProvider not initialized on Bus');
+        }
+        return this._syntheticPRProvider;
+    }
+
+    get walkthroughProvider(): WalkthroughWebviewProvider {
+        if (!this._walkthroughProvider) {
+            throw new Error('WalkthroughWebviewProvider not initialized on Bus');
+        }
+        return this._walkthroughProvider;
     }
 
     // Convenience methods for common operations
     async sendReferenceToActiveShell(referenceId: string, referenceData: any): Promise<void> {
-        if (!this.daemonClient) {
-            throw new Error('DaemonClient not available on bus');
-        }
         return this.daemonClient.sendReferenceToActiveShell(referenceId, referenceData);
     }
 
     getActiveTerminals(): Set<number> {
-        if (!this.daemonClient) {
-            return new Set();
-        }
         return this.daemonClient.getActiveTerminals();
     }
 
