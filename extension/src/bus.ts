@@ -8,25 +8,13 @@ import { WalkthroughWebviewProvider } from './walkthroughWebview';
  * Reduces tight coupling by providing shared access to all major components
  */
 export class Bus {
-    private static instance: Bus;
-    
-    public context!: vscode.ExtensionContext;
-    public outputChannel!: vscode.OutputChannel;
+    public context: vscode.ExtensionContext;
+    public outputChannel: vscode.OutputChannel;
     private _daemonClient: DaemonClient | undefined;
     private _syntheticPRProvider: SyntheticPRProvider | undefined;
     private _walkthroughProvider: WalkthroughWebviewProvider | undefined;
 
-    private constructor() {}
-
-    static getInstance(): Bus {
-        if (!Bus.instance) {
-            Bus.instance = new Bus();
-        }
-        return Bus.instance;
-    }
-
-    // Initialize with core components
-    init(context: vscode.ExtensionContext, outputChannel: vscode.OutputChannel) {
+    constructor(context: vscode.ExtensionContext, outputChannel: vscode.OutputChannel) {
         this.context = context;
         this.outputChannel = outputChannel;
     }

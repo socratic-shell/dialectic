@@ -930,9 +930,8 @@ export function activate(context: vscode.ExtensionContext) {
     outputChannel.appendLine('Dialectic extension is now active');
     console.log('Dialectic extension is now active');
 
-    // Initialize the central bus
-    const bus = Bus.getInstance();
-    bus.init(context, outputChannel);
+    // Create the central bus
+    const bus = new Bus(context, outputChannel);
 
     // 💡: PID Discovery Testing - Log VSCode and terminal PIDs
     logPIDDiscovery(outputChannel).catch(error => {
@@ -944,7 +943,7 @@ export function activate(context: vscode.ExtensionContext) {
     bus.setSyntheticPRProvider(syntheticPRProvider);
 
     // Create walkthrough webview provider
-    const walkthroughProvider = new WalkthroughWebviewProvider(context.extensionUri, outputChannel, undefined, context);
+    const walkthroughProvider = new WalkthroughWebviewProvider(context.extensionUri, bus);
     bus.setWalkthroughProvider(walkthroughProvider);
     context.subscriptions.push(
         vscode.window.registerWebviewViewProvider(WalkthroughWebviewProvider.viewType, walkthroughProvider)
@@ -962,8 +961,6 @@ export function activate(context: vscode.ExtensionContext) {
     const daemonClient = new DaemonClient(context, outputChannel, syntheticPRProvider, walkthroughProvider);
     bus.setDaemonClient(daemonClient);
     
-    // Set daemon client on walkthrough provider for terminal access
-    walkthroughProvider.setDaemonClient(daemonClient);
     daemonClient.start();
 
     // Set up comment callback to send comments as feedback
@@ -972,7 +969,7 @@ export function activate(context: vscode.ExtensionContext) {
     });
 
     // 💡: Set up universal selection detection for interactive code review
-    setupSelectionDetection();
+    setupSelectionDetection(bus);
 
     // Register review action command for tree view buttons
     const reviewActionCommand = vscode.commands.registerCommand('dialectic.reviewAction', (action: string) => {
@@ -1000,8 +997,7 @@ export function activate(context: vscode.ExtensionContext) {
 }
 
 // 💡: Set up universal selection detection for interactive code review
-function setupSelectionDetection(): void {
-    const bus = Bus.getInstance();
+function setupSelectionDetection(bus: Bus): void {
     const { context, outputChannel } = bus;
     
     outputChannel.appendLine('Setting up universal selection detection...');
@@ -1069,10 +1065,10 @@ function setupSelectionDetection(): void {
             outputChannel.appendLine(`Location: ${filePath}:${startLine}:${startColumn}-${endLine}:${endColumn}`);
 
             // 💡: Use new compact reference system instead of verbose XML
-            const targetTerminal = await findQChatTerminal();
+            const targetTerminal = await findQChatTerminal(bus);
             if (targetTerminal) {
                 const compactMessage = await createCompactSelectionReference(
-                    selectedText, filePath, startLine, startColumn, endLine, endColumn
+                    selectedText, filePath, startLine, startColumn, endLine, endColumn, bus
                 );
                 targetTerminal.sendText(compactMessage, false); // false = don't execute, just insert text
                 targetTerminal.show(); // Bring terminal into focus
@@ -1091,8 +1087,7 @@ function setupSelectionDetection(): void {
 }
 
 // 💡: Phase 4 - Intelligent terminal detection using registry
-async function findQChatTerminal(): Promise<vscode.Terminal | null> {
-    const bus = Bus.getInstance();
+async function findQChatTerminal(bus: Bus): Promise<vscode.Terminal | null> {
     const { outputChannel, context } = bus;
     const terminals = vscode.window.terminals;
     outputChannel.appendLine(`Found ${terminals.length} open terminals`);
@@ -1263,10 +1258,9 @@ async function createCompactSelectionReference(
     startLine: number,
     startColumn: number,
     endLine: number,
-    endColumn: number
+    endColumn: number,
+    bus: Bus
 ): Promise<string> {
-    const bus = Bus.getInstance();
-    
     try {
         const relativePath = vscode.workspace.asRelativePath(filePath);
         const referenceId = crypto.randomUUID();

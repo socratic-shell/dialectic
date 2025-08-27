@@ -78,19 +78,15 @@ export class WalkthroughWebviewProvider implements vscode.WebviewViewProvider {
 
     constructor(
         private readonly _extensionUri: vscode.Uri,
-        private readonly outputChannel: vscode.OutputChannel,
-        private daemonClient: any | undefined, // Set after daemon client is created - using any to avoid circular import
-        private context?: vscode.ExtensionContext
+        private readonly bus: Bus
     ) {
         this.md = this.setupMarkdownRenderer();
         this.diffContentProvider = new WalkthroughDiffContentProvider();
 
-        // Register diff content provider if context is available
-        if (this.context) {
-            this.context.subscriptions.push(
-                vscode.workspace.registerTextDocumentContentProvider('walkthrough-diff', this.diffContentProvider)
-            );
-        }
+        // Register diff content provider
+        this.bus.context.subscriptions.push(
+            vscode.workspace.registerTextDocumentContentProvider('walkthrough-diff', this.diffContentProvider)
+        );
     }
 
     private setupMarkdownRenderer(): MarkdownIt {
@@ -183,7 +179,7 @@ export class WalkthroughWebviewProvider implements vscode.WebviewViewProvider {
                 break;
             case 'openFile':
                 console.log('Walkthrough: openFile command received:', message.dialecticUrl);
-                await openDialecticUrl(message.dialecticUrl, this.outputChannel, this.baseUri, this.placementMemory);
+                await openDialecticUrl(message.dialecticUrl, this.bus.outputChannel, this.baseUri, this.placementMemory);
                 // After placement, update the UI
                 this.updateLinkPlacementUI(message.dialecticUrl);
                 break;
@@ -193,7 +189,7 @@ export class WalkthroughWebviewProvider implements vscode.WebviewViewProvider {
                 break;
             case 'action':
                 console.log('Walkthrough: action received:', message.message);
-                this.outputChannel.appendLine(`Action button clicked: ${message.message}`);
+                this.bus.outputChannel.appendLine(`Action button clicked: ${message.message}`);
 
                 // Send message to active AI terminal
                 await this.sendToActiveShell(message.message);
@@ -239,7 +235,7 @@ export class WalkthroughWebviewProvider implements vscode.WebviewViewProvider {
         // Clear placement memory
         this.placementMemory.clear();
         
-        this.outputChannel.appendLine('Walkthrough cleared');
+        this.bus.outputChannel.appendLine('Walkthrough cleared');
     }
 
     /**
@@ -671,19 +667,12 @@ export class WalkthroughWebviewProvider implements vscode.WebviewViewProvider {
         }
     }
 
-    /**
-     * Set the daemon client after it's created (deprecated - using Bus now)
-     */
-    setDaemonClient(daemonClient: any): void {
-        this.daemonClient = daemonClient;
-    }
+
 
     /**
      * Send a message to the active AI terminal (shared with Ask Socratic Shell)
      */
     private async sendToActiveShell(message: string): Promise<void> {
-        const bus = Bus.getInstance();
-        
         const terminals = vscode.window.terminals;
         if (terminals.length === 0) {
             vscode.window.showWarningMessage('No terminals found. Please open a terminal with an active AI assistant.');
@@ -691,8 +680,8 @@ export class WalkthroughWebviewProvider implements vscode.WebviewViewProvider {
         }
 
         // Get active terminals with MCP servers from registry
-        const activeTerminals = bus.getActiveTerminals();
-        this.outputChannel.appendLine(`Active MCP server terminals: [${Array.from(activeTerminals).join(', ')}]`);
+        const activeTerminals = this.bus.getActiveTerminals();
+        this.bus.outputChannel.appendLine(`Active MCP server terminals: [${Array.from(activeTerminals).join(', ')}]`);
 
         if (activeTerminals.size === 0) {
             vscode.window.showWarningMessage('No terminals with active MCP servers found. Please ensure you have a terminal with an active AI assistant (like Q chat or Claude CLI) running.');
@@ -722,7 +711,7 @@ export class WalkthroughWebviewProvider implements vscode.WebviewViewProvider {
             const terminal = aiEnabledTerminals[0];
             terminal.sendText(message, false); // false = don't execute, just insert text
             terminal.show(); // Bring terminal into focus
-            this.outputChannel.appendLine(`Message sent to terminal: ${terminal.name}`);
+            this.bus.outputChannel.appendLine(`Message sent to terminal: ${terminal.name}`);
             vscode.window.showInformationMessage(`Message sent to ${terminal.name}`);
             return;
         }
@@ -743,7 +732,7 @@ export class WalkthroughWebviewProvider implements vscode.WebviewViewProvider {
         if (selectedTerminal) {
             selectedTerminal.terminal.sendText(message, false);
             selectedTerminal.terminal.show();
-            this.outputChannel.appendLine(`Message sent to terminal: ${selectedTerminal.terminal.name}`);
+            this.bus.outputChannel.appendLine(`Message sent to terminal: ${selectedTerminal.terminal.name}`);
             vscode.window.showInformationMessage(`Message sent to ${selectedTerminal.terminal.name}`);
         }
     }
@@ -844,8 +833,7 @@ export class WalkthroughWebviewProvider implements vscode.WebviewViewProvider {
             const referenceId = crypto.randomUUID();
             
             // Store reference context via bus
-            const bus = Bus.getInstance();
-            await bus.sendReferenceToActiveShell(referenceId, {
+            await this.bus.sendReferenceToActiveShell(referenceId, {
                 file: filePath,
                 line: lineNumber,
                 selection: undefined,
@@ -855,10 +843,10 @@ export class WalkthroughWebviewProvider implements vscode.WebviewViewProvider {
             // Send compact ssref tag to terminal
             const compactRef = `<ssref id="${referenceId}"/>\n\n`;
             await this.sendToActiveShell(compactRef);
-            this.outputChannel.appendLine(`Comment reply sent as compact reference: ${referenceId}`);
+            this.bus.outputChannel.appendLine(`Comment reply sent as compact reference: ${referenceId}`);
         } catch (error) {
             console.error('[WALKTHROUGH] Error sending comment to shell:', error);
-            this.outputChannel.appendLine(`Error sending comment: ${error}`);
+            this.bus.outputChannel.appendLine(`Error sending comment: ${error}`);
         }
     }
 
@@ -932,7 +920,7 @@ export class WalkthroughWebviewProvider implements vscode.WebviewViewProvider {
         this.placementMemory?.delete(linkKey);
 
         // Open the link again - this will show disambiguation
-        await openDialecticUrl(dialecticUrl, this.outputChannel, this.baseUri, this.placementMemory);
+        await openDialecticUrl(dialecticUrl, this.bus.outputChannel, this.baseUri, this.placementMemory);
 
         // Update UI after relocation
         this.updateLinkPlacementUI(dialecticUrl);
@@ -1480,10 +1468,10 @@ export class WalkthroughWebviewProvider implements vscode.WebviewViewProvider {
             </body>
             </html>`;
 
-        this.outputChannel.appendLine(`-----------------------------------------`);
-        this.outputChannel.appendLine(`WEBVIEW HTML FOLLOWS:`);
-        this.outputChannel.appendLine(html);
-        this.outputChannel.appendLine(`-----------------------------------------`);
+        this.bus.outputChannel.appendLine(`-----------------------------------------`);
+        this.bus.outputChannel.appendLine(`WEBVIEW HTML FOLLOWS:`);
+        this.bus.outputChannel.appendLine(html);
+        this.bus.outputChannel.appendLine(`-----------------------------------------`);
 
         return html;
     }
