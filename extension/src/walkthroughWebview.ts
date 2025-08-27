@@ -191,8 +191,8 @@ export class WalkthroughWebviewProvider implements vscode.WebviewViewProvider {
                 console.log('Walkthrough: action received:', message.message);
                 this.bus.outputChannel.appendLine(`Action button clicked: ${message.message}`);
 
-                // Send message to active AI terminal
-                await this.sendToActiveShell(message.message);
+                // Send message to active AI terminal using Bus method
+                await this.bus.sendTextToActiveTerminal(message.message);
                 break;
             case 'showDiff':
                 console.log('Walkthrough: showDiff command received:', message.filePath);
@@ -667,76 +667,6 @@ export class WalkthroughWebviewProvider implements vscode.WebviewViewProvider {
         }
     }
 
-
-
-    /**
-     * Send a message to the active AI terminal (shared with Ask Socratic Shell)
-     */
-    private async sendToActiveShell(message: string): Promise<void> {
-        const terminals = vscode.window.terminals;
-        if (terminals.length === 0) {
-            vscode.window.showWarningMessage('No terminals found. Please open a terminal with an active AI assistant.');
-            return;
-        }
-
-        // Get active terminals with MCP servers from registry
-        const activeTerminals = this.bus.getActiveTerminals();
-        this.bus.outputChannel.appendLine(`Active MCP server terminals: [${Array.from(activeTerminals).join(', ')}]`);
-
-        if (activeTerminals.size === 0) {
-            vscode.window.showWarningMessage('No terminals with active MCP servers found. Please ensure you have a terminal with an active AI assistant (like Q chat or Claude CLI) running.');
-            return;
-        }
-
-        // Filter terminals to only those with active MCP servers
-        const terminalChecks = await Promise.all(
-            terminals.map(async (terminal) => {
-                const shellPID = await terminal.processId;
-                const isAiEnabled = shellPID && activeTerminals.has(shellPID);
-                return { terminal, isAiEnabled };
-            })
-        );
-
-        const aiEnabledTerminals = terminalChecks
-            .filter(check => check.isAiEnabled)
-            .map(check => check.terminal);
-
-        if (aiEnabledTerminals.length === 0) {
-            vscode.window.showWarningMessage('No AI-enabled terminals found. Please ensure you have a terminal with an active MCP server running.');
-            return;
-        }
-
-        // Simple case - exactly one AI-enabled terminal
-        if (aiEnabledTerminals.length === 1) {
-            const terminal = aiEnabledTerminals[0];
-            terminal.sendText(message, false); // false = don't execute, just insert text
-            terminal.show(); // Bring terminal into focus
-            this.bus.outputChannel.appendLine(`Message sent to terminal: ${terminal.name}`);
-            vscode.window.showInformationMessage(`Message sent to ${terminal.name}`);
-            return;
-        }
-
-        // Multiple terminals - show picker (simplified version)
-        const selectedTerminal = await vscode.window.showQuickPick(
-            aiEnabledTerminals.map(terminal => ({
-                label: terminal.name,
-                description: 'Terminal with active AI assistant',
-                terminal: terminal
-            })),
-            {
-                placeHolder: 'Select terminal for AI message',
-                title: 'Multiple AI-enabled terminals found'
-            }
-        );
-
-        if (selectedTerminal) {
-            selectedTerminal.terminal.sendText(message, false);
-            selectedTerminal.terminal.show();
-            this.bus.outputChannel.appendLine(`Message sent to terminal: ${selectedTerminal.terminal.name}`);
-            vscode.window.showInformationMessage(`Message sent to ${selectedTerminal.terminal.name}`);
-        }
-    }
-
     public resolveWebviewView(
         webviewView: vscode.WebviewView,
         context: vscode.WebviewViewResolveContext,
@@ -829,21 +759,16 @@ export class WalkthroughWebviewProvider implements vscode.WebviewViewProvider {
             const lineNumber = thread.range.start.line + 1; // Convert to 1-based
             const filePath = vscode.workspace.asRelativePath(uri);
             
-            // Generate compact reference instead of verbose XML
-            const referenceId = crypto.randomUUID();
-            
-            // Store reference context via bus
-            await this.bus.sendReferenceToActiveShell(referenceId, {
+            // Use new consolidated sendToActiveTerminal method
+            const referenceData = {
                 file: filePath,
                 line: lineNumber,
                 selection: undefined,
                 user_comment: text
-            });
-            
-            // Send compact ssref tag to terminal
-            const compactRef = `<ssref id="${referenceId}"/>\n\n`;
-            await this.sendToActiveShell(compactRef);
-            this.bus.outputChannel.appendLine(`Comment reply sent as compact reference: ${referenceId}`);
+            };
+
+            await this.bus.sendToActiveTerminal(referenceData);
+            this.bus.outputChannel.appendLine(`Comment reply sent as compact reference for ${filePath}:${lineNumber}`);
         } catch (error) {
             console.error('[WALKTHROUGH] Error sending comment to shell:', error);
             this.bus.outputChannel.appendLine(`Error sending comment: ${error}`);
