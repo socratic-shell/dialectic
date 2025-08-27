@@ -1057,13 +1057,16 @@ function setupSelectionDetection(context: vscode.ExtensionContext, outputChannel
             outputChannel.appendLine(`Selected: "${selectedText}"`);
             outputChannel.appendLine(`Location: ${filePath}:${startLine}:${startColumn}-${endLine}:${endColumn}`);
 
-            // 💡: Phase 4 & 5: Find Q chat terminal and inject formatted message
+            // 💡: Use new compact reference system instead of verbose XML
             const targetTerminal = await findQChatTerminal(outputChannel, daemonClient, context);
             if (targetTerminal) {
-                const formattedMessage = formatSelectionMessage(selectedText, filePath, startLine, startColumn, endLine, endColumn);
-                targetTerminal.sendText(formattedMessage, false); // false = don't execute, just insert text
+                const compactMessage = await createCompactSelectionReference(
+                    selectedText, filePath, startLine, startColumn, endLine, endColumn, 
+                    daemonClient, outputChannel
+                );
+                targetTerminal.sendText(compactMessage, false); // false = don't execute, just insert text
                 targetTerminal.show(); // Bring terminal into focus
-                outputChannel.appendLine(`Message injected into terminal: ${targetTerminal.name}`);
+                outputChannel.appendLine(`Compact reference injected into terminal: ${targetTerminal.name}`);
             } else {
                 outputChannel.appendLine('No suitable Q chat terminal found');
                 vscode.window.showWarningMessage('No suitable terminal found. Please ensure you have a terminal with an active MCP server (like Q chat) running.');
@@ -1241,8 +1244,45 @@ async function findQChatTerminal(outputChannel: vscode.OutputChannel, daemonClie
     return null;
 }
 
-// 💡: Phase 5 - Format selection context for Q chat injection
-function formatSelectionMessage(
+// 💡: Phase 5 - Create compact reference for selection context
+async function createCompactSelectionReference(
+    selectedText: string,
+    filePath: string,
+    startLine: number,
+    startColumn: number,
+    endLine: number,
+    endColumn: number,
+    daemonClient: DaemonClient,
+    outputChannel: vscode.OutputChannel
+): Promise<string> {
+    try {
+        const relativePath = vscode.workspace.asRelativePath(filePath);
+        const referenceId = crypto.randomUUID();
+        
+        // Create reference data matching the expected format
+        const referenceData = {
+            file: relativePath,
+            line: startLine,
+            selection: selectedText.length > 0 ? selectedText : undefined
+        };
+
+        // Store the reference using the daemon client
+        await daemonClient.sendReferenceToActiveShell(referenceId, referenceData);
+        
+        // Return compact reference tag
+        const compactRef = `<ssref id="${referenceId}"/>\n\n`;
+        outputChannel.appendLine(`Created compact reference ${referenceId} for ${relativePath}:${startLine}`);
+        
+        return compactRef;
+    } catch (error) {
+        outputChannel.appendLine(`Failed to create compact reference: ${error}`);
+        // Fallback to old format if compact reference fails
+        return formatSelectionMessageLegacy(selectedText, filePath, startLine, startColumn, endLine, endColumn);
+    }
+}
+
+// 💡: Legacy fallback - Format selection context for Q chat injection (old verbose format)
+function formatSelectionMessageLegacy(
     selectedText: string,
     filePath: string,
     startLine: number,
