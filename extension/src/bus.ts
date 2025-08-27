@@ -1,4 +1,5 @@
 import * as vscode from 'vscode';
+import * as crypto from 'crypto';
 import { DaemonClient } from './extension';
 import { SyntheticPRProvider } from './syntheticPRProvider';
 import { WalkthroughWebviewProvider } from './walkthroughWebview';
@@ -123,12 +124,22 @@ export class Bus {
             selectedTerminal = { terminal: selected.terminal, shellPID: selected.shellPID };
         }
 
-        // TODO: Generate fresh UUID for reference
-        // TODO: Send reference data to MCP server for selected terminal
-        // TODO: Generate <socratic-reference key="..."/> XML
-        // TODO: Send XML to terminal with optional newline
+        // Generate fresh UUID for reference
+        const referenceId = crypto.randomUUID();
 
-        this.log(`Selected terminal ${selectedTerminal.terminal.name} (PID: ${selectedTerminal.shellPID}) for reference`);
+        // Send reference data to MCP server for selected terminal
+        if (selectedTerminal.shellPID) {
+            await this.sendReferenceToActiveShell(referenceId, referenceData);
+        }
+
+        // Generate <ssref id="..."/> XML (using current format)
+        const xmlMessage = `<ssref id="${referenceId}"/>` + (includeNewline ? '\n\n' : '');
+
+        // Send XML to terminal
+        selectedTerminal.terminal.sendText(xmlMessage, false); // false = don't execute, just insert text
+        selectedTerminal.terminal.show(); // Bring terminal into focus
+
+        this.log(`Reference ${referenceId} sent to terminal ${selectedTerminal.terminal.name} (PID: ${selectedTerminal.shellPID})`);
     }
 
     getActiveTerminals(): Set<number> {
