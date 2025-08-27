@@ -564,7 +564,7 @@ async fn test_gitdiff_function() {
     // Test gitdiff for last commit (HEAD~1 to HEAD)
     let program = serde_json::json!({
         "gitdiff": {
-            "range": "HEAD~1..HEAD"
+            "commit_range": "HEAD~1..HEAD"
         }
     });
     
@@ -580,49 +580,51 @@ async fn test_gitdiff_function() {
     // Verify the structure using expect-test
     use expect_test::expect;
     expect![[r#"
-        Array [
-            Object {
-                "additions": Number(1),
-                "deletions": Number(1),
-                "hunks": Array [
-                    Object {
-                        "header": String("@@ -1,3 +1,3 @@"),
-                        "lines": Array [
-                            Object {
-                                "content": String("fn main() {"),
-                                "line_type": String("Context"),
-                                "new_line_number": Number(1),
-                                "old_line_number": Number(1),
-                            },
-                            Object {
-                                "content": String("    println!(\"Hello\");"),
-                                "line_type": String("Removed"),
-                                "new_line_number": Null,
-                                "old_line_number": Number(2),
-                            },
-                            Object {
-                                "content": String("    println!(\"Hello, World!\");"),
-                                "line_type": String("Added"),
-                                "new_line_number": Number(2),
-                                "old_line_number": Null,
-                            },
-                            Object {
-                                "content": String("}"),
-                                "line_type": String("Context"),
-                                "new_line_number": Number(3),
-                                "old_line_number": Number(3),
-                            },
-                        ],
-                        "new_lines": Number(3),
-                        "new_start": Number(1),
-                        "old_lines": Number(3),
-                        "old_start": Number(1),
-                    },
-                ],
-                "path": String("src/main.rs"),
-                "status": String("Modified"),
-            },
-        ]
+        Object {
+            "files": Array [
+                Object {
+                    "additions": Number(1),
+                    "deletions": Number(1),
+                    "hunks": Array [
+                        Object {
+                            "header": String("@@ -1,3 +1,3 @@"),
+                            "lines": Array [
+                                Object {
+                                    "content": String("fn main() {"),
+                                    "line_type": String("Context"),
+                                    "new_line_number": Number(1),
+                                    "old_line_number": Number(1),
+                                },
+                                Object {
+                                    "content": String("    println!(\"Hello\");"),
+                                    "line_type": String("Removed"),
+                                    "new_line_number": Null,
+                                    "old_line_number": Number(2),
+                                },
+                                Object {
+                                    "content": String("    println!(\"Hello, World!\");"),
+                                    "line_type": String("Added"),
+                                    "new_line_number": Number(2),
+                                    "old_line_number": Null,
+                                },
+                                Object {
+                                    "content": String("}"),
+                                    "line_type": String("Context"),
+                                    "new_line_number": Number(3),
+                                    "old_line_number": Number(3),
+                                },
+                            ],
+                            "new_lines": Number(3),
+                            "new_start": Number(1),
+                            "old_lines": Number(3),
+                            "old_start": Number(1),
+                        },
+                    ],
+                    "path": String("src/main.rs"),
+                    "status": String("Modified"),
+                },
+            ],
+        }
     "#]]
     .assert_debug_eq(&changes);
 }
@@ -694,10 +696,11 @@ async fn test_comment_function_with_symbol_def() {
     expect![[r#"
         Ok(
             Object {
-                "content": Array [
+                "comment": Array [
                     String("This function needs better error handling"),
                 ],
                 "icon": String("warning"),
+                "id": String("1a67e922-b26f-4175-93d8-a0d6d5c5598d"),
                 "locations": Array [
                     Object {
                         "content": String("fn validateToken(token: &str) -> bool {"),
