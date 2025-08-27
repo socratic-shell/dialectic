@@ -167,7 +167,7 @@ interface FileLocation {
 }
 
 // 💡: Daemon client for connecting to message bus
-class DaemonClient implements vscode.Disposable {
+export class DaemonClient implements vscode.Disposable {
     private socket: net.Socket | null = null;
     private reconnectTimer: NodeJS.Timeout | null = null;
     private isDisposed = false;
@@ -640,7 +640,7 @@ class DaemonClient implements vscode.Disposable {
         }
     }
 
-    private sendStoreReference(id: string, file?: string, line?: number, selection?: string, userComment?: string): void {
+    public sendStoreReference(id: string, file?: string, line?: number, selection?: string, userComment?: string): void {
         if (!this.socket || this.socket.destroyed) {
             this.outputChannel.appendLine(`Cannot send store_reference - socket not connected`);
             return;

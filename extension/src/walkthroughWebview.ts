@@ -3,6 +3,7 @@ import * as crypto from 'crypto';
 import * as path from 'path';
 import * as MarkdownIt from 'markdown-it';
 import { openDialecticUrl } from './fileNavigation';
+import { DaemonClient } from './extension';
 
 // Placement state for unified link and comment management
 interface PlacementState {
@@ -78,7 +79,7 @@ export class WalkthroughWebviewProvider implements vscode.WebviewViewProvider {
     constructor(
         private readonly _extensionUri: vscode.Uri,
         private readonly outputChannel: vscode.OutputChannel,
-        private daemonClient?: any, // Will be set after daemon client is created
+        private daemonClient?: DaemonClient, // Will be set after daemon client is created
         private context?: vscode.ExtensionContext
     ) {
         this.md = this.setupMarkdownRenderer();
@@ -673,7 +674,7 @@ export class WalkthroughWebviewProvider implements vscode.WebviewViewProvider {
     /**
      * Set the daemon client after it's created
      */
-    setDaemonClient(daemonClient: any): void {
+    setDaemonClient(daemonClient: DaemonClient): void {
         this.daemonClient = daemonClient;
     }
 
