@@ -25,13 +25,16 @@ use crate::types::{LogLevel, PresentWalkthroughParams};
 use serde::{Deserialize, Serialize};
 
 /// Parameters for the expand_reference tool
+// ANCHOR: expand_reference_params
 #[derive(Debug, Serialize, Deserialize, schemars::JsonSchema)]
 pub struct ExpandReferenceParams {
     /// The reference ID to expand
     pub id: String,
 }
+// ANCHOR_END: expand_reference_params
 
 /// Parameters for the store_reference tool
+// ANCHOR: store_reference_params
 #[derive(Debug, Serialize, Deserialize, schemars::JsonSchema)]
 pub struct StoreReferenceParams {
     /// File path relative to workspace (optional)
@@ -43,6 +46,7 @@ pub struct StoreReferenceParams {
     /// User comment or question (optional)
     pub user_comment: Option<String>,
 }
+// ANCHOR_END: store_reference_params
 
 /// Parameters for the ide_operation tool
 // ANCHOR: ide_operation_params
@@ -650,12 +654,14 @@ impl DialecticServer {
     ///
     /// This tool allows the extension to store context data and get back a compact ssref ID.
     /// The reference can later be expanded by LLMs using expand_reference.
+    // ANCHOR: store_reference_tool
     #[tool(description = "Store context data (file, line, selection, comment) and generate a compact reference ID. \
                        Returns an ssref tag that can be used in place of verbose XML.")]
     async fn store_reference(
         &self,
         Parameters(params): Parameters<StoreReferenceParams>,
     ) -> Result<CallToolResult, McpError> {
+    // ANCHOR_END: store_reference_tool
         self.ipc
             .send_log(
                 LogLevel::Debug,
@@ -705,12 +711,14 @@ impl DialecticServer {
     /// Expand a compact reference to get full context
     ///
     /// This tool allows LLMs to retrieve the full context for a compact ssref reference.
+    // ANCHOR: expand_reference_tool
     #[tool(description = "Expand a compact reference (ssref) to get full context including file, line, selection, and metadata. \
                        Returns structured JSON with all available context data.")]
     async fn expand_reference(
         &self,
         Parameters(params): Parameters<ExpandReferenceParams>,
     ) -> Result<CallToolResult, McpError> {
+    // ANCHOR_END: expand_reference_tool
         self.ipc
             .send_log(
                 LogLevel::Debug,

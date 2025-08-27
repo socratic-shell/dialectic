@@ -70,3 +70,25 @@
 ```
 
 *No parameters required.*
+
+## store_reference
+
+```rust
+{{#include ../../server/src/server.rs:store_reference_tool}}
+```
+
+**Parameters:**
+```rust
+{{#include ../../server/src/server.rs:store_reference_params}}
+```
+
+## expand_reference
+
+```rust
+{{#include ../../server/src/server.rs:expand_reference_tool}}
+```
+
+**Parameters:**
+```rust
+{{#include ../../server/src/server.rs:expand_reference_params}}
+```
