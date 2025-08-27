@@ -175,6 +175,8 @@ pub enum IPCMessageType {
     UpdateSyntheticPr,
     /// User feedback from VSCode extension (comments, review completion)
     UserFeedback,
+    /// Store reference context for compact ssref system
+    StoreReference,
 }
 
 /// Payload for synthetic PR creation/update messages
@@ -200,4 +202,14 @@ pub struct UserFeedbackPayload {
     pub completion_action: Option<String>, // "request_changes", "checkpoint", "return"
     pub additional_notes: Option<String>,
     pub context_lines: Option<Vec<String>>,
+}
+
+/// Payload for storing reference context in compact ssref system
+#[derive(Debug, Clone, Deserialize, Serialize)]
+pub struct StoreReferencePayload {
+    pub id: String,
+    pub file: Option<String>,
+    pub line: Option<u32>,
+    pub selection: Option<String>,
+    pub user_comment: Option<String>,
 }

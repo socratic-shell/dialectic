@@ -842,18 +842,18 @@ export class WalkthroughWebviewProvider implements vscode.WebviewViewProvider {
             const lineNumber = thread.range.start.line + 1; // Convert to 1-based
             const filePath = vscode.workspace.asRelativePath(uri);
             
-            // Create context XML similar to action buttons
-            const contextXml = `<comment_reply>
-<file>${filePath}</file>
-<line>${lineNumber}</line>
-<user_comment>${text}</user_comment>
-</comment_reply>
-
-`;
-
-            // Use existing sendToActiveShell method
-            await this.sendToActiveShell(contextXml);
-            this.outputChannel.appendLine(`Comment reply sent to AI shell: ${text}`);
+            // Generate compact reference instead of verbose XML
+            const referenceId = crypto.randomUUID();
+            
+            // Store reference context via IPC
+            if (this.daemonClient && this.daemonClient.sendStoreReference) {
+                this.daemonClient.sendStoreReference(referenceId, filePath, lineNumber, undefined, text);
+            }
+            
+            // Send compact ssref tag to terminal
+            const compactRef = `<ssref id="${referenceId}"/>\n\n`;
+            await this.sendToActiveShell(compactRef);
+            this.outputChannel.appendLine(`Comment reply sent as compact reference: ${referenceId}`);
         } catch (error) {
             console.error('[WALKTHROUGH] Error sending comment to shell:', error);
             this.outputChannel.appendLine(`Error sending comment: ${error}`);

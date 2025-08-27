@@ -7,7 +7,7 @@ use crate::synthetic_pr::UserFeedback;
 use crate::types::{
     FindAllReferencesPayload, GetSelectionResult, GoodbyePayload, IPCMessage, IPCMessageType,
     LogLevel, LogParams, PoloPayload, ResolveSymbolByNamePayload,
-    ResponsePayload, UserFeedbackPayload,
+    ResponsePayload, StoreReferencePayload, UserFeedbackPayload,
 };
 use anyhow::Context;
 use futures::FutureExt;
@@ -921,6 +921,28 @@ impl IPCCommunicator {
                         feedback_payload.review_id
                     );
                 }
+            }
+            IPCMessageType::StoreReference => {
+                info!("Received store reference message");
+
+                // Parse the store reference payload
+                let store_payload: StoreReferencePayload =
+                    match serde_json::from_value(message.payload) {
+                        Ok(payload) => payload,
+                        Err(e) => {
+                            error!("Failed to parse store reference payload: {}", e);
+                            return;
+                        }
+                    };
+
+                info!(
+                    "Reference {} stored with file: {:?}, line: {:?}, comment: {:?}",
+                    store_payload.id, store_payload.file, store_payload.line, store_payload.user_comment
+                );
+                
+                // TODO: Store the reference in a shared reference store
+                // For now, we just log it - the actual storage will be implemented
+                // when we integrate the reference store with the IPC system
             }
             _ => {
                 // Every message (including the ones we send...) gets rebroadcast to everyone,

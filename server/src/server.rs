@@ -17,7 +17,7 @@ use tracing::info;
 
 use crate::dialect::DialectInterpreter;
 use crate::ipc::IPCCommunicator;
-use crate::reference_store::ReferenceStore;
+use crate::reference_store::{ReferenceContext, ReferenceStore};
 use crate::synthetic_pr::{
     CompletionAction, RequestReviewParams, UpdateReviewParams, UserFeedback,
 };
@@ -29,6 +29,19 @@ use serde::{Deserialize, Serialize};
 pub struct ExpandReferenceParams {
     /// The reference ID to expand
     pub id: String,
+}
+
+/// Parameters for the store_reference tool
+#[derive(Debug, Serialize, Deserialize, schemars::JsonSchema)]
+pub struct StoreReferenceParams {
+    /// File path relative to workspace (optional)
+    pub file: Option<String>,
+    /// Line number (1-based, optional)
+    pub line: Option<u32>,
+    /// Selected text content (optional)
+    pub selection: Option<String>,
+    /// User comment or question (optional)
+    pub user_comment: Option<String>,
 }
 
 /// Parameters for the ide_operation tool
@@ -634,6 +647,62 @@ impl DialecticServer {
         })?;
 
         Ok(CallToolResult::success(vec![json_content]))
+    }
+
+    /// Store context and generate a compact reference
+    ///
+    /// This tool allows the extension to store context data and get back a compact ssref ID.
+    /// The reference can later be expanded by LLMs using expand_reference.
+    #[tool(description = "Store context data (file, line, selection, comment) and generate a compact reference ID. \
+                       Returns an ssref tag that can be used in place of verbose XML. References expire after 1 hour.")]
+    async fn store_reference(
+        &self,
+        Parameters(params): Parameters<StoreReferenceParams>,
+    ) -> Result<CallToolResult, McpError> {
+        self.ipc
+            .send_log(
+                LogLevel::Debug,
+                format!("Storing reference with context: {:?}", params),
+            )
+            .await;
+
+        let context = ReferenceContext {
+            file: params.file,
+            line: params.line,
+            selection: params.selection,
+            user_comment: params.user_comment,
+            metadata: std::collections::HashMap::new(),
+        };
+
+        match self.reference_store.store(context).await {
+            Ok(id) => {
+                self.ipc
+                    .send_log(
+                        LogLevel::Info,
+                        format!("Reference stored with ID: {}", id),
+                    )
+                    .await;
+
+                // Return the compact ssref tag
+                let ssref_tag = format!("<ssref id=\"{}\"/>", id);
+                Ok(CallToolResult::success(vec![Content::text(ssref_tag)]))
+            }
+            Err(e) => {
+                self.ipc
+                    .send_log(
+                        LogLevel::Error,
+                        format!("Error storing reference: {}", e),
+                    )
+                    .await;
+
+                Err(McpError::internal_error(
+                    "Failed to store reference",
+                    Some(serde_json::json!({
+                        "error": e.to_string()
+                    })),
+                ))
+            }
+        }
     }
 
     /// Expand a compact reference to get full context

@@ -12,8 +12,8 @@ import { WalkthroughWebviewProvider } from './walkthroughWebview';
 // 💡: Types for IPC communication with MCP server
 interface IPCMessage {
     shellPid: number;
-    type: 'present_walkthrough' | 'log' | 'get_selection' | 'response' | 'marco' | 'polo' | 'goodbye' | 'resolve_symbol_by_name' | 'find_all_references' | 'create_synthetic_pr' | 'update_synthetic_pr' | string; // string allows unknown types
-    payload: PresentWalkthroughPayload | LogPayload | GetSelectionPayload | PoloPayload | GoodbyePayload | ResolveSymbolPayload | FindReferencesPayload | ResponsePayload | SyntheticPRPayload | unknown; // unknown allows any payload
+    type: 'present_walkthrough' | 'log' | 'get_selection' | 'store_reference' | 'response' | 'marco' | 'polo' | 'goodbye' | 'resolve_symbol_by_name' | 'find_all_references' | 'create_synthetic_pr' | 'update_synthetic_pr' | string; // string allows unknown types
+    payload: PresentWalkthroughPayload | LogPayload | GetSelectionPayload | StoreReferencePayload | PoloPayload | GoodbyePayload | ResolveSymbolPayload | FindReferencesPayload | ResponsePayload | SyntheticPRPayload | unknown; // unknown allows any payload
     id: string;
 }
 
@@ -24,6 +24,14 @@ interface LogPayload {
 
 interface GetSelectionPayload {
     // Empty payload
+}
+
+interface StoreReferencePayload {
+    id: string;
+    file?: string;
+    line?: number;
+    selection?: string;
+    user_comment?: string;
 }
 
 interface PoloPayload {
@@ -637,6 +645,33 @@ class DaemonClient implements vscode.Disposable {
             this.socket.write(JSON.stringify(responseMessage) + '\n');
         } catch (error) {
             this.outputChannel.appendLine(`Failed to send response: ${error}`);
+        }
+    }
+
+    private sendStoreReference(id: string, file?: string, line?: number, selection?: string, userComment?: string): void {
+        if (!this.socket || this.socket.destroyed) {
+            this.outputChannel.appendLine(`Cannot send store_reference - socket not connected`);
+            return;
+        }
+
+        const storeMessage: IPCMessage = {
+            shellPid: 0, // Not shell-specific
+            type: 'store_reference',
+            payload: {
+                id,
+                file,
+                line,
+                selection,
+                user_comment: userComment
+            } as StoreReferencePayload,
+            id: crypto.randomUUID()
+        };
+
+        try {
+            this.socket.write(JSON.stringify(storeMessage) + '\n');
+            this.outputChannel.appendLine(`[REFERENCE] Stored reference ${id} with context`);
+        } catch (error) {
+            this.outputChannel.appendLine(`Failed to send store_reference: ${error}`);
         }
     }
 
