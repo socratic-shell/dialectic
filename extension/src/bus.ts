@@ -61,24 +61,22 @@ export class Bus {
     }
 
     /**
-     * Send reference data to active terminal with consolidated logic
-     * Handles terminal finding, reference creation, and XML generation
+     * Select an active AI-enabled terminal with picker for ambiguity resolution
+     * Returns null if no suitable terminal found or user cancelled
      */
-    async sendToActiveTerminal(referenceData: any, includeNewline: boolean = true): Promise<void> {
-        // Find active terminal using existing heuristics
+    private async selectActiveTerminal(): Promise<{ terminal: vscode.Terminal; shellPID: number } | null> {
         const terminals = vscode.window.terminals;
         if (terminals.length === 0) {
             vscode.window.showWarningMessage('No terminals found. Please open a terminal with an active AI assistant.');
-            return;
+            return null;
         }
 
-        // Get active terminals with MCP servers from registry
         const activeTerminals = this.getActiveTerminals();
         this.log(`Active MCP server terminals: [${Array.from(activeTerminals).join(', ')}]`);
 
         if (activeTerminals.size === 0) {
             vscode.window.showWarningMessage('No terminals with active MCP servers found. Please ensure you have a terminal with an active AI assistant (like Q chat or Claude CLI) running.');
-            return;
+            return null;
         }
 
         // Filter terminals to only those with active MCP servers
@@ -91,38 +89,41 @@ export class Bus {
         );
 
         const aiEnabledTerminals = terminalChecks
-            .filter(check => check.isAiEnabled)
-            .map(check => ({ terminal: check.terminal, shellPID: check.shellPID }));
+            .filter(check => check.isAiEnabled && check.shellPID)
+            .map(check => ({ terminal: check.terminal, shellPID: check.shellPID! }));
 
         if (aiEnabledTerminals.length === 0) {
             vscode.window.showWarningMessage('No AI-enabled terminals found. Please ensure you have a terminal with an active MCP server running.');
-            return;
+            return null;
         }
-
-        let selectedTerminal;
 
         // Simple case - exactly one AI-enabled terminal
         if (aiEnabledTerminals.length === 1) {
-            selectedTerminal = aiEnabledTerminals[0];
-        } else {
-            // Multiple terminals - show picker for ambiguity resolution
-            const terminalItems = aiEnabledTerminals.map(({ terminal, shellPID }) => ({
-                label: terminal.name,
-                description: `PID: ${shellPID}`,
-                terminal,
-                shellPID
-            }));
-
-            const selected = await vscode.window.showQuickPick(terminalItems, {
-                placeHolder: 'Select terminal to send reference to'
-            });
-
-            if (!selected) {
-                return; // User cancelled
-            }
-
-            selectedTerminal = { terminal: selected.terminal, shellPID: selected.shellPID };
+            return aiEnabledTerminals[0];
         }
+
+        // Multiple terminals - show picker for ambiguity resolution
+        const terminalItems = aiEnabledTerminals.map(({ terminal, shellPID }) => ({
+            label: terminal.name,
+            description: `PID: ${shellPID}`,
+            terminal,
+            shellPID
+        }));
+
+        const selected = await vscode.window.showQuickPick(terminalItems, {
+            placeHolder: 'Select terminal'
+        });
+
+        return selected ? { terminal: selected.terminal, shellPID: selected.shellPID } : null;
+    }
+
+    /**
+     * Send reference data to active terminal with consolidated logic
+     * Handles terminal finding, reference creation, and XML generation
+     */
+    async sendToActiveTerminal(referenceData: any, includeNewline: boolean = true): Promise<void> {
+        const selectedTerminal = await this.selectActiveTerminal();
+        if (!selectedTerminal) return;
 
         // Generate fresh UUID for reference
         const referenceId = crypto.randomUUID();
@@ -147,60 +148,8 @@ export class Bus {
      * For simple text messages that don't need MCP reference storage
      */
     async sendTextToActiveTerminal(message: string): Promise<void> {
-        // Find active terminal using same logic as sendToActiveTerminal
-        const terminals = vscode.window.terminals;
-        if (terminals.length === 0) {
-            vscode.window.showWarningMessage('No terminals found. Please open a terminal with an active AI assistant.');
-            return;
-        }
-
-        const activeTerminals = this.getActiveTerminals();
-        if (activeTerminals.size === 0) {
-            vscode.window.showWarningMessage('No terminals with active MCP servers found. Please ensure you have a terminal with an active AI assistant (like Q chat or Claude CLI) running.');
-            return;
-        }
-
-        // Filter to AI-enabled terminals
-        const terminalChecks = await Promise.all(
-            terminals.map(async (terminal) => {
-                const shellPID = await terminal.processId;
-                const isAiEnabled = shellPID && activeTerminals.has(shellPID);
-                return { terminal, shellPID, isAiEnabled };
-            })
-        );
-
-        const aiEnabledTerminals = terminalChecks
-            .filter(check => check.isAiEnabled)
-            .map(check => ({ terminal: check.terminal, shellPID: check.shellPID }));
-
-        if (aiEnabledTerminals.length === 0) {
-            vscode.window.showWarningMessage('No AI-enabled terminals found. Please ensure you have a terminal with an active MCP server running.');
-            return;
-        }
-
-        let selectedTerminal;
-
-        if (aiEnabledTerminals.length === 1) {
-            selectedTerminal = aiEnabledTerminals[0];
-        } else {
-            // Show picker for multiple terminals
-            const terminalItems = aiEnabledTerminals.map(({ terminal, shellPID }) => ({
-                label: terminal.name,
-                description: `PID: ${shellPID}`,
-                terminal,
-                shellPID
-            }));
-
-            const selected = await vscode.window.showQuickPick(terminalItems, {
-                placeHolder: 'Select terminal to send message to'
-            });
-
-            if (!selected) {
-                return; // User cancelled
-            }
-
-            selectedTerminal = { terminal: selected.terminal, shellPID: selected.shellPID };
-        }
+        const selectedTerminal = await this.selectActiveTerminal();
+        if (!selectedTerminal) return;
 
         // Send text directly to terminal
         selectedTerminal.terminal.sendText(message, false); // false = don't execute, just insert text
