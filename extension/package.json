@@ -1,7 +1,7 @@
 {
   "name": "dialectic",
-  "displayName": "Dialectic Code Reviews",
-  "description": "AI-powered code review panel for collaborative development",
+  "displayName": "Dialectic Walkthroughs",
+  "description": "AI-powered code walkthroughs for collaborative development",
   "version": "0.1.0",
   "publisher": "socratic-shell",
   "repository": {
@@ -75,10 +75,6 @@
     },
     "views": {
       "dialectic": [
-        {
-          "id": "dialectic.syntheticPR",
-          "name": "Code Review"
-        },
         {
           "id": "dialectic.walkthrough",
           "name": "Walkthrough",

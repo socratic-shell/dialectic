@@ -176,6 +176,10 @@ export class WalkthroughWebviewProvider implements vscode.WebviewViewProvider {
 
     private async handleWebviewMessage(message: any): Promise<void> {
         switch (message.command || message.type) {
+            case 'clearWalkthrough':
+                console.log('Walkthrough: clearWalkthrough command received');
+                await this.clearWalkthrough();
+                break;
             case 'openFile':
                 console.log('Walkthrough: openFile command received:', message.dialecticUrl);
                 await openDialecticUrl(message.dialecticUrl, this.outputChannel, this.baseUri, this.placementMemory);
@@ -205,6 +209,36 @@ export class WalkthroughWebviewProvider implements vscode.WebviewViewProvider {
                 console.log('Walkthrough webview ready');
                 break;
         }
+    }
+
+    /**
+     * Clear the walkthrough and dismiss any active comments
+     */
+    private async clearWalkthrough(): Promise<void> {
+        console.log('[WALKTHROUGH] Clearing walkthrough and comments');
+        
+        // Clear any active comment threads
+        if (this.commentController) {
+            // Dispose all comment threads
+            this.commentController.dispose();
+            
+            // Recreate the comment controller for future use
+            this.commentController = vscode.comments.createCommentController(
+                'dialectic-walkthrough',
+                'Dialectic Walkthrough'
+            );
+            
+            // Set options to enable submit button
+            this.commentController.options = {
+                prompt: 'Ask Socratic Shell...',
+                placeHolder: 'Type your question or comment here...'
+            };
+        }
+        
+        // Clear placement memory
+        this.placementMemory.clear();
+        
+        this.outputChannel.appendLine('Walkthrough cleared');
     }
 
     /**
@@ -939,6 +973,31 @@ export class WalkthroughWebviewProvider implements vscode.WebviewViewProvider {
                         padding: 16px;
                         line-height: 1.5;
                     }
+                    .walkthrough-header {
+                        display: flex;
+                        justify-content: space-between;
+                        align-items: center;
+                        margin-bottom: 20px;
+                        padding-bottom: 12px;
+                        border-bottom: 1px solid var(--vscode-panel-border);
+                    }
+                    .walkthrough-title {
+                        font-size: 1.2em;
+                        font-weight: 600;
+                        color: var(--vscode-textLink-foreground);
+                    }
+                    .clear-button {
+                        background-color: var(--vscode-button-secondaryBackground);
+                        color: var(--vscode-button-secondaryForeground);
+                        border: none;
+                        padding: 6px 12px;
+                        border-radius: 3px;
+                        cursor: pointer;
+                        font-size: 0.9em;
+                    }
+                    .clear-button:hover {
+                        background-color: var(--vscode-button-secondaryHoverBackground);
+                    }
                     .section {
                         margin-bottom: 24px;
                     }
@@ -1092,6 +1151,10 @@ export class WalkthroughWebviewProvider implements vscode.WebviewViewProvider {
                 </style>
             </head>
             <body>
+                <div class="walkthrough-header">
+                    <div class="walkthrough-title">Code Walkthrough</div>
+                    <button class="clear-button" id="clear-walkthrough">Clear</button>
+                </div>
                 <div id="content">
                     <div class="empty-state">No walkthrough loaded</div>
                 </div>
@@ -1335,7 +1398,13 @@ export class WalkthroughWebviewProvider implements vscode.WebviewViewProvider {
 
                     // Add event listener for action button clicks (CSP-compliant)
                     document.addEventListener('click', (event) => {
-                        if (event.target.tagName === 'BUTTON' && 
+                        if (event.target.id === 'clear-walkthrough') {
+                            // Clear walkthrough and dismiss comments
+                            document.getElementById('content').innerHTML = '<div class="empty-state">No walkthrough loaded</div>';
+                            vscode.postMessage({
+                                type: 'clearWalkthrough'
+                            });
+                        } else if (event.target.tagName === 'BUTTON' && 
                             event.target.classList.contains('action-button') && 
                             event.target.dataset.tellAgent) {
                             handleAction(event.target.dataset.tellAgent);
