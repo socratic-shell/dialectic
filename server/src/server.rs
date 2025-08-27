@@ -651,7 +651,7 @@ impl DialecticServer {
     /// This tool allows the extension to store context data and get back a compact ssref ID.
     /// The reference can later be expanded by LLMs using expand_reference.
     #[tool(description = "Store context data (file, line, selection, comment) and generate a compact reference ID. \
-                       Returns an ssref tag that can be used in place of verbose XML. References expire after 1 hour.")]
+                       Returns an ssref tag that can be used in place of verbose XML.")]
     async fn store_reference(
         &self,
         Parameters(params): Parameters<StoreReferenceParams>,
@@ -705,9 +705,8 @@ impl DialecticServer {
     /// Expand a compact reference to get full context
     ///
     /// This tool allows LLMs to retrieve the full context for a compact ssref reference.
-    /// References are stored temporarily and expire after 1 hour.
     #[tool(description = "Expand a compact reference (ssref) to get full context including file, line, selection, and metadata. \
-                       References expire after 1 hour. Returns structured JSON with all available context data.")]
+                       Returns structured JSON with all available context data.")]
     async fn expand_reference(
         &self,
         Parameters(params): Parameters<ExpandReferenceParams>,
@@ -743,12 +742,12 @@ impl DialecticServer {
                 self.ipc
                     .send_log(
                         LogLevel::Info,
-                        format!("Reference {} not found or expired", params.id),
+                        format!("Reference {} not found", params.id),
                     )
                     .await;
 
                 Err(McpError::invalid_params(
-                    "Reference not found or expired",
+                    "Reference not found",
                     Some(serde_json::json!({
                         "reference_id": params.id
                     })),
