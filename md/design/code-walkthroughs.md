@@ -49,7 +49,7 @@ We begin with examples before defining the full structure. A *walkthrough* is de
             "gitdiff": {
                 // The range can be a range of commits (e.g., `HEAD~3..HEAD~1`)
                 // of a single commit. 
-                "range": "HEAD^..",
+                "commit_range": "HEAD^..",
 
                 // If the range includes HEAD, then by default we will include
                 // unstaged and staged changes. The excluded parameter can
