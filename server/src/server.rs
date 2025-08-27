@@ -17,11 +17,19 @@ use tracing::info;
 
 use crate::dialect::DialectInterpreter;
 use crate::ipc::IPCCommunicator;
+use crate::reference_store::ReferenceStore;
 use crate::synthetic_pr::{
     CompletionAction, RequestReviewParams, UpdateReviewParams, UserFeedback,
 };
 use crate::types::{LogLevel, PresentWalkthroughParams};
 use serde::{Deserialize, Serialize};
+
+/// Parameters for the expand_reference tool
+#[derive(Debug, Serialize, Deserialize, schemars::JsonSchema)]
+pub struct ExpandReferenceParams {
+    /// The reference ID to expand
+    pub id: String,
+}
 
 /// Parameters for the ide_operation tool
 // ANCHOR: ide_operation_params
@@ -41,6 +49,7 @@ pub struct DialecticServer {
     ipc: IPCCommunicator,
     interpreter: DialectInterpreter<IPCCommunicator>,
     tool_router: ToolRouter<DialecticServer>,
+    reference_store: ReferenceStore,
 }
 
 #[tool_router]
@@ -82,6 +91,7 @@ impl DialecticServer {
             ipc: ipc.clone(),
             interpreter,
             tool_router: Self::tool_router(),
+            reference_store: ReferenceStore::new(),
         })
     }
 
@@ -181,6 +191,7 @@ impl DialecticServer {
             ipc,
             interpreter,
             tool_router: Self::tool_router(),
+            reference_store: ReferenceStore::new(),
         }
     }
 
@@ -623,6 +634,77 @@ impl DialecticServer {
         })?;
 
         Ok(CallToolResult::success(vec![json_content]))
+    }
+
+    /// Expand a compact reference to get full context
+    ///
+    /// This tool allows LLMs to retrieve the full context for a compact ssref reference.
+    /// References are stored temporarily and expire after 1 hour.
+    #[tool(description = "Expand a compact reference (ssref) to get full context including file, line, selection, and metadata. \
+                       References expire after 1 hour. Returns structured JSON with all available context data.")]
+    async fn expand_reference(
+        &self,
+        Parameters(params): Parameters<ExpandReferenceParams>,
+    ) -> Result<CallToolResult, McpError> {
+        self.ipc
+            .send_log(
+                LogLevel::Debug,
+                format!("Expanding reference: {}", params.id),
+            )
+            .await;
+
+        match self.reference_store.get(&params.id).await {
+            Ok(Some(context)) => {
+                self.ipc
+                    .send_log(
+                        LogLevel::Info,
+                        format!("Reference {} expanded successfully", params.id),
+                    )
+                    .await;
+
+                Ok(CallToolResult::success(vec![Content::text(
+                    serde_json::to_string_pretty(&context).map_err(|e| {
+                        McpError::internal_error(
+                            "Failed to serialize reference context",
+                            Some(serde_json::json!({
+                                "error": e.to_string()
+                            })),
+                        )
+                    })?,
+                )]))
+            }
+            Ok(None) => {
+                self.ipc
+                    .send_log(
+                        LogLevel::Info,
+                        format!("Reference {} not found or expired", params.id),
+                    )
+                    .await;
+
+                Err(McpError::invalid_params(
+                    "Reference not found or expired",
+                    Some(serde_json::json!({
+                        "reference_id": params.id
+                    })),
+                ))
+            }
+            Err(e) => {
+                self.ipc
+                    .send_log(
+                        LogLevel::Error,
+                        format!("Error expanding reference {}: {}", params.id, e),
+                    )
+                    .await;
+
+                Err(McpError::internal_error(
+                    "Failed to expand reference",
+                    Some(serde_json::json!({
+                        "error": e.to_string(),
+                        "reference_id": params.id
+                    })),
+                ))
+            }
+        }
     }
 }
 

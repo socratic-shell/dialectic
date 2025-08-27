@@ -7,10 +7,12 @@ mod dialect;
 mod ide;
 mod ipc;
 mod pid_discovery;
+mod reference_store;
 mod server;
 mod types;
 pub mod synthetic_pr;
 
 pub use daemon::{run_daemon_with_prefix, spawn_daemon_process};
 pub use pid_discovery::find_vscode_pid_from_mcp;
+pub use reference_store::{ReferenceContext, ReferenceStore};
 pub use server::DialecticServer;
