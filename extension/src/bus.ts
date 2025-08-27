@@ -121,7 +121,7 @@ export class Bus {
      * Send reference data to active terminal with consolidated logic
      * Handles terminal finding, reference creation, and XML generation
      */
-    async sendToActiveTerminal(referenceData: any, includeNewline: boolean = true): Promise<void> {
+    async sendToActiveTerminal(referenceData: any, options: { includeNewline: boolean }): Promise<void> {
         const selectedTerminal = await this.selectActiveTerminal();
         if (!selectedTerminal) return;
 
@@ -134,7 +134,7 @@ export class Bus {
         }
 
         // Generate <ssref id="..."/> XML (using current format)
-        const xmlMessage = `<ssref id="${referenceId}"/>` + (includeNewline ? '\n\n' : '');
+        const xmlMessage = `<ssref id="${referenceId}"/>` + (options.includeNewline ? '\n\n' : '');
 
         // Send XML to terminal
         selectedTerminal.terminal.sendText(xmlMessage, false); // false = don't execute, just insert text

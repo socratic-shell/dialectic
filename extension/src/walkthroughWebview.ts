@@ -767,7 +767,7 @@ export class WalkthroughWebviewProvider implements vscode.WebviewViewProvider {
                 user_comment: text
             };
 
-            await this.bus.sendToActiveTerminal(referenceData);
+            await this.bus.sendToActiveTerminal(referenceData, { includeNewline: true });
             this.bus.outputChannel.appendLine(`Comment reply sent as compact reference for ${filePath}:${lineNumber}`);
         } catch (error) {
             console.error('[WALKTHROUGH] Error sending comment to shell:', error);
