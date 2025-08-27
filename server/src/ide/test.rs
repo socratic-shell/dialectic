@@ -100,6 +100,10 @@ impl IpcClient for MockIpcClient {
             .cloned()
             .unwrap_or_default())
     }
+
+    fn generate_uuid(&self) -> String {
+        "DUMMY_UUID".to_string()
+    }
 }
 
 // IDE Function Tests
@@ -700,7 +704,7 @@ async fn test_comment_function_with_symbol_def() {
                     String("This function needs better error handling"),
                 ],
                 "icon": String("warning"),
-                "id": String("1a67e922-b26f-4175-93d8-a0d6d5c5598d"),
+                "id": String("DUMMY_UUID"),
                 "locations": Array [
                     Object {
                         "content": String("fn validateToken(token: &str) -> bool {"),

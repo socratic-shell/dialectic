@@ -1066,6 +1066,10 @@ impl crate::ide::IpcClient for IPCCommunicator {
 
         Ok(locations)
     }
+
+    fn generate_uuid(&self) -> String {
+        uuid::Uuid::new_v4().to_string()
+    }
 }
 
 #[cfg(test)]

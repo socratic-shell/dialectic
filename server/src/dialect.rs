@@ -26,6 +26,10 @@ impl<U: Send> DialectInterpreter<U> {
         }
     }
 
+    pub fn user_data(&self) -> &U {
+        &self.userdata
+    }
+
     pub fn add_function<F>(&mut self)
     where
         F: DialectFunction<U>,

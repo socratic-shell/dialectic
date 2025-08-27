@@ -12,6 +12,7 @@ mod test;
 pub trait IpcClient: Send {
     async fn resolve_symbol_by_name(&mut self, name: &str) -> anyhow::Result<Vec<SymbolDef>>;
     async fn find_all_references(&mut self, symbol: &SymbolDef) -> anyhow::Result<Vec<FileRange>>;
+    fn generate_uuid(&self) -> String;
 }
 
 /// The "symbols" file is used as the expected argument
@@ -355,7 +356,7 @@ impl<U: IpcClient> DialectFunction<U> for Comment {
         }
 
         Ok(ResolvedComment {
-            id: uuid::Uuid::new_v4().to_string(),
+            id: interpreter.user_data().generate_uuid(),
             locations,
             icon: self.icon,
             comment: resolved_content,
