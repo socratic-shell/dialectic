@@ -67,7 +67,7 @@ interface PresentWalkthroughPayload {
     base_uri: string;
 }
 
-type WalkthroughElement = 
+type WalkthroughElement =
     | string  // ResolvedMarkdownElement (now serialized as plain string)
     | { comment: ResolvedComment }
     | { files: FileChange[] }  // GitDiffElement - named field serializes as {"files": [...]}
@@ -267,15 +267,15 @@ export class DaemonClient implements vscode.Disposable {
         if (message.type === 'present_walkthrough') {
             try {
                 const walkthroughPayload = message.payload as PresentWalkthroughPayload;
-                
+
                 this.outputChannel.appendLine(`Received walkthrough with base_uri: ${walkthroughPayload.base_uri}`);
                 this.outputChannel.appendLine(`Walkthrough sections: ${Object.keys(walkthroughPayload).filter(k => k !== 'base_uri' && walkthroughPayload[k as keyof PresentWalkthroughPayload]).join(', ')}`);
-                
+
                 // Set base URI for file resolution
                 if (walkthroughPayload.base_uri) {
                     this.walkthroughProvider.setBaseUri(walkthroughPayload.base_uri);
                 }
-                
+
                 // Show walkthrough in webview
                 this.walkthroughProvider.showWalkthrough({
                     introduction: walkthroughPayload.introduction,
@@ -283,7 +283,7 @@ export class DaemonClient implements vscode.Disposable {
                     changes: walkthroughPayload.changes,
                     actions: walkthroughPayload.actions
                 });
-                
+
                 // Send success response back through daemon
                 this.sendResponse(message.id, { success: true });
             } catch (error) {
@@ -960,7 +960,7 @@ export function activate(context: vscode.ExtensionContext) {
     // 💡: Set up daemon client connection for message bus communication
     const daemonClient = new DaemonClient(context, outputChannel, syntheticPRProvider, walkthroughProvider);
     bus.setDaemonClient(daemonClient);
-    
+
     daemonClient.start();
 
     // Set up comment callback to send comments as feedback
@@ -999,7 +999,7 @@ export function activate(context: vscode.ExtensionContext) {
 // 💡: Set up universal selection detection for interactive code review
 function setupSelectionDetection(bus: Bus): void {
     const { context, outputChannel } = bus;
-    
+
     outputChannel.appendLine('Setting up universal selection detection...');
 
     // 💡: Track current selection state
@@ -1068,9 +1068,12 @@ function setupSelectionDetection(bus: Bus): void {
             try {
                 const relativePath = vscode.workspace.asRelativePath(filePath);
                 const referenceData = {
-                    file: relativePath,
-                    line: startLine,
-                    selection: selectedText.length > 0 ? selectedText : undefined
+                    relativePath: relativePath,
+                    selectionRange: {
+                        start: { line: startLine, column: startColumn },
+                        end: { line: endLine, column: endColumn }
+                    },
+                    selectedText: selectedText,
                 };
 
                 await bus.sendToActiveTerminal(referenceData);
@@ -1266,7 +1269,7 @@ async function createCompactSelectionReference(
     try {
         const relativePath = vscode.workspace.asRelativePath(filePath);
         const referenceId = crypto.randomUUID();
-        
+
         // Create reference data matching the expected format
         const referenceData = {
             file: relativePath,
@@ -1276,11 +1279,11 @@ async function createCompactSelectionReference(
 
         // Store the reference using the bus
         await bus.sendReferenceToActiveShell(referenceId, referenceData);
-        
+
         // Return compact reference tag
         const compactRef = `<ssref id="${referenceId}"/>\n\n`;
         bus.log(`Created compact reference ${referenceId} for ${relativePath}:${startLine}`);
-        
+
         return compactRef;
     } catch (error) {
         bus.log(`Failed to create compact reference: ${error}`);
