@@ -6,6 +6,14 @@ use std::time::{Duration, Instant};
 use tokio::sync::RwLock;
 use uuid::Uuid;
 
+/// Global reference store instance
+static GLOBAL_REFERENCE_STORE: std::sync::OnceLock<ReferenceStore> = std::sync::OnceLock::new();
+
+/// Get the global reference store instance
+pub fn global_reference_store() -> &'static ReferenceStore {
+    GLOBAL_REFERENCE_STORE.get_or_init(|| ReferenceStore::new())
+}
+
 /// Context data that can be referenced by a compact ssref
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ReferenceContext {
@@ -56,6 +64,12 @@ impl ReferenceStore {
     /// Store a reference context and return a unique ID
     pub async fn store(&self, context: ReferenceContext) -> Result<String> {
         let id = Uuid::new_v4().to_string();
+        self.store_with_id(&id, context).await?;
+        Ok(id)
+    }
+
+    /// Store a reference context with a specific ID
+    pub async fn store_with_id(&self, id: &str, context: ReferenceContext) -> Result<()> {
         let now = Instant::now();
         
         let stored_ref = StoredReference {
@@ -65,12 +79,12 @@ impl ReferenceStore {
         };
 
         let mut refs = self.references.write().await;
-        refs.insert(id.clone(), stored_ref);
+        refs.insert(id.to_string(), stored_ref);
         
         // Clean up expired references while we have the write lock
         self.cleanup_expired(&mut refs);
         
-        Ok(id)
+        Ok(())
     }
 
     /// Retrieve a reference context by ID

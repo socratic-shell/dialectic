@@ -17,7 +17,7 @@ use tracing::info;
 
 use crate::dialect::DialectInterpreter;
 use crate::ipc::IPCCommunicator;
-use crate::reference_store::{ReferenceContext, ReferenceStore};
+use crate::reference_store::{global_reference_store, ReferenceContext};
 use crate::synthetic_pr::{
     CompletionAction, RequestReviewParams, UpdateReviewParams, UserFeedback,
 };
@@ -62,7 +62,6 @@ pub struct DialecticServer {
     ipc: IPCCommunicator,
     interpreter: DialectInterpreter<IPCCommunicator>,
     tool_router: ToolRouter<DialecticServer>,
-    reference_store: ReferenceStore,
 }
 
 #[tool_router]
@@ -104,7 +103,6 @@ impl DialecticServer {
             ipc: ipc.clone(),
             interpreter,
             tool_router: Self::tool_router(),
-            reference_store: ReferenceStore::new(),
         })
     }
 
@@ -204,7 +202,6 @@ impl DialecticServer {
             ipc,
             interpreter,
             tool_router: Self::tool_router(),
-            reference_store: ReferenceStore::new(),
         }
     }
 
@@ -674,7 +671,7 @@ impl DialecticServer {
             metadata: std::collections::HashMap::new(),
         };
 
-        match self.reference_store.store(context).await {
+        match global_reference_store().store(context).await {
             Ok(id) => {
                 self.ipc
                     .send_log(
@@ -722,7 +719,7 @@ impl DialecticServer {
             )
             .await;
 
-        match self.reference_store.get(&params.id).await {
+        match global_reference_store().get(&params.id).await {
             Ok(Some(context)) => {
                 self.ipc
                     .send_log(

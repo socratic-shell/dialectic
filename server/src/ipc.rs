@@ -935,14 +935,27 @@ impl IPCCommunicator {
                         }
                     };
 
-                info!(
-                    "Reference {} stored with file: {:?}, line: {:?}, comment: {:?}",
-                    store_payload.id, store_payload.file, store_payload.line, store_payload.user_comment
-                );
-                
-                // TODO: Store the reference in a shared reference store
-                // For now, we just log it - the actual storage will be implemented
-                // when we integrate the reference store with the IPC system
+                // Create reference context
+                let context = crate::reference_store::ReferenceContext {
+                    file: store_payload.file.clone(),
+                    line: store_payload.line,
+                    selection: store_payload.selection.clone(),
+                    user_comment: store_payload.user_comment.clone(),
+                    metadata: std::collections::HashMap::new(),
+                };
+
+                // Store the reference in the global reference store
+                match crate::reference_store::global_reference_store().store_with_id(&store_payload.id, context).await {
+                    Ok(()) => {
+                        info!(
+                            "Successfully stored reference {} with file: {:?}, line: {:?}, comment: {:?}",
+                            store_payload.id, store_payload.file, store_payload.line, store_payload.user_comment
+                        );
+                    }
+                    Err(e) => {
+                        error!("Failed to store reference {}: {}", store_payload.id, e);
+                    }
+                }
             }
             _ => {
                 // Every message (including the ones we send...) gets rebroadcast to everyone,
