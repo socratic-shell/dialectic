@@ -126,10 +126,6 @@ async fn test_find_definition_with_to_string_symbol() {
     let mut interpreter = DialectInterpreter::new(MockIpcClient::new());
     interpreter.add_function::<FindDefinitions>();
 
-    let input = serde_json::json!({
-        "finddefinitions": {"of": "User"}
-    });
-
     expect_test::expect![[r#"
         Ok(
             Array [
@@ -152,19 +148,13 @@ async fn test_find_definition_with_to_string_symbol() {
             ],
         )
     "#]]
-    .assert_debug_eq(&interpreter.evaluate(input).await);
+    .assert_debug_eq(&interpreter.evaluate("findDefinitions(\"User\")").await);
 }
 
 #[tokio::test]
 async fn test_find_definition_ambiguous_symbol() {
     let mut interpreter = DialectInterpreter::new(MockIpcClient::new());
     interpreter.add_function::<FindDefinitions>();
-
-    let input = serde_json::json!({
-        "finddefinitions": {
-            "of": "validateToken"
-        }
-    });
 
     expect_test::expect![[r#"
         Ok(
@@ -203,19 +193,13 @@ async fn test_find_definition_ambiguous_symbol() {
                 },
             ],
         )
-    "#]].assert_debug_eq(&interpreter.evaluate(input).await);
+    "#]].assert_debug_eq(&interpreter.evaluate("findDefinitions(\"validateToken\")").await);
 }
 
 #[tokio::test]
 async fn test_find_references() {
     let mut interpreter = DialectInterpreter::new(MockIpcClient::new());
     interpreter.add_function::<FindReferences>();
-
-    let input = serde_json::json!({
-        "findreferences": {
-            "to": "User"
-        }
-    });
 
     expect_test::expect![[r#"
         Ok(
@@ -279,7 +263,7 @@ async fn test_find_references() {
             ],
         )
     "#]]
-    .assert_debug_eq(&interpreter.evaluate(input).await);
+    .assert_debug_eq(&interpreter.evaluate("findReferences(\"User\")").await);
 }
 
 #[tokio::test]
@@ -287,18 +271,12 @@ async fn test_symbol_not_found() {
     let mut interpreter = DialectInterpreter::new(MockIpcClient::new());
     interpreter.add_function::<FindDefinitions>();
 
-    let input = serde_json::json!({
-        "finddefinitions": {
-            "of": "NonExistentSymbol"
-        }
-    });
-
     expect_test::expect![[r#"
         Ok(
             Array [],
         )
     "#]]
-    .assert_debug_eq(&interpreter.evaluate(input).await);
+    .assert_debug_eq(&interpreter.evaluate("findDefinitions(\"NonExistentSymbol\")").await);
 }
 
 #[tokio::test]
@@ -396,8 +374,7 @@ async fn test_simple_function() {
     let mut interpreter = DialectInterpreter::new(());
     interpreter.add_function::<Uppercase>();
 
-    let input = serde_json::json!({"uppercase": {"text": "hello"}});
-    let result = interpreter.evaluate(input).await.unwrap();
+    let result = interpreter.evaluate("uppercase(\"hello\")").await.unwrap();
 
     assert_eq!(result, serde_json::json!("HELLO"));
 }
@@ -408,14 +385,7 @@ async fn test_function_composition() {
     interpreter.add_function::<Uppercase>();
     interpreter.add_function::<Concat>();
 
-    let input = serde_json::json!({
-        "concat": {
-            "left": {"uppercase": {"text": "hello"}},
-            "right": " world"
-        }
-    });
-
-    let result = interpreter.evaluate(input).await.unwrap();
+    let result = interpreter.evaluate("concat(uppercase(\"hello\"), \" world\")").await.unwrap();
     assert_eq!(result, serde_json::json!("HELLO world"));
 }
 
