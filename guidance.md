@@ -5,12 +5,12 @@ Dialectic offers tools to aid you in developing and discussing code with the use
 ## Quick Reference
 
 **Core XML Elements:**
-- `<comment location="DIALECT_EXPR" icon="ICON">content</comment>` - Code comments
+- `<comment location="EXPR" icon="ICON">content</comment>` - Code comments
 - `<gitdiff range="COMMIT_RANGE" />` - Show code changes
 - `<action button="TEXT">message</action>` - Interactive buttons
 - `<mermaid>diagram</mermaid>` - Architecture diagrams
 
-**Common Dialect Expressions:**
+**Common expressions:**
 - `findDefinition("symbol")` - Find where symbol is defined
 - `findReferences("symbol")` - Find all uses of symbol
 - `search("file.rs", "pattern")` - Search file for regex pattern
@@ -32,6 +32,7 @@ You SHOULD leverage the `ide_operation` tool to navigate the code rather than us
 
 * `findDefinitions("foo")` -- find all the definitions of a given symbol.
 * `findReferences("foo")` -- find all the references to a given symbol (this is more reliable than grep).
+* `search("path/to/directory", "regex")` -- search all files in the given directory for the given regular expression.
 * `search("path/to/directory", "regex", ".rs")` -- search `.rs` files in the given directory for the given regular expression.
 
 ## Tool Selection Guidelines
@@ -142,11 +143,12 @@ Can include **formatting** and [links](https://example.com).
 ```
 
 **Attributes:**
-- `location` (required) - Dialect expression that resolves to code location(s). Common examples:
+- `location` (required) - expression that resolves to code location(s). Common examples:
   - `findDefinition("validateToken")` -- definition of a function/class/variable
   - `findReferences("User")` -- all references to a symbol
   - `search("src/auth.rs", "impl.*Token")` -- regex search in specific file
-  - `search("src", "fn login", ".rs")` -- search directory for pattern in .rs files
+  - `search("src", "\s*fn login")` -- search directory `src` for regex `\s*fn login` in all files (respects gitignore)
+  - `search("src", "\s*fn login", ".rs")` -- search directory for regex `\s*fn login` in `.rs` files(respects gitignore)
   - `lines("src/auth.rs", 42, 45)` -- specific line range (use sparingly, prefer search)
 - `icon` (optional) - VSCode codicon name (e.g., `question`, `lightbulb`, `warning`)
 
@@ -197,9 +199,9 @@ How should I handle expired tokens differently?
 - Providing quick access to common questions
 - **Not for:** Simple navigation (use comments with links instead)
 
-## Dialect Location Expressions
+## Location Expressions
 
-Dialect expressions in `location` attributes target specific code locations. Here are the main functions:
+Expressions in `location` attributes target specific code locations. Here are the main functions:
 
 ### Symbol-based targeting
 ```xml
@@ -287,12 +289,11 @@ Dialect expressions in `location` attributes target specific code locations. Her
 
 ## Error Handling and Recovery
 
-### Dialect Expression Failures
-When Dialect expressions in `location` attributes fail:
+### Expression Failures
+When expressions in `location` attributes fail:
 
-- **Invalid syntax** - Check for proper quoting and function names
-- **No matches found** - Try broader search patterns or verify file paths
-- **Multiple matches** - Users get disambiguation dialog automatically
+- **Invalid syntax** - The error message should indicate the problem
+- **No matches found** - Try broader search patterns, verify file paths, or remove the extension from the search (it is optional)
 - **File not found** - Verify paths are relative to project root
 
 **Recovery patterns:**
