@@ -37,15 +37,6 @@ pub struct ResolvedXmlElement {
     pub content: String,
 }
 
-/// Placeholder for XML elements during markdown processing
-#[derive(Debug, Clone)]
-struct XmlPlaceholder {
-    pub id: usize,
-    pub start: usize,
-    pub end: usize,
-    pub element: XmlElement,
-}
-
 /// Main walkthrough parser
 pub struct WalkthroughParser<T: IpcClient> {
     interpreter: DialectInterpreter<T>,
@@ -58,28 +49,14 @@ impl<T: IpcClient> WalkthroughParser<T> {
 
     /// Parse markdown with embedded XML elements and return normalized output
     pub async fn parse_and_normalize(&mut self, content: &str) -> Result<String, Box<dyn std::error::Error>> {
-        // Phase 1: Extract XML elements
-        let (markdown_with_placeholders, xml_elements) = self.extract_xml_elements(content)?;
-        
-        // Phase 2: Process markdown
-        let processed_markdown = self.process_markdown(&markdown_with_placeholders);
-        
-        // Phase 3: Resolve XML elements with real Dialect evaluation
-        let resolved_elements = self.resolve_elements(xml_elements).await?;
-        
-        // Phase 4: Reconstruct with normalized XML
-        let normalized = self.reconstruct_with_normalized_xml(&processed_markdown, &resolved_elements);
-        
-        Ok(normalized)
+        // Transform XML elements in place with resolved data
+        self.transform_xml_elements_in_place(content).await
     }
 
-    /// Extract XML elements and replace with placeholders
-    fn extract_xml_elements(&self, content: &str) -> Result<(String, Vec<XmlPlaceholder>), Box<dyn std::error::Error>> {
-        let mut xml_elements = Vec::new();
-        let mut result = String::new();
-        let mut last_end = 0;
-        let mut placeholder_id = 0;
-
+    /// Transform XML elements in place with resolved Dialect data
+    async fn transform_xml_elements_in_place(&mut self, content: &str) -> Result<String, Box<dyn std::error::Error>> {
+        let mut result = content.to_string();
+        
         // Create regexes for each element type (both self-closing and regular)
         let patterns = [
             (regex::Regex::new(r"<comment([^>]*)/>")?),
@@ -92,48 +69,115 @@ impl<T: IpcClient> WalkthroughParser<T> {
             (regex::Regex::new(r"<mermaid([^>]*)>(.*?)</mermaid>")?),
         ];
         
-        // Find all matches and sort by position
-        let mut matches: Vec<(usize, usize, String)> = Vec::new();
-        
+        // Collect all matches first to avoid borrowing issues
+        let mut all_matches = Vec::new();
         for pattern in &patterns {
-            for mat in pattern.find_iter(content) {
-                matches.push((mat.start(), mat.end(), mat.as_str().to_string()));
+            for mat in pattern.find_iter(&result) {
+                all_matches.push((mat.start(), mat.end(), mat.as_str().to_string()));
             }
         }
         
-        // Sort by start position and remove overlaps
-        matches.sort_by_key(|&(start, _, _)| start);
-        matches.dedup_by_key(|&mut (start, _, _)| start);
+        // Sort by start position (reverse order so we can replace from end to start)
+        all_matches.sort_by_key(|&(start, _, _)| std::cmp::Reverse(start));
         
-        for (start, end, xml_text) in matches {
-            // Add content before this XML element
-            result.push_str(&content[last_end..start]);
-            
-            // Parse the XML element
+        // Transform each XML element
+        for (start, end, xml_text) in all_matches {
             let element = self.parse_xml_element(&xml_text)?;
+            let resolved_element = self.resolve_single_element(element).await?;
+            let normalized_xml = self.create_normalized_xml(&resolved_element);
             
-            // Add placeholder
-            let placeholder_marker = format!("__XML_PLACEHOLDER_{}__", placeholder_id);
-            result.push_str(&placeholder_marker);
-            
-            xml_elements.push(XmlPlaceholder {
-                id: placeholder_id,
-                start,
-                end,
-                element,
-            });
-            
-            placeholder_id += 1;
-            last_end = end;
+            // Replace the original XML with normalized version (from end to start to preserve indices)
+            result.replace_range(start..end, &normalized_xml);
         }
         
-        // Add remaining content
-        result.push_str(&content[last_end..]);
-        
-        Ok((result, xml_elements))
+        Ok(result)
     }
 
-    /// Parse a single XML element string into XmlElement
+    /// Resolve a single XML element with Dialect evaluation
+    async fn resolve_single_element(&mut self, element: XmlElement) -> Result<ResolvedXmlElement, Box<dyn std::error::Error>> {
+        let (element_type, attributes, resolved_data) = match &element {
+            XmlElement::Comment { location, icon, content: _ } => {
+                let mut attrs = HashMap::new();
+                if let Some(icon) = icon {
+                    attrs.insert("icon".to_string(), icon.clone());
+                }
+                
+                // Resolve Dialect expression for location
+                let resolved_data = if !location.is_empty() {
+                    match self.interpreter.evaluate(location).await {
+                        Ok(result) => {
+                            serde_json::json!({
+                                "locations": result,
+                                "dialect_expression": location
+                            })
+                        }
+                        Err(e) => {
+                            serde_json::json!({
+                                "error": format!("Failed to resolve location: {}", e),
+                                "dialect_expression": location
+                            })
+                        }
+                    }
+                } else {
+                    serde_json::json!({
+                        "locations": []
+                    })
+                };
+                
+                ("comment".to_string(), attrs, resolved_data)
+            }
+            XmlElement::GitDiff { range, exclude_unstaged, exclude_staged } => {
+                let mut attrs = HashMap::new();
+                if *exclude_unstaged {
+                    attrs.insert("exclude-unstaged".to_string(), "true".to_string());
+                }
+                if *exclude_staged {
+                    attrs.insert("exclude-staged".to_string(), "true".to_string());
+                }
+                
+                let resolved_data = serde_json::json!({
+                    "range": range,
+                    "type": "gitdiff"
+                });
+                
+                ("gitdiff".to_string(), attrs, resolved_data)
+            }
+            XmlElement::Action { button, message: _ } => {
+                let mut attrs = HashMap::new();
+                attrs.insert("button".to_string(), button.clone());
+                
+                let resolved_data = serde_json::json!({
+                    "button_text": button
+                });
+                
+                ("action".to_string(), attrs, resolved_data)
+            }
+            XmlElement::Mermaid { content: _ } => {
+                let attrs = HashMap::new();
+                let resolved_data = serde_json::json!({
+                    "type": "mermaid",
+                    "rendered": true
+                });
+                
+                ("mermaid".to_string(), attrs, resolved_data)
+            }
+        };
+
+        let content = match &element {
+            XmlElement::Comment { content, .. } => content.clone(),
+            XmlElement::Action { message, .. } => message.clone(),
+            XmlElement::Mermaid { content } => content.clone(),
+            XmlElement::GitDiff { .. } => String::new(),
+        };
+
+        Ok(ResolvedXmlElement {
+            element_type,
+            attributes,
+            resolved_data,
+            content,
+        })
+    }
+
     fn parse_xml_element(&self, xml_text: &str) -> Result<XmlElement, Box<dyn std::error::Error>> {
         let mut reader = Reader::from_str(xml_text);
         reader.config_mut().trim_text(true);
@@ -197,123 +241,6 @@ impl<T: IpcClient> WalkthroughParser<T> {
             "mermaid" => Ok(XmlElement::Mermaid { content }),
             _ => Err(format!("Unknown XML element: {}", element_name).into()),
         }
-    }
-
-    /// Process markdown content (placeholder for now)
-    fn process_markdown(&self, content: &str) -> String {
-        // For Phase 1, just return the content as-is
-        // Later we'll use pulldown-cmark for proper markdown processing
-        content.to_string()
-    }
-
-    /// Resolve XML elements with real Dialect evaluation
-    async fn resolve_elements(&mut self, placeholders: Vec<XmlPlaceholder>) -> Result<Vec<ResolvedXmlElement>, Box<dyn std::error::Error>> {
-        let mut resolved = Vec::new();
-        
-        for placeholder in placeholders {
-            let (element_type, attributes, resolved_data) = match &placeholder.element {
-                XmlElement::Comment { location, icon, content: _ } => {
-                    let mut attrs = HashMap::new();
-                    if let Some(icon) = icon {
-                        attrs.insert("icon".to_string(), icon.clone());
-                    }
-                    
-                    // Resolve Dialect expression for location
-                    let resolved_data = if !location.is_empty() {
-                        match self.interpreter.evaluate(location).await {
-                            Ok(result) => {
-                                // Convert Dialect result to locations format
-                                serde_json::json!({
-                                    "locations": result,
-                                    "dialect_expression": location
-                                })
-                            }
-                            Err(e) => {
-                                // Fallback to error info if resolution fails
-                                serde_json::json!({
-                                    "error": format!("Failed to resolve location: {}", e),
-                                    "dialect_expression": location
-                                })
-                            }
-                        }
-                    } else {
-                        serde_json::json!({
-                            "locations": []
-                        })
-                    };
-                    
-                    ("comment".to_string(), attrs, resolved_data)
-                }
-                XmlElement::GitDiff { range, exclude_unstaged, exclude_staged } => {
-                    let mut attrs = HashMap::new();
-                    if *exclude_unstaged {
-                        attrs.insert("exclude-unstaged".to_string(), "true".to_string());
-                    }
-                    if *exclude_staged {
-                        attrs.insert("exclude-staged".to_string(), "true".to_string());
-                    }
-                    
-                    // For gitdiff, we could resolve the range to actual file changes
-                    // For now, just pass through the range
-                    let resolved_data = serde_json::json!({
-                        "range": range,
-                        "type": "gitdiff"
-                    });
-                    
-                    ("gitdiff".to_string(), attrs, resolved_data)
-                }
-                XmlElement::Action { button, message: _ } => {
-                    let mut attrs = HashMap::new();
-                    attrs.insert("button".to_string(), button.clone());
-                    
-                    let resolved_data = serde_json::json!({
-                        "action_id": format!("action_{}", placeholder.id),
-                        "button_text": button
-                    });
-                    
-                    ("action".to_string(), attrs, resolved_data)
-                }
-                XmlElement::Mermaid { content: _ } => {
-                    let attrs = HashMap::new();
-                    let resolved_data = serde_json::json!({
-                        "type": "mermaid",
-                        "rendered": true
-                    });
-                    
-                    ("mermaid".to_string(), attrs, resolved_data)
-                }
-            };
-
-            let content = match &placeholder.element {
-                XmlElement::Comment { content, .. } => content.clone(),
-                XmlElement::Action { message, .. } => message.clone(),
-                XmlElement::Mermaid { content } => content.clone(),
-                XmlElement::GitDiff { .. } => String::new(),
-            };
-
-            resolved.push(ResolvedXmlElement {
-                element_type,
-                attributes,
-                resolved_data,
-                content,
-            });
-        }
-        
-        Ok(resolved)
-    }
-
-    /// Reconstruct markdown with normalized XML elements
-    fn reconstruct_with_normalized_xml(&self, markdown: &str, resolved: &[ResolvedXmlElement]) -> String {
-        let mut result = markdown.to_string();
-        
-        // Replace placeholders with normalized XML
-        for (i, resolved_element) in resolved.iter().enumerate() {
-            let placeholder = format!("__XML_PLACEHOLDER_{}__", i);
-            let normalized_xml = self.create_normalized_xml(resolved_element);
-            result = result.replace(&placeholder, &normalized_xml);
-        }
-        
-        result
     }
 
     /// Create normalized XML with resolved data
@@ -462,20 +389,26 @@ More markdown here.
         assert!(result.contains("src/models.rs") || result.contains("User"));
     }
 
-    #[test]
-    fn test_extract_xml_elements() {
-        let parser = create_test_parser();
-        let content = r#"# Title
-<comment location="test">Content</comment>
-More text
-<gitdiff range="HEAD" />"#;
+    #[tokio::test]
+    async fn test_in_place_transformation() {
+        let mut parser = create_test_parser();
+        let input = r#"# Title
+Some text before
+<comment location="findDefinitions(`User`)">User comment</comment>
+Some text after
+<gitdiff range="HEAD" />
+More text"#;
 
-        let (markdown, elements) = parser.extract_xml_elements(content).unwrap();
+        let result = parser.parse_and_normalize(input).await.unwrap();
         
-        assert_eq!(elements.len(), 2);
-        assert!(markdown.contains("__XML_PLACEHOLDER_0__"));
-        assert!(markdown.contains("__XML_PLACEHOLDER_1__"));
-        assert!(markdown.contains("# Title"));
-        assert!(markdown.contains("More text"));
+        // Should preserve markdown structure
+        assert!(result.contains("# Title"));
+        assert!(result.contains("Some text before"));
+        assert!(result.contains("Some text after"));
+        assert!(result.contains("More text"));
+        
+        // Should transform XML elements in place
+        assert!(result.contains("data-resolved="));
+        assert!(!result.contains("__XML_PLACEHOLDER_"));
     }
 }
