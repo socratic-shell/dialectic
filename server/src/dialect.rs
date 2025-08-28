@@ -167,7 +167,7 @@ pub trait DialectFunction<U: Send>: DeserializeOwned + Send {
 /// Macro to implement DialectFunction for value types that evaluate to themselves
 #[macro_export]
 macro_rules! dialect_value {
-    ($ty:ty { [$($param:ident),*] }) => {
+    ($ty:ty { $($param:ident),* }) => {
         impl<U: Send> $crate::dialect::DialectFunction<U> for $ty {
             type Output = $ty;
 
