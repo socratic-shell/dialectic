@@ -69,3 +69,4 @@ expect-test = "1.5.1"
 tempfile = "3.8"
 scopeguard = "1.2"
 test-utils = { path = "test-utils" }
+annotate-snippets = { version = "0.11", features = ["testing-colors"] }

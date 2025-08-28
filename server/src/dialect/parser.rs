@@ -1,5 +1,35 @@
 use std::{collections::BTreeMap, iter::Peekable};
 
+#[derive(Debug, thiserror::Error)]
+pub enum ParseError {
+    #[error("Unexpected end of input")]
+    UnexpectedEof { position: usize },
+    #[error("Unexpected token: {token:?}")]
+    UnexpectedToken { token: String, position: usize },
+    #[error("Unexpected identifier without function call")]
+    UnexpectedIdent { position: usize },
+    #[error("Expected ')'")]
+    ExpectedCloseParen { position: usize },
+    #[error("Expected ']'")]
+    ExpectedCloseBracket { position: usize },
+    #[error("Expected '}}'")]
+    ExpectedCloseBrace { position: usize },
+    #[error("Expected key")]
+    ExpectedKey { position: usize },
+    #[error("Expected ':' after key")]
+    ExpectedColon { position: usize },
+    #[error("Expected string or identifier as key")]
+    ExpectedStringOrIdent { position: usize },
+    #[error("Unterminated string literal")]
+    UnterminatedString { position: usize },
+    #[error("Invalid escape sequence: \\{char}")]
+    InvalidEscape { char: char, position: usize },
+    #[error("Unterminated escape sequence")]
+    UnterminatedEscape { position: usize },
+    #[error("Unexpected character '{char}' following \"{preceding}\"")]
+    UnexpectedChar { char: char, preceding: String, position: usize },
+}
+
 #[derive(Debug)]
 pub enum Ast {
     Call(String, Vec<Ast>),
@@ -10,18 +40,21 @@ pub enum Ast {
     Object(BTreeMap<String, Ast>),
 }
 
-pub fn parse<'a>(input: &'a str) -> anyhow::Result<Ast> {
+pub fn parse<'a>(input: &'a str) -> Result<Ast, ParseError> {
     let tokens = tokenize(input)?;
     let mut tokens = tokens.into_iter().peekable();
     let ast = parse_ast(&mut tokens)?;
     if let Some(token) = tokens.next() {
-        anyhow::bail!("Unexpected token: {token:?}");
+        return Err(ParseError::UnexpectedToken { 
+            token: format!("{:?}", token.kind), 
+            position: token.start 
+        });
     }
     Ok(ast)
 }
 
-fn parse_ast(tokens: &mut Peekable<std::vec::IntoIter<Token<'_>>>) -> anyhow::Result<Ast> {
-    let token = tokens.next().ok_or_else(|| anyhow::anyhow!("Unexpected end of input"))?;
+fn parse_ast(tokens: &mut Peekable<std::vec::IntoIter<Token<'_>>>) -> Result<Ast, ParseError> {
+    let token = tokens.next().ok_or(ParseError::UnexpectedEof { position: 0 })?;
     
     match token.kind {
         TokenKind::Integer(n) => Ok(Ast::Int(n)),
@@ -40,10 +73,10 @@ fn parse_ast(tokens: &mut Peekable<std::vec::IntoIter<Token<'_>>>) -> anyhow::Re
                     }
                 }
                 
-                tokens.next().ok_or_else(|| anyhow::anyhow!("Expected ')'"))?;
+                tokens.next().ok_or(ParseError::ExpectedCloseParen { position: token.end })?;
                 Ok(Ast::Call(name.to_string(), args))
             } else {
-                anyhow::bail!("Unexpected identifier without function call")
+                Err(ParseError::UnexpectedIdent { position: token.start })
             }
         }
         
@@ -57,7 +90,7 @@ fn parse_ast(tokens: &mut Peekable<std::vec::IntoIter<Token<'_>>>) -> anyhow::Re
                 }
             }
             
-            tokens.next().ok_or_else(|| anyhow::anyhow!("Expected ']'"))?;
+            tokens.next().ok_or(ParseError::ExpectedCloseBracket { position: token.end })?;
             Ok(Ast::Array(elements))
         }
         
@@ -65,14 +98,16 @@ fn parse_ast(tokens: &mut Peekable<std::vec::IntoIter<Token<'_>>>) -> anyhow::Re
             let mut map = BTreeMap::new();
             
             while tokens.peek().map(|t| &t.kind) != Some(&TokenKind::Sym('}')) {
-                let key = match tokens.next().ok_or_else(|| anyhow::anyhow!("Expected key"))?.kind {
+                let key_token = tokens.next().ok_or(ParseError::ExpectedKey { position: token.end })?;
+                let key = match key_token.kind {
                     TokenKind::String(s) => s,
                     TokenKind::Ident(s) => s.to_string(),
-                    _ => anyhow::bail!("Expected string or identifier as key"),
+                    _ => return Err(ParseError::ExpectedStringOrIdent { position: key_token.start }),
                 };
                 
-                if tokens.next().ok_or_else(|| anyhow::anyhow!("Expected ':'"))?.kind != TokenKind::Sym(':') {
-                    anyhow::bail!("Expected ':' after key");
+                let colon_token = tokens.next().ok_or(ParseError::ExpectedColon { position: key_token.end })?;
+                if colon_token.kind != TokenKind::Sym(':') {
+                    return Err(ParseError::ExpectedColon { position: colon_token.start });
                 }
                 
                 let value = parse_ast(tokens)?;
@@ -83,11 +118,14 @@ fn parse_ast(tokens: &mut Peekable<std::vec::IntoIter<Token<'_>>>) -> anyhow::Re
                 }
             }
             
-            tokens.next().ok_or_else(|| anyhow::anyhow!("Expected '}}'"))?;
+            tokens.next().ok_or(ParseError::ExpectedCloseBrace { position: token.end })?;
             Ok(Ast::Object(map))
         }
         
-        _ => anyhow::bail!("Unexpected token: {:?}", token.kind),
+        _ => Err(ParseError::UnexpectedToken { 
+            token: format!("{:?}", token.kind), 
+            position: token.start 
+        }),
     }
 }
 
@@ -108,7 +146,7 @@ enum TokenKind<'a> {
     EOF,
 }
 
-fn tokenize<'a>(input: &'a str) -> anyhow::Result<Vec<Token<'a>>> {
+fn tokenize<'a>(input: &'a str) -> Result<Vec<Token<'a>>, ParseError> {
     let mut tokens = Vec::new();
     let chars = &mut input.char_indices().peekable();
 
@@ -163,10 +201,10 @@ fn tokenize<'a>(input: &'a str) -> anyhow::Result<Vec<Token<'a>>> {
                         Some((_, '\'')) => s.push('\''),
                         Some((_, '\\')) => s.push('\\'),
                         Some((_, c)) => {
-                            return Err(anyhow::anyhow!("Invalid escape sequence: \\{}", c));
+                            return Err(ParseError::InvalidEscape { char: c, position: next_index });
                         }
                         None => {
-                            return Err(anyhow::anyhow!("Unterminated escape sequence"));
+                            return Err(ParseError::UnterminatedEscape { position: next_index });
                         }
                     }
                 } else {
@@ -175,7 +213,7 @@ fn tokenize<'a>(input: &'a str) -> anyhow::Result<Vec<Token<'a>>> {
             }
 
             if end_index == start_index {
-                anyhow::bail!("Unterminated string literal");
+                return Err(ParseError::UnterminatedString { position: start_index });
             }
 
             tokens.push(Token {
@@ -195,10 +233,11 @@ fn tokenize<'a>(input: &'a str) -> anyhow::Result<Vec<Token<'a>>> {
             continue;
         }
 
-        anyhow::bail!(
-            "Unexpected character '{start_ch}' following {:?}",
-            &input[..start_index]
-        );
+        return Err(ParseError::UnexpectedChar { 
+            char: start_ch, 
+            preceding: input[..start_index].to_string(),
+            position: start_index 
+        });
     }
 
     Ok(tokens)
@@ -232,10 +271,45 @@ fn take_chars<'i>(
 mod tests {
     use super::*;
     use expect_test::{expect, Expect};
+    use annotate_snippets::{Level, Renderer, Snippet};
 
     fn check_parse(input: &str, expected: Expect) {
         let result = parse(input).unwrap();
         expected.assert_debug_eq(&result);
+    }
+
+    fn check_parse_error(input: &str, expected: Expect) {
+        let result = parse(input);
+        match result {
+            Err(error) => {
+                let position = match &error {
+                    ParseError::UnexpectedEof { position } => *position,
+                    ParseError::UnexpectedToken { position, .. } => *position,
+                    ParseError::UnexpectedIdent { position } => *position,
+                    ParseError::ExpectedCloseParen { position } => *position,
+                    ParseError::ExpectedCloseBracket { position } => *position,
+                    ParseError::ExpectedCloseBrace { position } => *position,
+                    ParseError::ExpectedKey { position } => *position,
+                    ParseError::ExpectedColon { position } => *position,
+                    ParseError::ExpectedStringOrIdent { position } => *position,
+                    ParseError::UnterminatedString { position } => *position,
+                    ParseError::InvalidEscape { position, .. } => *position,
+                    ParseError::UnterminatedEscape { position } => *position,
+                    ParseError::UnexpectedChar { position, .. } => *position,
+                };
+                
+                let error_message = error.to_string();
+                let message = Level::Error.title(&error_message).snippet(
+                    Snippet::source(input)
+                        .annotation(Level::Error.span(position..position.saturating_add(1)))
+                );
+                
+                let renderer = Renderer::plain();
+                let output = renderer.render(message).to_string();
+                expected.assert_eq(&output);
+            }
+            Ok(_) => panic!("Expected parse error, but parsing succeeded"),
+        }
     }
 
     #[test]
@@ -296,11 +370,6 @@ mod tests {
         );
     }
 
-    fn check_parse_error(input: &str, expected: Expect) {
-        let result = parse(input);
-        expected.assert_debug_eq(&result);
-    }
-
     #[test]
     fn test_parse_nested_structure() {
         check_parse(
@@ -337,10 +406,11 @@ mod tests {
         check_parse_error(
             "foo(42 extra)",
             expect![[r#"
-                Err(
-                    "Unexpected identifier without function call",
-                )
-            "#]],
+                error: Unexpected identifier without function call
+                  |
+                1 | foo(42 extra)
+                  |        ^
+                  |"#]],
         );
     }
 
@@ -349,10 +419,11 @@ mod tests {
         check_parse_error(
             "\"unterminated",
             expect![[r#"
-                Err(
-                    "Unterminated string literal",
-                )
-            "#]],
+                error: Unterminated string literal
+                  |
+                1 | "unterminated
+                  | ^
+                  |"#]],
         );
     }
 
@@ -361,10 +432,11 @@ mod tests {
         check_parse_error(
             "foo(42",
             expect![[r#"
-                Err(
-                    "Unexpected end of input",
-                )
-            "#]],
+                error: Unexpected end of input
+                  |
+                1 | foo(42
+                  | ^
+                  |"#]],
         );
     }
 
@@ -373,10 +445,11 @@ mod tests {
         check_parse_error(
             "[1, 2",
             expect![[r#"
-                Err(
-                    "Unexpected end of input",
-                )
-            "#]],
+                error: Unexpected end of input
+                  |
+                1 | [1, 2
+                  | ^
+                  |"#]],
         );
     }
 
@@ -385,10 +458,11 @@ mod tests {
         check_parse_error(
             "{\"key\": 42",
             expect![[r#"
-                Err(
-                    "Expected key",
-                )
-            "#]],
+                error: Expected key
+                  |
+                1 | {"key": 42
+                  |  ^
+                  |"#]],
         );
     }
 
@@ -397,10 +471,11 @@ mod tests {
         check_parse_error(
             "{\"key\" 42}",
             expect![[r#"
-                Err(
-                    "Expected ':' after key",
-                )
-            "#]],
+                error: Expected ':' after key
+                  |
+                1 | {"key" 42}
+                  |        ^
+                  |"#]],
         );
     }
 
@@ -409,10 +484,11 @@ mod tests {
         check_parse_error(
             "\"invalid\\x\"",
             expect![[r#"
-                Err(
-                    "Invalid escape sequence: \\x",
-                )
-            "#]],
+                error: Invalid escape sequence: \x
+                  |
+                1 | "invalid\x"
+                  |         ^
+                  |"#]],
         );
     }
 
@@ -421,10 +497,11 @@ mod tests {
         check_parse_error(
             "@invalid",
             expect![[r#"
-                Err(
-                    "Unexpected character '@' following \"\"",
-                )
-            "#]],
+                error: Unexpected character '@' following ""
+                  |
+                1 | @invalid
+                  | ^
+                  |"#]],
         );
     }
 
@@ -433,10 +510,11 @@ mod tests {
         check_parse_error(
             "standalone",
             expect![[r#"
-                Err(
-                    "Unexpected identifier without function call",
-                )
-            "#]],
+                error: Unexpected identifier without function call
+                  |
+                1 | standalone
+                  | ^
+                  |"#]],
         );
     }
 
@@ -445,10 +523,11 @@ mod tests {
         check_parse_error(
             "42 extra",
             expect![[r#"
-                Err(
-                    "Unexpected token: Token { kind: Ident(\"extra\"), start: 3, end: 8 }",
-                )
-            "#]],
+                error: Unexpected token: "Ident(\"extra\")"
+                  |
+                1 | 42 extra
+                  |    ^
+                  |"#]],
         );
     }
 }
