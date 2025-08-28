@@ -624,6 +624,19 @@ mod tests {
     }
 
     #[test]
+    fn test_mismatched_delimiters() {
+        check_parse_error(
+            "[1}",
+            expect![[r#"
+                error: Unexpected token: "Sym('}')"
+                  |
+                1 | [1}
+                  |   ^
+                  |"#]],
+        );
+    }
+
+    #[test]
     fn test_extra_tokens() {
         check_parse_error(
             "42 extra",
