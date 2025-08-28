@@ -1,7 +1,8 @@
+use pulldown_cmark::{Event, Parser, html};
 use quick_xml::events::Event as XmlEvent;
 use quick_xml::Reader;
 use serde::{Deserialize, Serialize};
-use std::collections::HashMap;
+use std::collections::{HashMap, VecDeque};
 
 use crate::dialect::{DialectInterpreter};
 use crate::ide::IpcClient;
@@ -49,48 +50,28 @@ impl<T: IpcClient> WalkthroughParser<T> {
 
     /// Parse markdown with embedded XML elements and return normalized output
     pub async fn parse_and_normalize(&mut self, content: &str) -> Result<String, Box<dyn std::error::Error>> {
-        // Transform XML elements in place with resolved data
-        self.transform_xml_elements_in_place(content).await
+        let processed_events = self.process_events_sequentially(content).await?;
+        Self::render_events_to_markdown(processed_events)
     }
 
-    /// Transform XML elements in place with resolved Dialect data
-    async fn transform_xml_elements_in_place(&mut self, content: &str) -> Result<String, Box<dyn std::error::Error>> {
-        let mut result = content.to_string();
+    /// Process pulldown-cmark event stream sequentially
+    async fn process_events_sequentially<'a>(&mut self, content: &'a str) -> Result<Vec<Event<'a>>, Box<dyn std::error::Error>> {
+        let mut input_events: VecDeque<Event<'a>> = Parser::new(content).collect();
+        let mut output_events = Vec::new();
         
-        // Create regexes for each element type (both self-closing and regular)
-        let patterns = [
-            (regex::Regex::new(r"<comment([^>]*)/>")?),
-            (regex::Regex::new(r"<comment([^>]*)>(.*?)</comment>")?),
-            (regex::Regex::new(r"<gitdiff([^>]*)/>")?),
-            (regex::Regex::new(r"<gitdiff([^>]*)>(.*?)</gitdiff>")?),
-            (regex::Regex::new(r"<action([^>]*)/>")?),
-            (regex::Regex::new(r"<action([^>]*)>(.*?)</action>")?),
-            (regex::Regex::new(r"<mermaid([^>]*)/>")?),
-            (regex::Regex::new(r"<mermaid([^>]*)>(.*?)</mermaid>")?),
-        ];
-        
-        // Collect all matches first to avoid borrowing issues
-        let mut all_matches = Vec::new();
-        for pattern in &patterns {
-            for mat in pattern.find_iter(&result) {
-                all_matches.push((mat.start(), mat.end(), mat.as_str().to_string()));
-            }
+        while let Some(event) = input_events.pop_front() {
+            // For now, just pass through all events unchanged
+            output_events.push(event);
         }
         
-        // Sort by start position (reverse order so we can replace from end to start)
-        all_matches.sort_by_key(|&(start, _, _)| std::cmp::Reverse(start));
-        
-        // Transform each XML element
-        for (start, end, xml_text) in all_matches {
-            let element = self.parse_xml_element(&xml_text)?;
-            let resolved_element = self.resolve_single_element(element).await?;
-            let normalized_xml = self.create_normalized_xml(&resolved_element);
-            
-            // Replace the original XML with normalized version (from end to start to preserve indices)
-            result.replace_range(start..end, &normalized_xml);
-        }
-        
-        Ok(result)
+        Ok(output_events)
+    }
+
+    /// Render pulldown-cmark events back to markdown/HTML
+    fn render_events_to_markdown<'a>(events: Vec<Event<'a>>) -> Result<String, Box<dyn std::error::Error>> {
+        let mut output = String::new();
+        html::push_html(&mut output, events.into_iter());
+        Ok(output)
     }
 
     /// Resolve a single XML element with Dialect evaluation
@@ -382,6 +363,9 @@ More markdown here.
         let input = r#"<comment location="findDefinitions(`User`)">User struct</comment>"#;
 
         let result = parser.parse_and_normalize(input).await.unwrap();
+        
+        println!("Input: {}", input);
+        println!("Output: {}", result);
         
         // Should contain resolved data from MockIpcClient
         assert!(result.contains("data-resolved="));
