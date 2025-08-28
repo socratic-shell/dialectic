@@ -582,21 +582,36 @@ async fn test_comment_function() {
     
     // Test comment with direct FileRange location (wrapped as Dialect value)
     let result = interpreter.evaluate(r#"comment({
-        location: {
-            FileRange: {
-                path: "src/main.rs",
-                start: {line: 10, column: 1},
-                end: {line: 10, column: 20},
-                content: "fn main() {"
-            }
-        },
-        icon: "info",
-        content: ["This is the main function", "Entry point of the program"]
-    })"#).await;
+        path: "src/main.rs",
+        start: {line: 10, column: 1},
+        end: {line: 10, column: 20},
+        content: "fn main() {"
+    }, "info", ["This is the main function", "Entry point of the program"])"#).await;
     
     expect![[r#"
-        Err(
-            "[invalid dialect program] object must have exactly one key: {\n    \"column\": Number(20),\n    \"line\": Number(10),\n}",
+        Ok(
+            Object {
+                "comment": Array [
+                    String("This is the main function"),
+                    String("Entry point of the program"),
+                ],
+                "icon": String("info"),
+                "id": String("DUMMY_UUID"),
+                "locations": Array [
+                    Object {
+                        "content": String("fn main() {"),
+                        "end": Object {
+                            "column": Number(20),
+                            "line": Number(10),
+                        },
+                        "path": String("src/main.rs"),
+                        "start": Object {
+                            "column": Number(1),
+                            "line": Number(10),
+                        },
+                    },
+                ],
+            },
         )
     "#]]
     .assert_debug_eq(&result);
@@ -615,11 +630,7 @@ async fn test_comment_function_with_symbol_def() {
     interpreter.add_function::<crate::ide::Comment>();
     
     // Test comment with SymbolDef location (should extract definedAt field)
-    let result = interpreter.evaluate(r#"comment({
-        location: findDefinitions("validateToken"),
-        icon: "warning",
-        content: ["This function needs better error handling"]
-    })"#).await;
+    let result = interpreter.evaluate(r#"comment(findDefinitions("validateToken"), "warning", ["This function needs better error handling"])"#).await;
     
     // Should normalize SymbolDef to its definedAt FileRange
     expect![[r#"
@@ -676,10 +687,7 @@ async fn test_action_function() {
     interpreter.add_function::<crate::ide::Action>();
     
     // Test action with tell_agent
-    let result = interpreter.evaluate(r#"action({
-        button: "Generate Auth",
-        "tell_agent": "Create a complete authentication system with login, logout, and middleware"
-    })"#).await;
+    let result = interpreter.evaluate(r#"action("Generate Auth", "Create a complete authentication system with login, logout, and middleware")"#).await;
     
     expect![[r#"
         Ok(
