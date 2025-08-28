@@ -2,17 +2,53 @@
 
 Dialectic offers tools to aid you in developing and discussing code with the user.
 
+## Quick Reference
+
+**Core XML Elements:**
+- `<comment location="DIALECT_EXPR" icon="ICON">content</comment>` - Code comments
+- `<gitdiff range="COMMIT_RANGE" />` - Show code changes
+- `<action button="TEXT">message</action>` - Interactive buttons
+- `<mermaid>diagram</mermaid>` - Architecture diagrams
+
+**Common Dialect Expressions:**
+- `findDefinition("symbol")` - Find where symbol is defined
+- `findReferences("symbol")` - Find all uses of symbol
+- `search("file.rs", "pattern")` - Search file for regex pattern
+- `search("dir", "pattern", ".rs")` - Search directory for pattern in .rs files
+- `lines("file.rs", 10, 20)` - Select specific line range (use sparingly)
+
+**Tool Selection:**
+- `ide_operation` for code navigation and search
+- `fs_read` for reading file contents
+- `present_walkthrough` for creating interactive code tours
+
 # Socratic Shell references
 
 Whenever the user sends you a message that includes an XML `<ssref/>` element, you SHOULD use the `expand_reference` tool with the contents of the `id` attribute to determine what it means.
 
 # IDE operations
 
-You SHOULD leverage the `ide_operation` tool to navigate the code rather than using bash comments. Example of useful commands you can give to `ide_operaton` include:
+You SHOULD leverage the `ide_operation` tool to navigate the code rather than using bash commands. Example of useful commands you can give to `ide_operation` include:
 
 * `findDefinitions("foo")` -- find all the definitions of a given symbol.
 * `findReferences("foo")` -- find all the references to a given symbol (this is more reliable than grep).
 * `search("path/to/directory", "regex", ".rs")` -- search `.rs` files in the given directory for the given regular expression.
+
+## Tool Selection Guidelines
+
+**Use `ide_operation` when:**
+- Finding symbol definitions or references
+- Searching for patterns in code
+- Navigating code structure
+
+**Use `fs_read` when:**
+- Reading file contents for analysis
+- Examining configuration files
+- Reviewing documentation
+
+**Use both together for:**
+- Complex code analysis (find locations with `ide_operation`, then read content with `fs_read`)
+- Comprehensive code reviews (search for patterns, then examine specific files)
 
 <!-- ANCHOR: walkthrough_format -->
 # Walkthrough Format Specification
@@ -225,4 +261,123 @@ Dialect expressions in `location` attributes target specific code locations. Her
 - **Comments:** Specific code explanations, design decisions, review points
 - **Git diffs:** Showing scope of changes, file-level context
 - **Actions:** Next steps, follow-up questions, related tasks
+
+### Anti-Patterns to Avoid
+
+**Comments:**
+- Don't comment obvious code: `<comment>This function returns a string</comment>`
+- Don't use for simple navigation: Use direct links instead of comment buttons
+- Don't create comments without specific location targeting
+
+**Git diffs:**
+- Don't include massive commit ranges that overwhelm users
+- Don't show diffs for unrelated changes mixed together
+- Don't use gitdiff when a simple file link would suffice
+
+**Actions:**
+- Don't create actions for information that should be in comments
+- Don't use vague button text like "Continue" or "Next"
+- Don't create actions that don't provide useful context to the AI
+
+**Mermaid:**
+- Don't use diagrams for simple linear processes
+- Don't create overly complex diagrams that are hard to read
+- Don't use mermaid when a simple list would be clearer
 <!-- ANCHOR_END: walkthrough_format -->
+
+## Error Handling and Recovery
+
+### Dialect Expression Failures
+When Dialect expressions in `location` attributes fail:
+
+- **Invalid syntax** - Check for proper quoting and function names
+- **No matches found** - Try broader search patterns or verify file paths
+- **Multiple matches** - Users get disambiguation dialog automatically
+- **File not found** - Verify paths are relative to project root
+
+**Recovery patterns:**
+```xml
+<!-- If specific search fails, try broader pattern -->
+<comment location="search(`src/auth.rs`, `validateToken`)">
+<!-- Fallback: <comment location="search(`src`, `validateToken`, `.rs`)"> -->
+```
+
+### Performance Considerations
+
+**For large codebases:**
+- Use specific file paths rather than directory-wide searches
+- Prefer symbol-based targeting over regex when possible
+- Limit search scope with file extensions
+- Avoid overly broad patterns that match many files
+
+**Examples:**
+```xml
+<!-- Good: Specific and targeted -->
+<comment location="search(`src/auth/mod.rs`, `pub fn login`)">
+
+<!-- Avoid: Too broad, may be slow -->
+<comment location="search(`src`, `.*`, `.rs`)">
+```
+
+### Tool Orchestration Patterns
+
+**Progressive disclosure approach:**
+1. Start with `ide_operation` to find locations
+2. Use `fs_read` to examine specific files
+3. Create walkthrough with targeted comments
+
+**Example workflow:**
+```
+1. ide_operation: findDefinitions("User") 
+2. fs_read: Read the found files to understand structure
+3. present_walkthrough: Create walkthrough with specific comments
+```
+
+**When to combine tools:**
+- **Code analysis**: `ide_operation` + `fs_read` for comprehensive understanding
+- **Documentation**: `fs_read` + `present_walkthrough` for explaining existing code
+- **Debugging**: `ide_operation` to trace references, then targeted comments
+
+## Troubleshooting
+
+### Common Issues
+
+**"No locations found" for comments:**
+- Verify file paths are correct and relative to project root
+- Check that search patterns match actual code syntax
+- Try simpler patterns first, then add complexity
+
+**Walkthrough not displaying properly:**
+- Ensure all XML elements are properly closed
+- Check that Dialect expressions use correct quoting (backticks recommended)
+- Verify mermaid syntax is valid
+
+**Performance issues:**
+- Reduce search scope by specifying file extensions
+- Use more specific search patterns
+- Avoid searching entire directories when possible
+
+**Action buttons not working:**
+- Ensure button text is descriptive and clear
+- Keep action messages concise and specific
+- Test that actions provide useful context to continue conversation
+
+### Best Practices Summary
+
+**Do:**
+- Start with simple, targeted searches
+- Use descriptive button text and comment content
+- Test Dialect expressions before including in walkthroughs
+- Provide context in comments about your reasoning and decisions
+- Use mermaid diagrams for complex architectural explanations
+
+**Don't:**
+- Use overly broad search patterns in large codebases
+- Create comments that just describe what code does
+- Forget to include gitdiff ranges for code you recently authored
+- Use line-based targeting unless absolutely necessary
+
+**Progressive approach:**
+1. **Simple walkthrough** - Basic structure with gitdiff and a few key comments
+2. **Enhanced walkthrough** - Add mermaid diagrams and more detailed comments  
+3. **Interactive walkthrough** - Include action buttons for follow-up tasks
