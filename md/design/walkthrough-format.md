@@ -54,15 +54,17 @@ The API documentation needs to reflect the new default token lifetime.
 
 This walkthrough combines regular markdown with specialized XML elements: ``<mermaid>`, `<comment>`, `<gitdiff>`, and `<action>`.
 
-## Overview
-
-Walkthroughs use a hybrid format combining markdown content with embedded XML elements for interactive features. The format consists of:
-
-- **Markdown content** - Standard markdown for documentation text
-- **XML elements** - Structured elements for comments, diffs, and actions
-- **Dialect expressions** - Code location targeting within XML attributes
-
 ## XML Elements
+
+### Mermaid
+
+Render mermaid graphs and diagrams
+
+```xml
+<mermaid>
+... mermaid content here ...
+</mermaid>
+```
 
 ### Comments
 
@@ -76,7 +78,12 @@ Can include **formatting** and [links](https://example.com).
 ```
 
 **Attributes:**
-- `location` (required) - Dialect expression that resolves to code location(s)
+- `location` (required) - Dialect expression that resolves to code location(s). A full explanation of Dialect is below, but common examples include:
+  - `findDefinitions("name")` -- definition(s) of a symbol
+  - `findReferences("name")` -- reference(s) to a symbol
+  - `search("src/foo.rs", "impl.*Foo")` -- search a file for the given regular expression
+  - `lines("src/foo.rs", 1, 5)` -- select lines from a given file (this is hard to get right, prefer to use search)
+  - `search("src", "fn foo", ".rs")` -- search a directory for files that contain the given regex and have the given extension
 - `icon` (optional) - VSCode codicon name (e.g., `question`, `lightbulb`, `warning`)
 
 **Content:** Markdown text that will be rendered in VSCode comment threads
@@ -111,148 +118,3 @@ How should I handle expired tokens differently?
 - `button` (required) - Text displayed on the button
 
 **Content:** Message sent to AI assistant when button is clicked
-
-## Dialect Location Expressions
-
-The `location` attribute in `<comment>` elements accepts Dialect expressions that resolve to code locations:
-
-### Current Capabilities
-
-**Search-based locations:**
-```xml
-<comment location="search('src/auth.rs', 'fn validate_token')">
-<comment location="search('src/', 'struct User')">
-```
-
-**Symbol-based locations:**
-```xml
-<comment location="findDefinition('TokenValidator')">
-<comment location="findReferences('validate_token')">
-```
-
-**Exact positions:**
-```xml
-<comment location="range('src/auth.rs', 42)">
-<comment location="range('src/auth.rs', 42, 15)">
-```
-
-### Future Enhancements
-
-**Chained method calls** (see [issue #34](https://github.com/socratic-shell/dialectic/issues/34)):
-```xml
-<comment location="findDefinition(`User`).methods().named(`validate`)">
-<comment location="search(`*.rs`, `TODO:`).limit(5).inFile(`auth`)">
-```
-
-## Processing Pipeline
-
-1. **Parse markdown** - Extract XML elements while preserving surrounding content
-2. **Execute Dialect** - Resolve `location` attributes to specific file positions
-3. **Generate resolved walkthrough** - Convert to internal `ResolvedWalkthrough` format
-4. **Render in VSCode** - Display markdown content with interactive elements
-
-## Location Resolution
-
-When a Dialect expression in a `location` attribute resolves to:
-
-- **Single location** - Comment placed automatically
-- **Multiple locations** - User prompted to choose via QuickPick dialog
-- **No locations** - Error displayed, comment not placed
-- **Invalid expression** - Dialect execution error shown
-
-## Ambiguous Location Handling
-
-For comments with multiple possible locations:
-
-1. **Initial click** - Shows disambiguation dialog with file:line options
-2. **User selects** - Comment placed at chosen location, sidebar updates to show selection
-3. **Re-click** - Shows relocation dialog with current location marked as "(current)"
-4. **Different selection** - Comment moved to new location
-
-## Migration from JSON Format
-
-The new format replaces the previous JSON structure:
-
-**Old (JSON Dialect program):**
-```json
-{
-  "introduction": ["Markdown content"],
-  "highlights": [
-    {
-      "comment": {
-        "content": ["Comment text"],
-        "location": {"search": {"path": "file.rs", "regex": "pattern"}}
-      }
-    }
-  ],
-  "changes": [
-    {"gitdiff": {"commit_range": "HEAD~1..HEAD"}}
-  ],
-  "actions": [
-    {"action": {"button": "Text", "tell_agent": "Message"}}
-  ]
-}
-```
-
-**New (Markdown+XML):**
-```markdown
-# Title
-
-Markdown content
-
-<comment location="search('file.rs', 'pattern')">
-Comment text
-</comment>
-
-<gitdiff range="HEAD~1..HEAD" />
-
-<action button="Text">Message</action>
-```
-
-## Implementation Notes
-
-### Parsing Strategy
-- Use regex or XML parser to extract elements from markdown
-- Preserve line numbers for error reporting
-- Handle nested markdown within XML element content
-
-### Security Considerations
-- Sanitize Dialect expressions before execution
-- Validate XML structure and attributes
-- Escape user content in generated HTML
-
-### Error Handling
-- Invalid Dialect expressions show user-friendly errors
-- Malformed XML elements are treated as plain text
-- Missing required attributes generate warnings
-
-### Performance
-- Cache Dialect execution results for repeated locations
-- Lazy-load git diff content for large ranges
-- Debounce location resolution for rapid changes
-
-## Future Extensions
-
-### Additional Elements
-```xml
-<mermaid>
-graph TD; A-->B; B-->C;
-</mermaid>
-
-<code language="rust">
-fn example() {
-    println!("Embedded code example");
-}
-</code>
-
-<image src="diagram.png" alt="Architecture diagram" />
-```
-
-### Conditional Content
-```xml
-<comment location="findDefinition(`DEBUG_MODE`)" if="config.debug">
-This debug code should be removed before production.
-</comment>
-```
-
-This format supports interactive code walkthroughs with embedded comments, diffs, and actions.

@@ -77,7 +77,11 @@ pub struct SymbolDef {
     pub defined_at: FileRange,
 }
 
-crate::dialect_value!(SymbolDef { name, kind, defined_at });
+crate::dialect_value!(SymbolDef {
+    name,
+    kind,
+    defined_at
+});
 
 /// A *reference* to a symbol -- includes the information about the symbol itself.
 /// A [`SymbolRef`][] can therefore be seen as a subtype of [`SymbolDef`][].
@@ -92,7 +96,64 @@ pub struct SymbolRef {
     pub referenced_at: FileRange,
 }
 
-crate::dialect_value!(SymbolRef { name, kind, defined_at, referenced_at });
+crate::dialect_value!(SymbolRef {
+    name,
+    kind,
+    defined_at,
+    referenced_at
+});
+
+/// Represents a range of bytes in a file (or URI, etc).
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct Lines {
+    /// File path, relative to workspace root
+    pub path: String,
+
+    /// Start line of range (always <= end)
+    pub start: usize,
+
+    /// End line of range (always >= start)
+    pub end: usize,
+}
+
+impl<U: Send> DialectFunction<U> for Lines {
+    type Output = FileRange;
+
+    const PARAMETER_ORDER: &'static [&'static str] = &["path", "start", "end"];
+
+    async fn execute(
+        self,
+        _interpreter: &mut DialectInterpreter<U>,
+    ) -> anyhow::Result<Self::Output> {
+        let Lines { path, start, end } = self;
+
+        // Find the length of the end line.
+        let content = std::fs::read_to_string(&path)?;
+        let lines = content
+            .lines()
+            .skip(start - 1)
+            .take(end - start + 1)
+            .collect::<Vec<_>>();
+
+        let last_column = match lines.last() {
+            Some(l) => l.len(),
+            None => 0,
+        };
+
+        Ok(FileRange {
+            path,
+            start: FileLocation {
+                line: start as u32,
+                column: 1,
+            },
+            end: FileLocation {
+                line: end as u32,
+                column: last_column as u32,
+            },
+            content: Some(lines.join("\n")),
+        })
+    }
+}
 
 /// Represents a range of bytes in a file (or URI, etc).
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -111,7 +172,12 @@ pub struct FileRange {
     pub content: Option<String>,
 }
 
-crate::dialect_value!(FileRange { path, start, end, content });
+crate::dialect_value!(FileRange {
+    path,
+    start,
+    end,
+    content
+});
 
 /// A line/colum index.
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -249,7 +315,8 @@ pub struct GitDiff {
 impl<U: IpcClient> DialectFunction<U> for GitDiff {
     type Output = GitDiffElement;
 
-    const PARAMETER_ORDER: &'static [&'static str] = &["commit_range", "exclude_unstaged", "exclude_staged"];
+    const PARAMETER_ORDER: &'static [&'static str] =
+        &["commit_range", "exclude_unstaged", "exclude_staged"];
 
     async fn execute(
         self,
