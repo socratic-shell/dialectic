@@ -296,6 +296,11 @@ mod tests {
         );
     }
 
+    fn check_parse_error(input: &str, expected: Expect) {
+        let result = parse(input);
+        expected.assert_debug_eq(&result);
+    }
+
     #[test]
     fn test_parse_nested_structure() {
         check_parse(
@@ -322,6 +327,126 @@ mod tests {
                             ],
                         ),
                     ],
+                )
+            "#]],
+        );
+    }
+
+    #[test]
+    fn test_unexpected_token() {
+        check_parse_error(
+            "foo(42 extra)",
+            expect![[r#"
+                Err(
+                    "Unexpected identifier without function call",
+                )
+            "#]],
+        );
+    }
+
+    #[test]
+    fn test_unterminated_string() {
+        check_parse_error(
+            "\"unterminated",
+            expect![[r#"
+                Err(
+                    "Unterminated string literal",
+                )
+            "#]],
+        );
+    }
+
+    #[test]
+    fn test_missing_closing_paren() {
+        check_parse_error(
+            "foo(42",
+            expect![[r#"
+                Err(
+                    "Unexpected end of input",
+                )
+            "#]],
+        );
+    }
+
+    #[test]
+    fn test_missing_closing_bracket() {
+        check_parse_error(
+            "[1, 2",
+            expect![[r#"
+                Err(
+                    "Unexpected end of input",
+                )
+            "#]],
+        );
+    }
+
+    #[test]
+    fn test_missing_closing_brace() {
+        check_parse_error(
+            "{\"key\": 42",
+            expect![[r#"
+                Err(
+                    "Expected key",
+                )
+            "#]],
+        );
+    }
+
+    #[test]
+    fn test_missing_colon_in_object() {
+        check_parse_error(
+            "{\"key\" 42}",
+            expect![[r#"
+                Err(
+                    "Expected ':' after key",
+                )
+            "#]],
+        );
+    }
+
+    #[test]
+    fn test_invalid_escape_sequence() {
+        check_parse_error(
+            "\"invalid\\x\"",
+            expect![[r#"
+                Err(
+                    "Invalid escape sequence: \\x",
+                )
+            "#]],
+        );
+    }
+
+    #[test]
+    fn test_unexpected_character() {
+        check_parse_error(
+            "@invalid",
+            expect![[r#"
+                Err(
+                    "Unexpected character '@' following \"\"",
+                )
+            "#]],
+        );
+    }
+
+    #[test]
+    fn test_identifier_without_call() {
+        check_parse_error(
+            "standalone",
+            expect![[r#"
+                Err(
+                    "Unexpected identifier without function call",
+                )
+            "#]],
+        );
+    }
+
+    #[test]
+    fn test_extra_tokens() {
+        check_parse_error(
+            "42 extra",
+            expect![[r#"
+                Err(
+                    "Unexpected token: Token { kind: Ident(\"extra\"), start: 3, end: 8 }",
                 )
             "#]],
         );
