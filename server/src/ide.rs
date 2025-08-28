@@ -77,7 +77,7 @@ pub struct SymbolDef {
     pub defined_at: FileRange,
 }
 
-crate::dialect_value!(SymbolDef);
+crate::dialect_value!(SymbolDef { [name, kind, defined_at] });
 
 /// A *reference* to a symbol -- includes the information about the symbol itself.
 /// A [`SymbolRef`][] can therefore be seen as a subtype of [`SymbolDef`][].
@@ -92,7 +92,7 @@ pub struct SymbolRef {
     pub referenced_at: FileRange,
 }
 
-crate::dialect_value!(SymbolRef);
+crate::dialect_value!(SymbolRef { [name, kind, defined_at, referenced_at] });
 
 /// Represents a range of bytes in a file (or URI, etc).
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -111,7 +111,7 @@ pub struct FileRange {
     pub content: Option<String>,
 }
 
-crate::dialect_value!(FileRange);
+crate::dialect_value!(FileRange { [path, start, end, content] });
 
 /// A line/colum index.
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -123,7 +123,7 @@ pub struct FileLocation {
     pub column: u32,
 }
 
-crate::dialect_value!(FileLocation);
+crate::dialect_value!(FileLocation { [line, column] });
 
 // IDE Functions
 #[derive(Deserialize)]

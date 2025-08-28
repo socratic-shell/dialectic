@@ -167,11 +167,11 @@ pub trait DialectFunction<U: Send>: DeserializeOwned + Send {
 /// Macro to implement DialectFunction for value types that evaluate to themselves
 #[macro_export]
 macro_rules! dialect_value {
-    ($ty:ty) => {
+    ($ty:ty { [$($param:ident),*] }) => {
         impl<U: Send> $crate::dialect::DialectFunction<U> for $ty {
             type Output = $ty;
 
-            const PARAMETER_ORDER: &'static [&'static str] = &[];
+            const PARAMETER_ORDER: &'static [&'static str] = &[$(stringify!($param)),*];
 
             async fn execute(
                 self,
