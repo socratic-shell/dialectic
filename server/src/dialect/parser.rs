@@ -1,5 +1,6 @@
 use std::{collections::BTreeMap, iter::Peekable};
 
+#[derive(Debug)]
 pub enum Ast {
     Call(String, Vec<Ast>),
     Int(u64),
@@ -230,44 +231,99 @@ fn take_chars<'i>(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use expect_test::{expect, Expect};
+
+    fn check_parse(input: &str, expected: Expect) {
+        let result = parse(input).unwrap();
+        expected.assert_debug_eq(&result);
+    }
 
     #[test]
     fn test_parse_function_call() {
-        let result = parse("foo(42, \"hello\")").unwrap();
-        match result {
-            Ast::Call(name, args) => {
-                assert_eq!(name, "foo");
-                assert_eq!(args.len(), 2);
-                assert!(matches!(args[0], Ast::Int(42)));
-                assert!(matches!(args[1], Ast::String(ref s) if s == "hello"));
-            }
-            _ => panic!("Expected function call"),
-        }
+        check_parse(
+            "foo(42, \"hello\")",
+            expect![[r#"
+                Call(
+                    "foo",
+                    [
+                        Int(
+                            42,
+                        ),
+                        String(
+                            "hello",
+                        ),
+                    ],
+                )
+            "#]],
+        );
     }
 
     #[test]
     fn test_parse_array() {
-        let result = parse("[1, 2, 3]").unwrap();
-        match result {
-            Ast::Array(elements) => {
-                assert_eq!(elements.len(), 3);
-                assert!(matches!(elements[0], Ast::Int(1)));
-                assert!(matches!(elements[1], Ast::Int(2)));
-                assert!(matches!(elements[2], Ast::Int(3)));
-            }
-            _ => panic!("Expected array"),
-        }
+        check_parse(
+            "[1, 2, 3]",
+            expect![[r#"
+                Array(
+                    [
+                        Int(
+                            1,
+                        ),
+                        Int(
+                            2,
+                        ),
+                        Int(
+                            3,
+                        ),
+                    ],
+                )
+            "#]],
+        );
     }
 
     #[test]
     fn test_parse_object() {
-        let result = parse("{\"key\": 42}").unwrap();
-        match result {
-            Ast::Object(map) => {
-                assert_eq!(map.len(), 1);
-                assert!(matches!(map.get("key"), Some(Ast::Int(42))));
-            }
-            _ => panic!("Expected object"),
-        }
+        check_parse(
+            "{\"key\": 42}",
+            expect![[r#"
+                Object(
+                    {
+                        "key": Int(
+                            42,
+                        ),
+                    },
+                )
+            "#]],
+        );
+    }
+
+    #[test]
+    fn test_parse_nested_structure() {
+        check_parse(
+            "process([{\"name\": \"test\", \"value\": 123}, true])",
+            expect![[r#"
+                Call(
+                    "process",
+                    [
+                        Array(
+                            [
+                                Object(
+                                    {
+                                        "name": String(
+                                            "test",
+                                        ),
+                                        "value": Int(
+                                            123,
+                                        ),
+                                    },
+                                ),
+                                Boolean(
+                                    true,
+                                ),
+                            ],
+                        ),
+                    ],
+                )
+            "#]],
+        );
     }
 }
