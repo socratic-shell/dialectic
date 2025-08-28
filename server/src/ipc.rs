@@ -6,8 +6,8 @@
 use crate::synthetic_pr::UserFeedback;
 use crate::types::{
     FindAllReferencesPayload, GetSelectionResult, GoodbyePayload, IPCMessage, IPCMessageType,
-    LogLevel, LogParams, PoloPayload, PresentReviewParams, ResolveSymbolByNamePayload,
-    ResponsePayload, ReviewMode, UserFeedbackPayload,
+    LogLevel, LogParams, PoloPayload, ResolveSymbolByNamePayload,
+    ResponsePayload, UserFeedbackPayload,
 };
 use anyhow::Context;
 use futures::FutureExt;

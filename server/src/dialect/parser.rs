@@ -1,6 +1,7 @@
 use std::{collections::BTreeMap, iter::Peekable};
 
 #[derive(Debug, thiserror::Error)]
+#[allow(dead_code)]
 pub enum ParseError {
     #[error("Unexpected end of input")]
     UnexpectedEof { position: usize },
@@ -180,6 +181,7 @@ struct Token<'a> {
 }
 
 #[derive(Debug, PartialEq)]
+#[allow(dead_code)]
 enum TokenKind<'a> {
     Ident(&'a str),
     Integer(u64),
