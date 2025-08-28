@@ -110,40 +110,69 @@ impl<T: IpcClient> WalkthroughParser<T> {
         input_events: &mut VecDeque<Event<'a>>,
         output_events: &mut Vec<Event<'a>>,
     ) -> Result<(), Box<dyn std::error::Error>> {
-        // Buffer the complete inline XML element
-        let mut xml_content = html.to_string();
+        // If this is a self-closing tag, handle it directly
+        if html.contains("/>") {
+            let xml_content = html.to_string();
+            if let Ok(xml_element) = self.parse_xml_element(&xml_content) {
+                let resolved = self.resolve_single_element(xml_element).await?;
+                let normalized_xml = self.create_normalized_xml(&resolved);
+                output_events.push(Event::InlineHtml(normalized_xml.into()));
+            } else {
+                output_events.push(Event::InlineHtml(html));
+            }
+            return Ok(());
+        }
+
+        // If this is a closing tag, pass it through (shouldn't happen in our flow)
+        if html.starts_with("</") {
+            output_events.push(Event::InlineHtml(html));
+            return Ok(());
+        }
+
+        // This is an opening tag - collect all events until closing tag
+        let mut content_events = Vec::new();
         
-        // If this is an opening tag, collect until closing tag
-        if !html.contains("/>") && !html.starts_with("</") {
-            // Collect content and closing tag
-            while let Some(event) = input_events.pop_front() {
-                match event {
-                    Event::Text(text) => xml_content.push_str(&text),
-                    Event::InlineHtml(closing_html) => {
-                        xml_content.push_str(&closing_html);
-                        if closing_html.starts_with("</") {
-                            break;
+        while let Some(event) = input_events.pop_front() {
+            match event {
+                Event::InlineHtml(closing_html) if closing_html.starts_with("</") => {
+                    // Found closing tag - render collected content and create complete XML
+                    let mut content_html = String::new();
+                    html::push_html(&mut content_html, content_events.iter().cloned());
+                    
+                    // Try to parse just the opening tag to get attributes
+                    if let Ok(xml_element) = self.parse_xml_element(&format!("{}</{}>", html, &closing_html[2..])) {
+                        let resolved = self.resolve_single_element(xml_element).await?;
+                        
+                        // Create the resolved XML with the rendered content
+                        let mut attrs = String::new();
+                        let resolved_json = serde_json::to_string(&resolved.resolved_data).unwrap_or_default();
+                        attrs.push_str(&format!(" data-resolved='{}'", resolved_json));
+                        
+                        for (key, value) in &resolved.attributes {
+                            attrs.push_str(&format!(" {}=\"{}\"", key, value));
                         }
+                        
+                        let tag_name = resolved.element_type;
+                        let normalized_xml = format!("<{}{}>{}{}", tag_name, attrs, content_html, closing_html);
+                        output_events.push(Event::InlineHtml(normalized_xml.into()));
+                    } else {
+                        // If parsing fails, pass through original
+                        output_events.push(Event::InlineHtml(html));
+                        output_events.extend(content_events);
+                        output_events.push(Event::InlineHtml(closing_html));
                     }
-                    _ => {
-                        // Put back unexpected event and break
-                        input_events.push_front(event);
-                        break;
-                    }
+                    return Ok(());
+                }
+                _ => {
+                    // Collect all events between opening and closing tags
+                    content_events.push(event);
                 }
             }
         }
 
-        // Parse and resolve the complete XML element
-        if let Ok(xml_element) = self.parse_xml_element(&xml_content) {
-            let resolved = self.resolve_single_element(xml_element).await?;
-            let normalized_xml = self.create_normalized_xml(&resolved);
-            output_events.push(Event::InlineHtml(normalized_xml.into()));
-        } else {
-            // If parsing fails, pass through original
-            output_events.push(Event::InlineHtml(html));
-        }
-
+        // If we get here, no closing tag was found - pass through original
+        output_events.push(Event::InlineHtml(html));
+        output_events.extend(content_events);
         Ok(())
     }
 
@@ -464,7 +493,15 @@ More text"#,
         );
     }
 
-    // Keep original XML parsing tests
+    #[test]
+    fn test_markdown_inside_xml_elements() {
+        check(
+            r#"<comment location="findDefinitions(`User`)">This has *emphasis* and **bold** text</comment>"#,
+            expect![[r#"
+                <p><comment data-resolved='{"dialect_expression":"findDefinitions(`User`)","locations":[{"definedAt":{"content":"struct User {","end":{"column":4,"line":10},"path":"src/models.rs","start":{"column":0,"line":10}},"kind":"struct","name":"User"}]}'>This has <em>emphasis</em> and <strong>bold</strong> text</comment></p>
+            "#]],
+        );
+    }
     #[test]
     fn test_parse_comment_element() {
         let parser = create_test_parser();
