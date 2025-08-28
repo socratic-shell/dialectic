@@ -11,10 +11,16 @@ pub use parser::{Ast, parse};
 
 #[derive(Clone)]
 pub struct DialectInterpreter<U: Send> {
-    functions: BTreeMap<String, (
-        fn(&mut DialectInterpreter<U>, Value) -> Pin<Box<dyn Future<Output = anyhow::Result<Value>> + '_>>,
-        &'static [&'static str], // parameter_order
-    )>,
+    functions: BTreeMap<
+        String,
+        (
+            fn(
+                &mut DialectInterpreter<U>,
+                Value,
+            ) -> Pin<Box<dyn Future<Output = anyhow::Result<Value>> + '_>>,
+            &'static [&'static str], // parameter_order
+        ),
+    >,
     userdata: U,
 }
 
@@ -49,6 +55,14 @@ impl<U: Send> DialectInterpreter<U> {
 
     pub fn evaluate(
         &mut self,
+        program: &str,
+    ) -> Pin<Box<dyn Future<Output = anyhow::Result<Value>> + '_>> {
+        let ast = parse(&program);
+        Box::pin(async move { self.evaluate_ast(ast?).await })
+    }
+
+    pub fn evaluate_ast(
+        &mut self,
         ast: Ast,
     ) -> Pin<Box<dyn Future<Output = anyhow::Result<Value>> + '_>> {
         Box::pin(async move {
@@ -56,7 +70,7 @@ impl<U: Send> DialectInterpreter<U> {
                 Ast::Call(name, args) => {
                     let mut evaluated_args = Vec::new();
                     for arg in args {
-                        evaluated_args.push(self.evaluate(arg).await?);
+                        evaluated_args.push(self.evaluate_ast(arg).await?);
                     }
                     self.call_function_positional(name, evaluated_args).await
                 }
@@ -66,14 +80,14 @@ impl<U: Send> DialectInterpreter<U> {
                 Ast::Array(elements) => {
                     let mut results = Vec::new();
                     for element in elements {
-                        results.push(self.evaluate(element).await?);
+                        results.push(self.evaluate_ast(element).await?);
                     }
                     Ok(Value::Array(results))
                 }
                 Ast::Object(map) => {
                     let mut result_map = serde_json::Map::new();
                     for (key, value) in map {
-                        let evaluated_value = self.evaluate(value).await?;
+                        let evaluated_value = self.evaluate_ast(value).await?;
                         result_map.insert(key, evaluated_value);
                     }
                     Ok(Value::Object(result_map))
@@ -82,22 +96,32 @@ impl<U: Send> DialectInterpreter<U> {
         })
     }
 
-    async fn call_function_positional(&mut self, name: String, args: Vec<Value>) -> anyhow::Result<Value> {
+    async fn call_function_positional(
+        &mut self,
+        name: String,
+        args: Vec<Value>,
+    ) -> anyhow::Result<Value> {
         let name_lower = name.to_ascii_lowercase();
-        let (func, parameter_order) = self.functions.get(&name_lower)
+        let (func, parameter_order) = self
+            .functions
+            .get(&name_lower)
             .ok_or_else(|| anyhow::anyhow!("unknown function: {}", name))?;
-        
+
         // Map positional args to named object
         let mut arg_object = serde_json::Map::new();
         for (i, value) in args.into_iter().enumerate() {
             if let Some(&param_name) = parameter_order.get(i) {
                 arg_object.insert(param_name.to_string(), value);
             } else {
-                anyhow::bail!("too many arguments for function {}: expected {}, got {}", 
-                    name, parameter_order.len(), i + 1);
+                anyhow::bail!(
+                    "too many arguments for function {}: expected {}, got {}",
+                    name,
+                    parameter_order.len(),
+                    i + 1
+                );
             }
         }
-        
+
         func(self, Value::Object(arg_object)).await
     }
 
