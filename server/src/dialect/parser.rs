@@ -27,7 +27,11 @@ pub enum ParseError {
     #[error("Unterminated escape sequence")]
     UnterminatedEscape { position: usize },
     #[error("Unexpected character '{char}' following \"{preceding}\"")]
-    UnexpectedChar { char: char, preceding: String, position: usize },
+    UnexpectedChar {
+        char: char,
+        preceding: String,
+        position: usize,
+    },
 }
 
 #[derive(Debug)]
@@ -43,90 +47,115 @@ pub enum Ast {
 pub fn parse<'a>(input: &'a str) -> Result<Ast, ParseError> {
     let tokens = tokenize(input)?;
     let mut tokens = tokens.into_iter().peekable();
-    let ast = parse_ast(&mut tokens)?;
+    let ast = parse_ast(&mut tokens, input)?;
     if let Some(token) = tokens.next() {
-        return Err(ParseError::UnexpectedToken { 
-            token: format!("{:?}", token.kind), 
-            position: token.start 
+        return Err(ParseError::UnexpectedToken {
+            token: format!("{:?}", token.kind),
+            position: token.start,
         });
     }
     Ok(ast)
 }
 
-fn parse_ast(tokens: &mut Peekable<std::vec::IntoIter<Token<'_>>>) -> Result<Ast, ParseError> {
-    let token = tokens.next().ok_or(ParseError::UnexpectedEof { position: 0 })?;
-    
+fn parse_ast(
+    tokens: &mut Peekable<std::vec::IntoIter<Token<'_>>>,
+    input: &str,
+) -> Result<Ast, ParseError> {
+    let token = tokens
+        .next()
+        .ok_or(ParseError::UnexpectedEof { position: input.len() })?;
+
     match token.kind {
         TokenKind::Integer(n) => Ok(Ast::Int(n)),
         TokenKind::Boolean(b) => Ok(Ast::Boolean(b)),
         TokenKind::String(s) => Ok(Ast::String(s)),
-        
+
         TokenKind::Ident(name) => {
             if tokens.peek().map(|t| &t.kind) == Some(&TokenKind::Sym('(')) {
                 tokens.next(); // consume '('
                 let mut args = Vec::new();
-                
+
                 while tokens.peek().map(|t| &t.kind) != Some(&TokenKind::Sym(')')) {
-                    args.push(parse_ast(tokens)?);
+                    args.push(parse_ast(tokens, input)?);
                     if tokens.peek().map(|t| &t.kind) == Some(&TokenKind::Sym(',')) {
                         tokens.next(); // consume ','
                     }
                 }
-                
-                tokens.next().ok_or(ParseError::ExpectedCloseParen { position: token.end })?;
+
+                tokens.next().ok_or(ParseError::ExpectedCloseParen {
+                    position: input.len(),
+                })?;
                 Ok(Ast::Call(name.to_string(), args))
             } else {
-                Err(ParseError::UnexpectedIdent { position: token.start })
+                Err(ParseError::UnexpectedIdent {
+                    position: token.start,
+                })
             }
         }
-        
+
         TokenKind::Sym('[') => {
             let mut elements = Vec::new();
-            
+
             while tokens.peek().map(|t| &t.kind) != Some(&TokenKind::Sym(']')) {
-                elements.push(parse_ast(tokens)?);
+                elements.push(parse_ast(tokens, input)?);
                 if tokens.peek().map(|t| &t.kind) == Some(&TokenKind::Sym(',')) {
                     tokens.next(); // consume ','
                 }
             }
-            
-            tokens.next().ok_or(ParseError::ExpectedCloseBracket { position: token.end })?;
+
+            tokens.next().ok_or(ParseError::ExpectedCloseBracket {
+                position: input.len(),
+            })?;
             Ok(Ast::Array(elements))
         }
-        
+
         TokenKind::Sym('{') => {
             let mut map = BTreeMap::new();
-            
+
             while tokens.peek().map(|t| &t.kind) != Some(&TokenKind::Sym('}')) {
-                let key_token = tokens.next().ok_or(ParseError::ExpectedCloseBrace { 
-                    position: if map.is_empty() { token.end } else { token.start + 10 } // rough estimate
+                let key_token = tokens.next().ok_or(ParseError::ExpectedCloseBrace {
+                    position: if map.is_empty() {
+                        token.end
+                    } else {
+                        input.len()
+                    },
                 })?;
                 let key = match key_token.kind {
                     TokenKind::String(s) => s,
                     TokenKind::Ident(s) => s.to_string(),
-                    _ => return Err(ParseError::ExpectedStringOrIdent { position: key_token.start }),
+                    _ => {
+                        return Err(ParseError::ExpectedStringOrIdent {
+                            position: key_token.start,
+                        });
+                    }
                 };
-                
-                let colon_token = tokens.next().ok_or(ParseError::ExpectedColon { position: key_token.end })?;
+
+                let colon_token = tokens.next().ok_or(ParseError::ExpectedColon {
+                    position: input.len(),
+                })?;
                 if colon_token.kind != TokenKind::Sym(':') {
-                    return Err(ParseError::ExpectedColon { position: colon_token.start });
+                    return Err(ParseError::ExpectedColon {
+                        position: colon_token.start,
+                    });
                 }
-                
-                let value = parse_ast(tokens)?;
+
+                let value = parse_ast(tokens, input)?;
                 map.insert(key, value);
-                
+
                 if tokens.peek().map(|t| &t.kind) == Some(&TokenKind::Sym(',')) {
                     tokens.next(); // consume ','
                 }
             }
-            
-            tokens.next().ok_or(ParseError::ExpectedCloseBrace { position: token.end })?;
+
+            tokens.next().ok_or(ParseError::ExpectedCloseBrace {
+                position: input.len(),
+            })?;
             Ok(Ast::Object(map))
         }
-        
-        _ => Err(ParseError::UnexpectedToken { 
-            token: format!("{:?}", token.kind), 
-            position: token.start 
+
+        _ => Err(ParseError::UnexpectedToken {
+            token: format!("{:?}", token.kind),
+            position: token.start,
         }),
     }
 }
@@ -203,10 +232,15 @@ fn tokenize<'a>(input: &'a str) -> Result<Vec<Token<'a>>, ParseError> {
                         Some((_, '\'')) => s.push('\''),
                         Some((_, '\\')) => s.push('\\'),
                         Some((_, c)) => {
-                            return Err(ParseError::InvalidEscape { char: c, position: next_index });
+                            return Err(ParseError::InvalidEscape {
+                                char: c,
+                                position: next_index,
+                            });
                         }
                         None => {
-                            return Err(ParseError::UnterminatedEscape { position: next_index });
+                            return Err(ParseError::UnterminatedEscape {
+                                position: next_index,
+                            });
                         }
                     }
                 } else {
@@ -215,7 +249,9 @@ fn tokenize<'a>(input: &'a str) -> Result<Vec<Token<'a>>, ParseError> {
             }
 
             if end_index == start_index {
-                return Err(ParseError::UnterminatedString { position: start_index });
+                return Err(ParseError::UnterminatedString {
+                    position: start_index,
+                });
             }
 
             tokens.push(Token {
@@ -235,10 +271,10 @@ fn tokenize<'a>(input: &'a str) -> Result<Vec<Token<'a>>, ParseError> {
             continue;
         }
 
-        return Err(ParseError::UnexpectedChar { 
-            char: start_ch, 
+        return Err(ParseError::UnexpectedChar {
+            char: start_ch,
             preceding: input[..start_index].to_string(),
-            position: start_index 
+            position: start_index,
         });
     }
 
@@ -272,8 +308,8 @@ fn take_chars<'i>(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use expect_test::{expect, Expect};
     use annotate_snippets::{Level, Renderer, Snippet};
+    use expect_test::{Expect, expect};
 
     fn check_parse(input: &str, expected: Expect) {
         let result = parse(input).unwrap();
@@ -299,13 +335,13 @@ mod tests {
                     ParseError::UnterminatedEscape { position } => *position,
                     ParseError::UnexpectedChar { position, .. } => *position,
                 };
-                
+
                 let error_message = error.to_string();
                 let message = Level::Error.title(&error_message).snippet(
                     Snippet::source(input)
-                        .annotation(Level::Error.span(position..position.saturating_add(1)))
+                        .annotation(Level::Error.span(position..position.saturating_add(1))),
                 );
-                
+
                 let renderer = Renderer::plain();
                 let output = renderer.render(message).to_string();
                 expected.assert_eq(&output);
@@ -437,7 +473,7 @@ mod tests {
                 error: Unexpected end of input
                   |
                 1 | foo(42
-                  | ^
+                  |       ^
                   |"#]],
         );
     }
@@ -450,7 +486,7 @@ mod tests {
                 error: Unexpected end of input
                   |
                 1 | [1, 2
-                  | ^
+                  |      ^
                   |"#]],
         );
     }
