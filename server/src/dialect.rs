@@ -6,6 +6,8 @@ use std::pin::Pin;
 use serde::{Serialize, de::DeserializeOwned};
 use serde_json::Value;
 
+mod parser;
+
 #[derive(Clone)]
 pub struct DialectInterpreter<U: Send> {
     functions: BTreeMap<
