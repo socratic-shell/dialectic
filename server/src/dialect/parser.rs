@@ -79,6 +79,10 @@ fn parse_ast(
                     args.push(parse_ast(tokens, input)?);
                     if tokens.peek().map(|t| &t.kind) == Some(&TokenKind::Sym(',')) {
                         tokens.next(); // consume ','
+                        // Allow trailing comma - if next token is ')', we're done
+                        if tokens.peek().map(|t| &t.kind) == Some(&TokenKind::Sym(')')) {
+                            break;
+                        }
                     }
                 }
 
@@ -100,6 +104,10 @@ fn parse_ast(
                 elements.push(parse_ast(tokens, input)?);
                 if tokens.peek().map(|t| &t.kind) == Some(&TokenKind::Sym(',')) {
                     tokens.next(); // consume ','
+                    // Allow trailing comma - if next token is ']', we're done
+                    if tokens.peek().map(|t| &t.kind) == Some(&TokenKind::Sym(']')) {
+                        break;
+                    }
                 }
             }
 
@@ -144,6 +152,10 @@ fn parse_ast(
 
                 if tokens.peek().map(|t| &t.kind) == Some(&TokenKind::Sym(',')) {
                     tokens.next(); // consume ','
+                    // Allow trailing comma - if next token is '}', we're done
+                    if tokens.peek().map(|t| &t.kind) == Some(&TokenKind::Sym('}')) {
+                        break;
+                    }
                 }
             }
 
@@ -553,6 +565,61 @@ mod tests {
                 1 | standalone
                   | ^
                   |"#]],
+        );
+    }
+
+    #[test]
+    fn test_trailing_commas() {
+        // Array with trailing comma
+        check_parse(
+            "[1, 2, 3,]",
+            expect![[r#"
+                Array(
+                    [
+                        Int(
+                            1,
+                        ),
+                        Int(
+                            2,
+                        ),
+                        Int(
+                            3,
+                        ),
+                    ],
+                )
+            "#]],
+        );
+
+        // Object with trailing comma
+        check_parse(
+            "{\"key\": 42,}",
+            expect![[r#"
+                Object(
+                    {
+                        "key": Int(
+                            42,
+                        ),
+                    },
+                )
+            "#]],
+        );
+
+        // Function call with trailing comma
+        check_parse(
+            "foo(42, \"hello\",)",
+            expect![[r#"
+                Call(
+                    "foo",
+                    [
+                        Int(
+                            42,
+                        ),
+                        String(
+                            "hello",
+                        ),
+                    ],
+                )
+            "#]],
         );
     }
 
