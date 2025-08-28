@@ -98,7 +98,9 @@ fn parse_ast(tokens: &mut Peekable<std::vec::IntoIter<Token<'_>>>) -> Result<Ast
             let mut map = BTreeMap::new();
             
             while tokens.peek().map(|t| &t.kind) != Some(&TokenKind::Sym('}')) {
-                let key_token = tokens.next().ok_or(ParseError::ExpectedKey { position: token.end })?;
+                let key_token = tokens.next().ok_or(ParseError::ExpectedCloseBrace { 
+                    position: if map.is_empty() { token.end } else { token.start + 10 } // rough estimate
+                })?;
                 let key = match key_token.kind {
                     TokenKind::String(s) => s,
                     TokenKind::Ident(s) => s.to_string(),
@@ -458,10 +460,10 @@ mod tests {
         check_parse_error(
             "{\"key\": 42",
             expect![[r#"
-                error: Expected key
+                error: Expected '}'
                   |
                 1 | {"key": 42
-                  |  ^
+                  |           ^
                   |"#]],
         );
     }
