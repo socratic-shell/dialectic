@@ -420,8 +420,8 @@ async fn test_literal_values() {
         serde_json::json!(true)
     );
     assert_eq!(
-        interpreter.evaluate("null").await.unwrap(),
-        serde_json::json!(null)
+        interpreter.evaluate("\"null\"").await.unwrap(),
+        serde_json::json!("null")
     );
 }
 
@@ -581,22 +581,18 @@ async fn test_comment_function() {
     interpreter.add_function::<crate::ide::Comment>();
     
     // Test comment with direct FileRange location (wrapped as Dialect value)
-    let program = serde_json::json!({
-        "comment": {
-            "location": {
-                "FileRange": {
-                    "path": "src/main.rs",
-                    "start": {"line": 10, "column": 1},
-                    "end": {"line": 10, "column": 20},
-                    "content": "fn main() {"
-                }
-            },
-            "icon": "info",
-            "content": ["This is the main function", "Entry point of the program"]
-        }
-    });
-    
-    let result = interpreter.evaluate(program).await;
+    let result = interpreter.evaluate(r#"comment({
+        location: {
+            FileRange: {
+                path: "src/main.rs",
+                start: {line: 10, column: 1},
+                end: {line: 10, column: 20},
+                content: "fn main() {"
+            }
+        },
+        icon: "info",
+        content: ["This is the main function", "Entry point of the program"]
+    })"#).await;
     
     expect![[r#"
         Err(
@@ -619,17 +615,11 @@ async fn test_comment_function_with_symbol_def() {
     interpreter.add_function::<crate::ide::Comment>();
     
     // Test comment with SymbolDef location (should extract definedAt field)
-    let program = serde_json::json!({
-        "comment": {
-            "location": {
-                "findDefinitions": "validateToken"
-            },
-            "icon": "warning",
-            "content": ["This function needs better error handling"]
-        }
-    });
-    
-    let result = interpreter.evaluate(program).await;
+    let result = interpreter.evaluate(r#"comment({
+        location: findDefinitions("validateToken"),
+        icon: "warning",
+        content: ["This function needs better error handling"]
+    })"#).await;
     
     // Should normalize SymbolDef to its definedAt FileRange
     expect![[r#"
@@ -686,14 +676,10 @@ async fn test_action_function() {
     interpreter.add_function::<crate::ide::Action>();
     
     // Test action with tell_agent
-    let program = serde_json::json!({
-        "action": {
-            "button": "Generate Auth",
-            "tell_agent": "Create a complete authentication system with login, logout, and middleware"
-        }
-    });
-    
-    let result = interpreter.evaluate(program).await;
+    let result = interpreter.evaluate(r#"action({
+        button: "Generate Auth",
+        "tell_agent": "Create a complete authentication system with login, logout, and middleware"
+    })"#).await;
     
     expect![[r#"
         Ok(
