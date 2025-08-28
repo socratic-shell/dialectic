@@ -32,6 +32,7 @@
     - [Daemon message bus](./design/daemon.md) <!-- 💡: Central message router implementation, client management, process lifecycle, and Unix socket server architecture -->
     - [MCP Tool interface](./design/mcp-tool-interface.md) <!-- 💡: API specification for AI assistants calling present_review tool with markdown content -->
 - [VSCode extension](./design/extension.md) <!-- 💡: Highlights of the VSCode Extension design and implementation: activation, establishing IPC protocol -->
+- [Walkthrough format](./design/walkthrough-format.md)
 - [Dialect language](./design/dialect-language.md) <!-- 💡: JSON mini-language semantics for IDE operations - function composition, value types, and execution model -->
 
 

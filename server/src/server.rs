@@ -306,13 +306,13 @@ impl DialecticServer {
                 let mut interpreter = self.interpreter.clone();
 
                 let result = tokio::task::spawn_blocking(move || {
-                    tokio::runtime::Handle::current()
-                        .block_on(async move { 
-                            // Parse and evaluate the Dialect program string
-                            let program_str = element.as_str()
-                                .ok_or_else(|| anyhow::anyhow!("Expected string program"))?;
-                            interpreter.evaluate(program_str).await 
-                        })
+                    tokio::runtime::Handle::current().block_on(async move {
+                        // Parse and evaluate the Dialect program string
+                        let program_str = element
+                            .as_str()
+                            .ok_or_else(|| anyhow::anyhow!("Expected string program"))?;
+                        interpreter.evaluate(program_str).await
+                    })
                 })
                 .await
                 .map_err(|e| {
@@ -451,11 +451,10 @@ impl DialecticServer {
         let mut interpreter = self.interpreter.clone();
 
         let result = tokio::task::spawn_blocking(move || {
-            tokio::runtime::Handle::current()
-                .block_on(async move { 
-                    // Parse and evaluate the Dialect program string
-                    interpreter.evaluate(&program).await 
-                })
+            tokio::runtime::Handle::current().block_on(async move {
+                // Parse and evaluate the Dialect program string
+                interpreter.evaluate(&program).await
+            })
         })
         .await
         .map_err(|e| {
@@ -657,13 +656,16 @@ impl DialecticServer {
     ///
     /// This tool allows LLMs to retrieve the full context for a compact ssref reference.
     // ANCHOR: expand_reference_tool
-    #[tool(description = "Expand a compact reference (ssref) to get full context including file, line, selection, and metadata. \
-                       Returns structured JSON with all available context data.")]
+    #[tool(description = "
+        Expand a compact reference (denoted as `<ssref id='..'/>`) to get full context. \
+        Invoke with the contents of `id` attribute. \
+        Returns structured JSON with all available context data. \
+    ")]
     async fn expand_reference(
         &self,
         Parameters(params): Parameters<ExpandReferenceParams>,
     ) -> Result<CallToolResult, McpError> {
-    // ANCHOR_END: expand_reference_tool
+        // ANCHOR_END: expand_reference_tool
         self.ipc
             .send_log(
                 LogLevel::Debug,
@@ -693,10 +695,7 @@ impl DialecticServer {
             }
             Ok(None) => {
                 self.ipc
-                    .send_log(
-                        LogLevel::Info,
-                        format!("Reference {} not found", params.id),
-                    )
+                    .send_log(LogLevel::Info, format!("Reference {} not found", params.id))
                     .await;
 
                 Err(McpError::invalid_params(

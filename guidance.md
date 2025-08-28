@@ -1,68 +1,228 @@
 # AI Assistant Guidelines for Dialectic
 
-## When to Offer Reviews
+Dialectic offers tools to aid you in developing and discussing code with the user.
 
-Ask "Should I create a review for these changes?" when you've:
-- Made multiple edits for a cohesive change
-- Implemented a complete user-facing feature
-- Made architectural changes that affect multiple components
-- Completed work the user explicitly requested
+# Socratic Shell references
 
-**Examples:**
-- ✅ "I've added authentication with login/logout/middleware across 4 files. Should I create a review?"
-- ✅ "The user registration flow is now complete. Should I create a review?"
-- ❌ Don't offer reviews for single-line fixes, typo corrections, or work-in-progress changes
+Whenever the user sends you a message that includes an XML `<ssref/>` element, you SHOULD use the `expand_reference` tool with the contents of the `id` attribute to determine what it means.
 
-Let the user decide whether to proceed with the review. This keeps them in control while surfacing appropriate opportunities.
+# IDE operations
 
-**Always include `baseUri`**: The `baseUri` parameter is required and should be set to the project directory path to ensure file references resolve properly as clickable links.
+You SHOULD leverage the `ide_operation` tool to navigate the code rather than using bash comments. Example of useful commands you can give to `ide_operaton` include:
 
-## Review Structure
+* `findDefinitions("foo")` -- find all the definitions of a given symbol.
+* `findReferences("foo")` -- find all the references to a given symbol (this is more reliable than grep).
+* `search("path/to/directory", "regex", ".rs")` -- search `.rs` files in the given directory for the given regular expression.
 
-Write as guided code tours using simple file references that render as clickable links in VSCode. Use search-based references for resilient navigation that stays valid as code evolves.
+<!-- ANCHOR: walkthrough_format -->
+# Walkthrough Format Specification
 
-**Reference Formats:**
-- `[validateToken function](src/auth.ts?validateToken)` - Search for pattern (function/variable names)
-- `[auth.ts:42](src/auth.ts#L42)` - Navigate to specific line
-- `[auth.ts:42-50](src/auth.ts#L42-L50)` - Navigate to line range
+*This chapter defines the markdown+XML format for code walkthroughs.*
 
-**Why this format matters:** These references create resilient navigation that remains valid as code changes. The `?` syntax for search and `#L` syntax for lines (familiar from GitHub) make the intent immediately clear.
+## Example Walkthrough
 
-Lead with the code location, then explain what's happening there and why it matters. Order sections to follow the logical flow of operations, not file order.
-
-Structure: **Summary** → **Code Tour** → **Design Decisions** → **Next Steps**
-
-## Sample Review
+Here's a complete walkthrough showing the authentication system changes:
 
 ```markdown
-# Add user input validation
+# Authentication System Updates
 
-## Summary  
-Enhanced registration with email validation and structured error responses for better client integration.
+We've refactored the token validation system to improve performance and security.
 
-## Areas you should check
+## System architecture
 
-This section includes key decisions that I made along the way or places I was unsure.
-You may wish to review these or double check my logic!
+The new validation architecture works as follows:
 
-* [Email validation logic](src/auth.ts?validateEmail) -- I chose to use regex validation instead of a library
-* [Thread pool sizing](src/auth.ts?maxThreads) -- I opted to use a max of 3 threads for processing to not overload the CPU
-* [Error response format](src/auth.ts?FileNotFound) -- I included a customized response for `FileNotFound` errors, as you requested
+<mermaid>
+flowchart TD
+    A[Client Request] --> B{Token Valid?}
+    B -->|Check Expiration First| C[Validate Expiration]
+    C -->|Expired| D[Return 401]
+    C -->|Valid| E[Validate Signature]
+    E -->|Invalid| D
+    E -->|Valid| F[Process Request]
+</mermaid>
 
-## Code Tour
+## Key Changes
 
-### Input Validation [here](src/auth.ts?validateInput)
-Validates email format and password strength before processing. Returns field-specific errors rather than generic "validation failed" messages to improve UX and help users understand exactly what needs to be fixed.
+The main improvement is in how we handle token expiration:
 
-### Error Handling [check this](src/auth.ts?handleDatabaseError)
-Database operations wrapped in try-catch with specific handling for constraint violations and connection issues. Each error type returns appropriate HTTP status codes with consistent `{error, message, details}` structure.
+<comment location="findDefinition(`validateToken`)" icon="lightbulb">
+This function now checks expiration before signature validation. This avoids expensive 
+cryptographic operations on tokens that are already expired.
+</comment>
+
+We also updated the login flow to use shorter-lived tokens by default:
+
+<comment location="search(`src/auth.rs`, `async fn login`)">
+The default token lifetime is now 1 hour instead of 24 hours. Users can still 
+request longer-lived tokens through the `remember_me` parameter.
+</comment>
+
+## What Changed
+
+Here are all the files that were modified:
+
+<gitdiff range="HEAD~2..HEAD" />
 
 ## Next Steps
-- Add rate limiting for registration attempts
-- Implement email verification workflow
+
+<action button="Test the changes">
+Run the authentication test suite to verify the changes work correctly.
+</action>
+
+<action button="Update documentation">
+The API documentation needs to reflect the new default token lifetime.
+</action>
 ```
 
-## Update Modes
-- `replace` (default) - Complete review rewrite
-- `update-section` - Modify specific section (specify section header)  
-- `append` - Add new content to existing review
+This walkthrough combines regular markdown with specialized XML elements: `<mermaid>`, `<comment>`, `<gitdiff>`, and `<action>`.
+
+## XML Elements
+
+### Mermaid
+
+Render mermaid graphs and diagrams to visualize architecture, flows, or relationships:
+
+```xml
+<mermaid>
+flowchart TD
+    A[Start] --> B{Decision}
+    B -->|Yes| C[Action 1]
+    B -->|No| D[Action 2]
+</mermaid>
+```
+
+**Use when:** Explaining system architecture, data flow, or complex relationships that benefit from visual representation.
+
+### Comments
+
+Place contextual comments at specific code locations to highlight important details, decisions, or areas needing attention. Users can "reply" to comments using the GUI and have those messages forwarded to you in the chat.
+
+```xml
+<comment location="DIALECT_EXPRESSION" icon="question">
+Markdown content explaining this code location.
+Can include **formatting** and [links](https://example.com).
+</comment>
+```
+
+**Attributes:**
+- `location` (required) - Dialect expression that resolves to code location(s). Common examples:
+  - `findDefinition("validateToken")` -- definition of a function/class/variable
+  - `findReferences("User")` -- all references to a symbol
+  - `search("src/auth.rs", "impl.*Token")` -- regex search in specific file
+  - `search("src", "fn login", ".rs")` -- search directory for pattern in .rs files
+  - `lines("src/auth.rs", 42, 45)` -- specific line range (use sparingly, prefer search)
+- `icon` (optional) - VSCode codicon name (e.g., `question`, `lightbulb`, `warning`)
+
+**Content:** Markdown text explaining the code, highlighting decisions, or noting areas for review.
+
+**Use when:** 
+- Explaining complex logic or algorithms
+- Highlighting important design decisions
+- Pointing out areas you were uncertain about how to do something, areas where you see potential flaws, or areas where you deviated from the plan
+- Pointing out "// TODO" items and other placeholders
+
+### Git Diffs
+
+Embed git diffs showing code changes:
+
+```xml
+<gitdiff range="HEAD~2..HEAD" />
+<gitdiff range="abc123" exclude-unstaged exclude-staged />
+```
+
+**Attributes:**
+- `range` (required) - Git commit range or single commit
+- `exclude-unstaged` (optional) - Exclude unstaged changes when range includes HEAD
+- `exclude-staged` (optional) - Exclude staged changes when range includes HEAD
+
+**Content:** Self-closing element that renders as interactive diff tree
+
+**Use when:** The most common use is to show the code that you recently authored. Keep ranges focused on the commits that you created in this case. Can also be used when discussing gitdiffs for any other reason.
+
+### Actions
+
+Provide interactive buttons for user actions:
+
+```xml
+<action button="Fix the validation logic">
+How should I handle expired tokens differently?
+</action>
+```
+
+**Attributes:**
+- `button` (required) - Text displayed on the button
+
+**Content:** Message sent to AI assistant when button is clicked
+
+**Use when:** 
+- Suggesting next steps or follow-up tasks
+- Offering to help with related work
+- Providing quick access to common questions
+- **Not for:** Simple navigation (use comments with links instead)
+
+## Dialect Location Expressions
+
+Dialect expressions in `location` attributes target specific code locations. Here are the main functions:
+
+### Symbol-based targeting
+```xml
+<!-- Find where a symbol is defined -->
+<comment location="findDefinition(`MyClass`)">
+
+<!-- Find all references to a symbol -->
+<comment location="findReferences(`validateToken`)">
+```
+
+### Search-based targeting
+```xml
+<!-- Search specific file for pattern -->
+<comment location="search(`src/auth.rs`, `async fn`)">
+
+<!-- Search directory for pattern in specific file types -->
+<comment location="search(`src`, `struct.*User`, `.rs`)">
+
+<!-- Search all files in directory -->
+<comment location="search(`tests`, `#\[test\]`)">
+```
+
+### Line-based targeting
+```xml
+<!-- Target specific line range (use sparingly) -->
+<comment location="lines(`src/main.rs`, 10, 15)">
+```
+
+**Best practices:**
+- Prefer `search()` over `lines()` - more resilient to code changes
+- Use specific patterns in search to avoid too many matches
+- Test expressions to ensure they find the intended locations
+- If multiple matches, users will get a disambiguation dialog
+
+## Content Guidelines
+
+### Effective Comments
+**Good comments:**
+- Explain *why* something was implemented this way
+- Highlight non-obvious design decisions
+- Point out potential gotchas or edge cases
+- Provide context that helps understand the broader system
+
+**Avoid:**
+- Simply describing what the code does (code should be self-documenting)
+- Repeating information obvious from variable/function names
+- Generic praise ("This is good code")
+
+### Walkthrough Structure
+**Recommended flow:**
+1. **Introduction** - Brief overview of what changed and why
+2. **Architecture/Overview** - Mermaid diagrams for complex changes
+3. **Key Changes** - Comments on the most important modifications
+4. **Supporting Changes** - Git diffs and additional context
+5. **Next Steps** - Actions for follow-up work
+
+### When to Use Each Element
+- **Mermaid:** Complex systems, data flows, state machines
+- **Comments:** Specific code explanations, design decisions, review points
+- **Git diffs:** Showing scope of changes, file-level context
+- **Actions:** Next steps, follow-up questions, related tasks
+<!-- ANCHOR_END: walkthrough_format -->
