@@ -305,7 +305,13 @@ impl DialecticServer {
 
                 let result = tokio::task::spawn_blocking(move || {
                     tokio::runtime::Handle::current()
-                        .block_on(async move { interpreter.evaluate(element).await })
+                        .block_on(async move { 
+                            // Parse the JSON value as a string and then parse as Dialect
+                            let program_str = element.as_str()
+                                .ok_or_else(|| anyhow::anyhow!("Expected string program"))?;
+                            let ast = crate::dialect::parse(program_str)?;
+                            interpreter.evaluate(ast).await 
+                        })
                 })
                 .await
                 .map_err(|e| {
@@ -445,7 +451,13 @@ impl DialecticServer {
 
         let result = tokio::task::spawn_blocking(move || {
             tokio::runtime::Handle::current()
-                .block_on(async move { interpreter.evaluate(program).await })
+                .block_on(async move { 
+                    // Parse the program string as Dialect
+                    let program_str = program.as_str()
+                        .ok_or_else(|| anyhow::anyhow!("Expected string program"))?;
+                    let ast = crate::dialect::parse(program_str)?;
+                    interpreter.evaluate(ast).await 
+                })
         })
         .await
         .map_err(|e| {

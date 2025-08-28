@@ -134,7 +134,7 @@ pub struct FindDefinitions {
 impl<U: IpcClient> DialectFunction<U> for FindDefinitions {
     type Output = Vec<SymbolDef>;
 
-    const DEFAULT_FIELD_NAME: Option<&'static str> = Some("of");
+    const PARAMETER_ORDER: &'static [&'static str] = &["of"];
 
     async fn execute(
         self,
@@ -152,7 +152,7 @@ pub struct FindReferences {
 impl<U: IpcClient> DialectFunction<U> for FindReferences {
     type Output = Vec<SymbolRef>;
 
-    const DEFAULT_FIELD_NAME: Option<&'static str> = Some("to");
+    const PARAMETER_ORDER: &'static [&'static str] = &["to"];
 
     async fn execute(
         self,
@@ -187,7 +187,7 @@ pub struct Search {
 impl<U: IpcClient> DialectFunction<U> for Search {
     type Output = Vec<FileRange>;
 
-    const DEFAULT_FIELD_NAME: Option<&'static str> = None;
+    const PARAMETER_ORDER: &'static [&'static str] = &["path", "regex", "extension"];
 
     async fn execute(
         self,
@@ -249,7 +249,7 @@ pub struct GitDiff {
 impl<U: IpcClient> DialectFunction<U> for GitDiff {
     type Output = GitDiffElement;
 
-    const DEFAULT_FIELD_NAME: Option<&'static str> = None;
+    const PARAMETER_ORDER: &'static [&'static str] = &["commit_range", "exclude_unstaged", "exclude_staged"];
 
     async fn execute(
         self,
@@ -316,7 +316,7 @@ pub struct ResolvedComment {
 impl<U: IpcClient> DialectFunction<U> for Comment {
     type Output = ResolvedComment;
 
-    const DEFAULT_FIELD_NAME: Option<&'static str> = None;
+    const PARAMETER_ORDER: &'static [&'static str] = &["location", "icon", "content"];
 
     async fn execute(
         self,
@@ -431,7 +431,7 @@ pub struct ResolvedAction {
 impl<U: IpcClient> DialectFunction<U> for Action {
     type Output = ResolvedAction;
 
-    const DEFAULT_FIELD_NAME: Option<&'static str> = None;
+    const PARAMETER_ORDER: &'static [&'static str] = &["button", "tell_agent"];
 
     async fn execute(
         self,

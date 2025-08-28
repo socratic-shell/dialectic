@@ -7,16 +7,14 @@ use serde::{Serialize, de::DeserializeOwned};
 use serde_json::Value;
 
 mod parser;
+pub use parser::{Ast, parse};
 
 #[derive(Clone)]
 pub struct DialectInterpreter<U: Send> {
-    functions: BTreeMap<
-        String,
-        fn(
-            &mut DialectInterpreter<U>,
-            Value,
-        ) -> Pin<Box<dyn Future<Output = anyhow::Result<Value>> + '_>>,
-    >,
+    functions: BTreeMap<String, (
+        fn(&mut DialectInterpreter<U>, Value) -> Pin<Box<dyn Future<Output = anyhow::Result<Value>> + '_>>,
+        &'static [&'static str], // parameter_order
+    )>,
     userdata: U,
 }
 
@@ -40,111 +38,74 @@ impl<U: Send> DialectInterpreter<U> {
         // Extract just the struct name from the full path (e.g., "module::Uppercase" -> "uppercase")
         let struct_name = type_name.split("::").last().unwrap_or(type_name);
         let type_name_lower = struct_name.to_ascii_lowercase();
-        self.functions
-            .insert(type_name_lower, |interpreter, value| {
-                Box::pin(async move { interpreter.execute::<F>(value).await })
-            });
+        self.functions.insert(
+            type_name_lower,
+            (
+                |interpreter, value| Box::pin(async move { interpreter.execute::<F>(value).await }),
+                F::PARAMETER_ORDER,
+            ),
+        );
     }
 
     pub fn evaluate(
         &mut self,
-        value: Value,
+        ast: Ast,
     ) -> Pin<Box<dyn Future<Output = anyhow::Result<Value>> + '_>> {
         Box::pin(async move {
-            match value {
-                Value::Null | Value::Bool(_) | Value::Number(_) | Value::String(_) => Ok(value),
-                Value::Array(values) => {
+            match ast {
+                Ast::Call(name, args) => {
+                    let mut evaluated_args = Vec::new();
+                    for arg in args {
+                        evaluated_args.push(self.evaluate(arg).await?);
+                    }
+                    self.call_function_positional(name, evaluated_args).await
+                }
+                Ast::Int(n) => Ok(Value::Number(n.into())),
+                Ast::String(s) => Ok(Value::String(s)),
+                Ast::Boolean(b) => Ok(Value::Bool(b)),
+                Ast::Array(elements) => {
                     let mut results = Vec::new();
-                    for v in values {
-                        results.push(self.evaluate(v).await?);
+                    for element in elements {
+                        results.push(self.evaluate(element).await?);
                     }
                     Ok(Value::Array(results))
                 }
-                Value::Object(map) => {
-                    // We expect the `arg` to look like
-                    //
-                    // `{"func": { "arg0": json0, ..., "argN": jsonN }`
-                    //
-                    // We begin by
-                    //
-                    // (1) extracting the inner object.
-                    // (2) map the fields in the inner object using recursive evaluation, yielding `R = {"arg0": val0, ..}`;
-                    // (3) deserialize from `R` to the input type `I`
-                    // (4) invoke the function to get the result struct and then serialize it to JSON
-
-                    if map.len() != 1 {
-                        anyhow::bail!(
-                            "[invalid dialect program] object must have exactly one key: {map:#?}"
-                        );
+                Ast::Object(map) => {
+                    let mut result_map = serde_json::Map::new();
+                    for (key, value) in map {
+                        let evaluated_value = self.evaluate(value).await?;
+                        result_map.insert(key, evaluated_value);
                     }
-
-                    let (mut fn_name, fn_arg) = map.into_iter().next().unwrap();
-                    fn_name.make_ascii_lowercase();
-
-                    let evaluated_arg = self.evaluate_arg(fn_arg).await?;
-
-                    match self.functions.get(&fn_name) {
-                        Some(func) => func(self, evaluated_arg).await,
-                        None => {
-                            anyhow::bail!("[invalid dialect program] unknown function: {fn_name}")
-                        }
-                    }
+                    Ok(Value::Object(result_map))
                 }
             }
         })
     }
 
-    /// Evaluate a function argument, e.g., the A in a call like `{"functionName": A}`.
-    /// This performs a "structural map" of the outer level, so `{"f1": E}` becomes
-    /// `{"f1": E_eval}`, where `E_eval` is the evaluated form of `E`, etc.
-    async fn evaluate_arg(&mut self, arg: Value) -> anyhow::Result<Value> {
-        match arg {
-            Value::Object(map) => {
-                let mut result_map = serde_json::Map::new();
-                for (name, value) in map {
-                    let evaluated_value = self.evaluate(value).await?;
-                    result_map.insert(name, evaluated_value);
-                }
-                Ok(Value::Object(result_map))
+    async fn call_function_positional(&mut self, name: String, args: Vec<Value>) -> anyhow::Result<Value> {
+        let name_lower = name.to_ascii_lowercase();
+        let (func, parameter_order) = self.functions.get(&name_lower)
+            .ok_or_else(|| anyhow::anyhow!("unknown function: {}", name))?;
+        
+        // Map positional args to named object
+        let mut arg_object = serde_json::Map::new();
+        for (i, value) in args.into_iter().enumerate() {
+            if let Some(&param_name) = parameter_order.get(i) {
+                arg_object.insert(param_name.to_string(), value);
+            } else {
+                anyhow::bail!("too many arguments for function {}: expected {}, got {}", 
+                    name, parameter_order.len(), i + 1);
             }
-            Value::Array(a) => {
-                let mut result_array = Vec::new();
-                for value in a {
-                    let evaluated_value = self.evaluate(value).await?;
-                    result_array.push(evaluated_value);
-                }
-                Ok(Value::Array(result_array))
-            }
-
-            // Atomic values just pass through
-            Value::String(s) => Ok(Value::String(s)),
-            Value::Number(n) => Ok(Value::Number(n)),
-            Value::Bool(b) => Ok(Value::Bool(b)),
-            Value::Null => Ok(Value::Null),
         }
+        
+        func(self, Value::Object(arg_object)).await
     }
 
     async fn execute<F>(&mut self, value: Value) -> anyhow::Result<Value>
     where
         F: DialectFunction<U>,
     {
-        let value_obj = match value {
-            // For a call like `{"funcName": {"f1": E1, "f2": E2}}`,
-            // we now have a struct `{"f1": E1_eval, "f2": E2_eval}`.
-            //
-            // We will "deserialize" this into an instance of the
-            // struct that `DialectFunction` is defined on.
-            Value::Object(_) => value,
-
-            // Otherwise, for a call like `{"funcName": E}`,
-            // we now have a value `E_eval`. Some functions
-            // allow that `E_eval` to be converted to `{"f1": E_eval}`.
-            _ => match F::DEFAULT_FIELD_NAME {
-                Some(name) => serde_json::json!({ name : value }),
-                None => anyhow::bail!("expected a json object `{{...}}`"),
-            },
-        };
-        let input: F = serde_json::from_value(value_obj)?;
+        let input: F = serde_json::from_value(value)?;
         let output: F::Output = input.execute(self).await?;
         Ok(serde_json::to_value(output)?)
     }
@@ -171,34 +132,32 @@ impl<U: Send> DerefMut for DialectInterpreter<U> {
 /// ```rust,ignore
 /// #[derive(Deserialize)]
 /// pub struct TheFunction {
-///    name: String
+///    symbol: String,
+///    path: Option<String>,
 /// }
 /// ```
 ///
 /// The struct name becomes the function name
 /// (note: Dialect is case-insensitive when it comes to function names).
-/// The argument names are defined by the struct.
+/// The argument names are defined by the struct fields.
 ///
 /// To invoke your function, the Dialect interpreter will
 ///
-/// 1. determine a JSON object for your arguments
-/// 2. deserialize that into the `Self` type to create an instance of `Self`
-/// 3. invoke [`DialectFunction::execute`][].
+/// 1. evaluate the positional arguments to JSON values
+/// 2. map them to named arguments using `PARAMETER_ORDER`
+/// 3. deserialize that into the `Self` type to create an instance of `Self`
+/// 4. invoke [`DialectFunction::execute`][].
 ///
-/// # Default field names
+/// # Parameter Order
 ///
-/// Normally, functions must be invoked with explicit arguments,
-/// like `{"lower": {"text": "Foo"}}`, and invoking them with
-/// plain values like `{"lower": "Foo"}` is an error.
-/// If you provide a `DEFAULT_FIELD_NAME` (e.g., `Some("text")`),
-/// then a non-object argument is converted into
-/// an object with a single field with the given name
-/// (e.g., `{"text": "Foo"}`).
+/// Functions are called with positional arguments that are mapped to struct fields
+/// using the `PARAMETER_ORDER` constant. For example, with `PARAMETER_ORDER = &["symbol", "path"]`,
+/// the call `findDefinitions("MyClass", "src/main.rs")` becomes `{"symbol": "MyClass", "path": "src/main.rs"}`.
 // ANCHOR: dialect_function_trait
 pub trait DialectFunction<U: Send>: DeserializeOwned + Send {
     type Output: Serialize + Send;
 
-    const DEFAULT_FIELD_NAME: Option<&'static str>;
+    const PARAMETER_ORDER: &'static [&'static str];
 
     async fn execute(self, interpreter: &mut DialectInterpreter<U>)
     -> anyhow::Result<Self::Output>;
@@ -212,7 +171,7 @@ macro_rules! dialect_value {
         impl<U: Send> $crate::dialect::DialectFunction<U> for $ty {
             type Output = $ty;
 
-            const DEFAULT_FIELD_NAME: Option<&'static str> = None;
+            const PARAMETER_ORDER: &'static [&'static str] = &[];
 
             async fn execute(
                 self,
