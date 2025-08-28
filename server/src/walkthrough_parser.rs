@@ -268,6 +268,41 @@ impl<T: IpcClient + Clone + 'static> WalkthroughParser<T> {
                 ("comment".to_string(), attrs, resolved_data)
             }
             XmlElement::GitDiff { range, exclude_unstaged, exclude_staged } => {
+                // Use GitService to generate actual file changes
+                use crate::synthetic_pr::git_service::GitService;
+                
+                let resolved_data = match GitService::new(".") {
+                    Ok(git_service) => {
+                        match git_service.parse_commit_range(range).and_then(|(base_oid, head_oid)| {
+                            git_service.generate_diff(base_oid, head_oid)
+                        }) {
+                            Ok(file_changes) => {
+                                serde_json::json!({
+                                    "type": "gitdiff",
+                                    "range": range,
+                                    "files": file_changes
+                                })
+                            }
+                            Err(e) => {
+                                // Fallback for git errors (tests, non-git directories, etc.)
+                                serde_json::json!({
+                                    "type": "gitdiff",
+                                    "range": range,
+                                    "error": format!("Git error: {}", e)
+                                })
+                            }
+                        }
+                    }
+                    Err(e) => {
+                        // Fallback for non-git directories (like in tests)
+                        serde_json::json!({
+                            "type": "gitdiff",
+                            "range": range,
+                            "error": format!("Not a git repository: {}", e)
+                        })
+                    }
+                };
+                
                 let mut attrs = HashMap::new();
                 if *exclude_unstaged {
                     attrs.insert("exclude-unstaged".to_string(), "true".to_string());
@@ -275,11 +310,6 @@ impl<T: IpcClient + Clone + 'static> WalkthroughParser<T> {
                 if *exclude_staged {
                     attrs.insert("exclude-staged".to_string(), "true".to_string());
                 }
-                
-                let resolved_data = serde_json::json!({
-                    "range": range,
-                    "type": "gitdiff"
-                });
                 
                 ("gitdiff".to_string(), attrs, resolved_data)
             }
@@ -443,7 +473,7 @@ mod tests {
     fn test_self_closing_gitdiff() {
         check(
             r#"<gitdiff range="HEAD~1..HEAD" />"#,
-            expect![[r#"<gitdiff data-resolved='{"range":"HEAD~1..HEAD","type":"gitdiff"}' />"#]],
+            expect![[r#"<gitdiff data-resolved='{"error":"Not a git repository: could not find repository at '.'; class=Repository (6); code=NotFound (-3)","range":"HEAD~1..HEAD","type":"gitdiff"}' />"#]],
         );
     }
 
@@ -478,7 +508,7 @@ More markdown here.
                 <p>This is some markdown content.</p>
                 <comment data-resolved='{"dialect_expression":"findDefinitions(`User`)","locations":[{"definedAt":{"content":"struct User {","end":{"column":4,"line":10},"path":"src/models.rs","start":{"column":0,"line":10}},"kind":"struct","name":"User"}]}' icon="lightbulb">This explains the User struct</comment>
                 <p>More markdown here.</p>
-                <gitdiff data-resolved='{"range":"HEAD~1..HEAD","type":"gitdiff"}' />
+                <gitdiff data-resolved='{"error":"Not a git repository: could not find repository at '.'; class=Repository (6); code=NotFound (-3)","range":"HEAD~1..HEAD","type":"gitdiff"}' />
                 <p><action data-resolved='{"button_text":"Next Step"}' button="Next Step">What should we do next?</action></p>
             "#]],
         );
@@ -498,7 +528,7 @@ More text"#,
                 <p>Some text before
                 <comment data-resolved='{"dialect_expression":"findDefinitions(`User`)","locations":[{"definedAt":{"content":"struct User {","end":{"column":4,"line":10},"path":"src/models.rs","start":{"column":0,"line":10}},"kind":"struct","name":"User"}]}'>User comment</comment>
                 Some text after
-                <gitdiff data-resolved='{"range":"HEAD","type":"gitdiff"}' />
+                <gitdiff data-resolved='{"error":"Not a git repository: could not find repository at '.'; class=Repository (6); code=NotFound (-3)","range":"HEAD","type":"gitdiff"}' />
                 More text</p>
             "#]],
         );
