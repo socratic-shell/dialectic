@@ -309,7 +309,7 @@ impl DialecticServer {
                             // Parse and evaluate the Dialect program string
                             let program_str = element.as_str()
                                 .ok_or_else(|| anyhow::anyhow!("Expected string program"))?;
-                            interpreter.evaluate(program_str.to_string()).await 
+                            interpreter.evaluate(program_str).await 
                         })
                 })
                 .await
@@ -454,7 +454,7 @@ impl DialecticServer {
                     // Parse and evaluate the Dialect program string
                     let program_str = program.as_str()
                         .ok_or_else(|| anyhow::anyhow!("Expected string program"))?;
-                    interpreter.evaluate(program_str.to_string()).await 
+                    interpreter.evaluate(program_str).await 
                 })
         })
         .await

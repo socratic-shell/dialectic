@@ -112,11 +112,7 @@ async fn test_find_definition_with_string_symbol() {
     let mut interpreter = DialectInterpreter::new(MockIpcClient::new());
     interpreter.add_function::<FindDefinitions>();
 
-    let input = serde_json::json!({
-        "finddefinitions": "User"
-    });
-
-    let result = interpreter.evaluate(input).await.unwrap();
+    let result = interpreter.evaluate("findDefinitions(\"User\")").await.unwrap();
     let definitions: Vec<SymbolDef> = serde_json::from_value(result).unwrap();
 
     assert_eq!(definitions.len(), 1);
@@ -345,7 +341,7 @@ struct Uppercase {
 impl DialectFunction<()> for Uppercase {
     type Output = String;
 
-    const DEFAULT_FIELD_NAME: Option<&'static str> = None;
+    const PARAMETER_ORDER: &'static [&'static str] = &["text"];
 
     async fn execute(
         self,
@@ -365,7 +361,7 @@ struct Concat {
 impl DialectFunction<()> for Concat {
     type Output = String;
 
-    const DEFAULT_FIELD_NAME: Option<&'static str> = None;
+    const PARAMETER_ORDER: &'static [&'static str] = &["left", "right"];
 
     async fn execute(
         self,
@@ -385,7 +381,7 @@ struct Add {
 impl DialectFunction<()> for Add {
     type Output = i32;
 
-    const DEFAULT_FIELD_NAME: Option<&'static str> = None;
+    const PARAMETER_ORDER: &'static [&'static str] = &["a", "b"];
 
     async fn execute(
         self,
