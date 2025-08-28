@@ -39,7 +39,7 @@ pub struct ExpandReferenceParams {
 #[derive(Debug, Deserialize, Serialize, schemars::JsonSchema)]
 struct IdeOperationParams {
     /// Dialect program to execute
-    program: serde_json::Value,
+    program: String,
 }
 // ANCHOR_END: ide_operation_params
 
@@ -420,8 +420,8 @@ impl DialecticServer {
                        This tool provides access to VSCode's Language Server Protocol (LSP) capabilities \
                        through a composable function system.\n\n\
                        Common operations:\n\
-                       - {\"findDefinitions\": \"MyFunction\"} - list of locations where a symbol named `MyFunction` is defined\n\
-                       - {\"findReferences\": \"MyFunction\"} - list of locations where a symbol named `MyFunction` is referenced\n\
+                       - findDefinitions(\"MyFunction\") - list of locations where a symbol named `MyFunction` is defined\n\
+                       - findReferences(\"MyFunction\") - list of locations where a symbol named `MyFunction` is referenced\n\
                        "
     )]
     async fn ide_operation(
@@ -452,9 +452,7 @@ impl DialecticServer {
             tokio::runtime::Handle::current()
                 .block_on(async move { 
                     // Parse and evaluate the Dialect program string
-                    let program_str = program.as_str()
-                        .ok_or_else(|| anyhow::anyhow!("Expected string program"))?;
-                    interpreter.evaluate(program_str).await 
+                    interpreter.evaluate(&program).await 
                 })
         })
         .await
@@ -739,7 +737,7 @@ impl ServerHandler for DialecticServer {
             instructions: Some(
                 "This server provides tools for AI assistants to perform IDE operations and display walkthroughs in VSCode. \
                 Use 'get_selection' to retrieve currently selected text from the active editor, \
-                'ide_operation' to execute IDE operations like finding symbol definitions and references using Dialect, \
+                'ide_operation' to execute IDE operations like finding symbol definitions and references using Dialect function calls, \
                 'present_walkthrough' to display structured code walkthroughs with interactive elements, \
                 'request_review' to create synthetic pull requests from Git commit ranges with AI insight comments, \
                 'update_review' to manage review workflows and wait for user feedback, \
