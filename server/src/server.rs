@@ -89,6 +89,7 @@ impl DialecticServer {
         interpreter.add_function::<crate::ide::FindDefinitions>();
         interpreter.add_function::<crate::ide::FindReferences>();
         interpreter.add_function::<crate::ide::Search>();
+        interpreter.add_function::<crate::ide::Lines>();
         interpreter.add_function::<crate::ide::GitDiff>();
         interpreter.add_function::<crate::ide::Comment>();
         interpreter.add_function::<crate::ide::Action>();
@@ -190,6 +191,7 @@ impl DialecticServer {
         interpreter.add_function::<crate::ide::FindDefinitions>();
         interpreter.add_function::<crate::ide::FindReferences>();
         interpreter.add_function::<crate::ide::Search>();
+        interpreter.add_function::<crate::ide::Lines>();
         interpreter.add_function::<crate::ide::GitDiff>();
         interpreter.add_function::<crate::ide::Comment>();
         interpreter.add_function::<crate::ide::Action>();

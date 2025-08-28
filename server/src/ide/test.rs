@@ -699,3 +699,50 @@ async fn test_action_function() {
     "#]]
     .assert_debug_eq(&result);
 }
+
+#[tokio::test]
+async fn test_lines_function() {
+    use expect_test::expect;
+    use std::fs;
+    use tempfile::NamedTempFile;
+    
+    // Create a temporary file with known content
+    let temp_file = NamedTempFile::new().unwrap();
+    let content = "line 1\nline 2\nline 3\nline 4\nline 5\n";
+    fs::write(&temp_file, content).unwrap();
+    let file_path = temp_file.path().to_str().unwrap();
+    
+    let mock_client = MockIpcClient::new();
+    let mut interpreter = DialectInterpreter::new(mock_client);
+    interpreter.add_function::<crate::ide::Lines>();
+    
+    // Test selecting lines 2-4
+    let query = format!(r#"lines("{}", 2, 4)"#, file_path);
+    let result = interpreter.evaluate(&query).await;
+    
+    expect![[r#"
+        Ok(
+            Object {
+                "content": String("line 2\nline 3\nline 4"),
+                "end": Object {
+                    "column": Number(6),
+                    "line": Number(4),
+                },
+                "path": String("[TEMP_FILE_PATH]"),
+                "start": Object {
+                    "column": Number(1),
+                    "line": Number(2),
+                },
+            },
+        )
+    "#]]
+    .assert_debug_eq(&result.map(|mut v| {
+        // Replace the actual temp file path with a placeholder for consistent testing
+        if let Some(obj) = v.as_object_mut() {
+            if let Some(path) = obj.get_mut("path") {
+                *path = serde_json::json!("[TEMP_FILE_PATH]");
+            }
+        }
+        v
+    }));
+}
