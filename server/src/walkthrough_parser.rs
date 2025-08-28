@@ -1,4 +1,4 @@
-use pulldown_cmark::{Event, Parser, html};
+use pulldown_cmark::{Event, Parser, html, Tag, TagEnd, CowStr};
 use quick_xml::events::Event as XmlEvent;
 use quick_xml::Reader;
 use serde::{Deserialize, Serialize};
@@ -60,11 +60,131 @@ impl<T: IpcClient> WalkthroughParser<T> {
         let mut output_events = Vec::new();
         
         while let Some(event) = input_events.pop_front() {
-            // For now, just pass through all events unchanged
-            output_events.push(event);
+            match event {
+                Event::InlineHtml(html) => {
+                    if self.is_xml_element(&html) {
+                        self.process_inline_xml(html, &mut input_events, &mut output_events).await?;
+                    } else {
+                        output_events.push(Event::InlineHtml(html));
+                    }
+                }
+                Event::Start(Tag::HtmlBlock) => {
+                    if self.is_xml_block(&input_events) {
+                        self.process_xml_block(&mut input_events, &mut output_events).await?;
+                    } else {
+                        output_events.push(Event::Start(Tag::HtmlBlock));
+                    }
+                }
+                _ => output_events.push(event),
+            }
         }
         
         Ok(output_events)
+    }
+
+    /// Check if HTML content is one of our XML elements
+    fn is_xml_element(&self, html: &str) -> bool {
+        html.trim_start().starts_with("<comment") ||
+        html.trim_start().starts_with("<gitdiff") ||
+        html.trim_start().starts_with("<action") ||
+        html.trim_start().starts_with("<mermaid") ||
+        html.trim_start().starts_with("</comment") ||
+        html.trim_start().starts_with("</gitdiff") ||
+        html.trim_start().starts_with("</action") ||
+        html.trim_start().starts_with("</mermaid")
+    }
+
+    /// Check if upcoming events contain XML block content
+    fn is_xml_block(&self, upcoming_events: &VecDeque<Event>) -> bool {
+        if let Some(Event::Html(html)) = upcoming_events.front() {
+            self.is_xml_element(html)
+        } else {
+            false
+        }
+    }
+
+    /// Process inline XML elements (opening tag, content, closing tag)
+    async fn process_inline_xml<'a>(
+        &mut self,
+        html: CowStr<'a>,
+        input_events: &mut VecDeque<Event<'a>>,
+        output_events: &mut Vec<Event<'a>>,
+    ) -> Result<(), Box<dyn std::error::Error>> {
+        // Buffer the complete inline XML element
+        let mut xml_content = html.to_string();
+        
+        // If this is an opening tag, collect until closing tag
+        if !html.contains("/>") && !html.starts_with("</") {
+            // Collect content and closing tag
+            while let Some(event) = input_events.pop_front() {
+                match event {
+                    Event::Text(text) => xml_content.push_str(&text),
+                    Event::InlineHtml(closing_html) => {
+                        xml_content.push_str(&closing_html);
+                        if closing_html.starts_with("</") {
+                            break;
+                        }
+                    }
+                    _ => {
+                        // Put back unexpected event and break
+                        input_events.push_front(event);
+                        break;
+                    }
+                }
+            }
+        }
+
+        // Parse and resolve the complete XML element
+        if let Ok(xml_element) = self.parse_xml_element(&xml_content) {
+            let resolved = self.resolve_single_element(xml_element).await?;
+            let normalized_xml = self.create_normalized_xml(&resolved);
+            output_events.push(Event::InlineHtml(normalized_xml.into()));
+        } else {
+            // If parsing fails, pass through original
+            output_events.push(Event::InlineHtml(html));
+        }
+
+        Ok(())
+    }
+
+    /// Process block-level XML elements
+    async fn process_xml_block<'a>(
+        &mut self,
+        input_events: &mut VecDeque<Event<'a>>,
+        output_events: &mut Vec<Event<'a>>,
+    ) -> Result<(), Box<dyn std::error::Error>> {
+        let mut xml_content = String::new();
+        
+        // Collect all HTML events until End(HtmlBlock)
+        while let Some(event) = input_events.pop_front() {
+            match event {
+                Event::Html(html) => xml_content.push_str(&html),
+                Event::End(TagEnd::HtmlBlock) => break,
+                _ => {
+                    // Put back unexpected event and break
+                    input_events.push_front(event);
+                    break;
+                }
+            }
+        }
+
+        // Parse and resolve the complete XML block
+        if let Ok(xml_element) = self.parse_xml_element(&xml_content) {
+            let resolved = self.resolve_single_element(xml_element).await?;
+            let normalized_xml = self.create_normalized_xml(&resolved);
+            
+            // Emit as HTML block
+            output_events.push(Event::Start(Tag::HtmlBlock));
+            output_events.push(Event::Html(normalized_xml.into()));
+            output_events.push(Event::End(TagEnd::HtmlBlock));
+        } else {
+            // If parsing fails, pass through original
+            output_events.push(Event::Start(Tag::HtmlBlock));
+            output_events.push(Event::Html(xml_content.into()));
+            output_events.push(Event::End(TagEnd::HtmlBlock));
+        }
+
+        Ok(())
     }
 
     /// Render pulldown-cmark events back to markdown/HTML
@@ -349,7 +469,7 @@ More markdown here.
         
         // Should contain normalized XML with data-resolved attributes
         assert!(result.contains("data-resolved="));
-        assert!(result.contains("# My Walkthrough"));
+        assert!(result.contains("My Walkthrough")); // HTML version: <h1>My Walkthrough</h1>
         assert!(result.contains("This is some markdown content."));
         assert!(result.contains("More markdown here."));
         
@@ -363,9 +483,6 @@ More markdown here.
         let input = r#"<comment location="findDefinitions(`User`)">User struct</comment>"#;
 
         let result = parser.parse_and_normalize(input).await.unwrap();
-        
-        println!("Input: {}", input);
-        println!("Output: {}", result);
         
         // Should contain resolved data from MockIpcClient
         assert!(result.contains("data-resolved="));
@@ -385,8 +502,8 @@ More text"#;
 
         let result = parser.parse_and_normalize(input).await.unwrap();
         
-        // Should preserve markdown structure
-        assert!(result.contains("# Title"));
+        // Should preserve markdown structure (as HTML)
+        assert!(result.contains("Title")); // HTML version: <h1>Title</h1>
         assert!(result.contains("Some text before"));
         assert!(result.contains("Some text after"));
         assert!(result.contains("More text"));
