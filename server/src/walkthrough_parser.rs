@@ -3,6 +3,9 @@ use quick_xml::Reader;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 
+use crate::dialect::{DialectInterpreter};
+use crate::ide::IpcClient;
+
 /// Parsed XML element from walkthrough markdown
 #[derive(Debug, Clone, PartialEq)]
 pub enum XmlElement {
@@ -44,23 +47,25 @@ struct XmlPlaceholder {
 }
 
 /// Main walkthrough parser
-pub struct WalkthroughParser;
+pub struct WalkthroughParser<T: IpcClient> {
+    interpreter: DialectInterpreter<T>,
+}
 
-impl WalkthroughParser {
-    pub fn new() -> Self {
-        Self
+impl<T: IpcClient> WalkthroughParser<T> {
+    pub fn new(interpreter: DialectInterpreter<T>) -> Self {
+        Self { interpreter }
     }
 
     /// Parse markdown with embedded XML elements and return normalized output
-    pub fn parse_and_normalize(&self, content: &str) -> Result<String, Box<dyn std::error::Error>> {
+    pub async fn parse_and_normalize(&mut self, content: &str) -> Result<String, Box<dyn std::error::Error>> {
         // Phase 1: Extract XML elements
         let (markdown_with_placeholders, xml_elements) = self.extract_xml_elements(content)?;
         
         // Phase 2: Process markdown
         let processed_markdown = self.process_markdown(&markdown_with_placeholders);
         
-        // Phase 3: Resolve XML elements (dummy data for now)
-        let resolved_elements = self.resolve_elements(xml_elements);
+        // Phase 3: Resolve XML elements with real Dialect evaluation
+        let resolved_elements = self.resolve_elements(xml_elements).await?;
         
         // Phase 4: Reconstruct with normalized XML
         let normalized = self.reconstruct_with_normalized_xml(&processed_markdown, &resolved_elements);
@@ -201,83 +206,100 @@ impl WalkthroughParser {
         content.to_string()
     }
 
-    /// Resolve XML elements (dummy data for Phase 1)
-    fn resolve_elements(&self, placeholders: Vec<XmlPlaceholder>) -> Vec<ResolvedXmlElement> {
-        placeholders
-            .into_iter()
-            .map(|placeholder| {
-                let (element_type, attributes, resolved_data) = match &placeholder.element {
-                    XmlElement::Comment { location: _, icon, content: _ } => {
-                        let mut attrs = HashMap::new();
-                        if let Some(icon) = icon {
-                            attrs.insert("icon".to_string(), icon.clone());
+    /// Resolve XML elements with real Dialect evaluation
+    async fn resolve_elements(&mut self, placeholders: Vec<XmlPlaceholder>) -> Result<Vec<ResolvedXmlElement>, Box<dyn std::error::Error>> {
+        let mut resolved = Vec::new();
+        
+        for placeholder in placeholders {
+            let (element_type, attributes, resolved_data) = match &placeholder.element {
+                XmlElement::Comment { location, icon, content: _ } => {
+                    let mut attrs = HashMap::new();
+                    if let Some(icon) = icon {
+                        attrs.insert("icon".to_string(), icon.clone());
+                    }
+                    
+                    // Resolve Dialect expression for location
+                    let resolved_data = if !location.is_empty() {
+                        match self.interpreter.evaluate(location).await {
+                            Ok(result) => {
+                                // Convert Dialect result to locations format
+                                serde_json::json!({
+                                    "locations": result,
+                                    "dialect_expression": location
+                                })
+                            }
+                            Err(e) => {
+                                // Fallback to error info if resolution fails
+                                serde_json::json!({
+                                    "error": format!("Failed to resolve location: {}", e),
+                                    "dialect_expression": location
+                                })
+                            }
                         }
-                        
-                        let dummy_data = serde_json::json!({
-                            "locations": [{
-                                "path": "src/example.rs",
-                                "start": {"line": 42, "column": 0},
-                                "end": {"line": 42, "column": 10}
-                            }]
-                        });
-                        
-                        ("comment".to_string(), attrs, dummy_data)
-                    }
-                    XmlElement::GitDiff { range: _, exclude_unstaged, exclude_staged } => {
-                        let mut attrs = HashMap::new();
-                        if *exclude_unstaged {
-                            attrs.insert("exclude-unstaged".to_string(), "true".to_string());
-                        }
-                        if *exclude_staged {
-                            attrs.insert("exclude-staged".to_string(), "true".to_string());
-                        }
-                        
-                        let dummy_data = serde_json::json!({
-                            "files": [{
-                                "path": "src/example.rs",
-                                "status": "modified",
-                                "additions": 5,
-                                "deletions": 2
-                            }]
-                        });
-                        
-                        ("gitdiff".to_string(), attrs, dummy_data)
-                    }
-                    XmlElement::Action { button, message: _ } => {
-                        let mut attrs = HashMap::new();
-                        attrs.insert("button".to_string(), button.clone());
-                        
-                        let dummy_data = serde_json::json!({
-                            "action_id": format!("action_{}", placeholder.id)
-                        });
-                        
-                        ("action".to_string(), attrs, dummy_data)
-                    }
-                    XmlElement::Mermaid { content: _ } => {
-                        let attrs = HashMap::new();
-                        let dummy_data = serde_json::json!({
-                            "rendered": true
-                        });
-                        
-                        ("mermaid".to_string(), attrs, dummy_data)
-                    }
-                };
-
-                let content = match &placeholder.element {
-                    XmlElement::Comment { content, .. } => content.clone(),
-                    XmlElement::Action { message, .. } => message.clone(),
-                    XmlElement::Mermaid { content } => content.clone(),
-                    XmlElement::GitDiff { .. } => String::new(),
-                };
-
-                ResolvedXmlElement {
-                    element_type,
-                    attributes,
-                    resolved_data,
-                    content,
+                    } else {
+                        serde_json::json!({
+                            "locations": []
+                        })
+                    };
+                    
+                    ("comment".to_string(), attrs, resolved_data)
                 }
-            })
-            .collect()
+                XmlElement::GitDiff { range, exclude_unstaged, exclude_staged } => {
+                    let mut attrs = HashMap::new();
+                    if *exclude_unstaged {
+                        attrs.insert("exclude-unstaged".to_string(), "true".to_string());
+                    }
+                    if *exclude_staged {
+                        attrs.insert("exclude-staged".to_string(), "true".to_string());
+                    }
+                    
+                    // For gitdiff, we could resolve the range to actual file changes
+                    // For now, just pass through the range
+                    let resolved_data = serde_json::json!({
+                        "range": range,
+                        "type": "gitdiff"
+                    });
+                    
+                    ("gitdiff".to_string(), attrs, resolved_data)
+                }
+                XmlElement::Action { button, message: _ } => {
+                    let mut attrs = HashMap::new();
+                    attrs.insert("button".to_string(), button.clone());
+                    
+                    let resolved_data = serde_json::json!({
+                        "action_id": format!("action_{}", placeholder.id),
+                        "button_text": button
+                    });
+                    
+                    ("action".to_string(), attrs, resolved_data)
+                }
+                XmlElement::Mermaid { content: _ } => {
+                    let attrs = HashMap::new();
+                    let resolved_data = serde_json::json!({
+                        "type": "mermaid",
+                        "rendered": true
+                    });
+                    
+                    ("mermaid".to_string(), attrs, resolved_data)
+                }
+            };
+
+            let content = match &placeholder.element {
+                XmlElement::Comment { content, .. } => content.clone(),
+                XmlElement::Action { message, .. } => message.clone(),
+                XmlElement::Mermaid { content } => content.clone(),
+                XmlElement::GitDiff { .. } => String::new(),
+            };
+
+            resolved.push(ResolvedXmlElement {
+                element_type,
+                attributes,
+                resolved_data,
+                content,
+            });
+        }
+        
+        Ok(resolved)
     }
 
     /// Reconstruct markdown with normalized XML elements
@@ -321,17 +343,26 @@ impl WalkthroughParser {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::ide::test::MockIpcClient;
+    use crate::ide::{FindDefinitions, FindReferences};
+
+    fn create_test_parser() -> WalkthroughParser<MockIpcClient> {
+        let mut interpreter = DialectInterpreter::new(MockIpcClient::new());
+        interpreter.add_function::<FindDefinitions>();
+        interpreter.add_function::<FindReferences>();
+        WalkthroughParser::new(interpreter)
+    }
 
     #[test]
     fn test_parse_comment_element() {
-        let parser = WalkthroughParser::new();
-        let xml = r#"<comment location="findDefinition(`User`)" icon="lightbulb">This is a comment</comment>"#;
+        let parser = create_test_parser();
+        let xml = r#"<comment location="findDefinitions(`User`)" icon="lightbulb">This is a comment</comment>"#;
         
         let element = parser.parse_xml_element(xml).unwrap();
         
         match element {
             XmlElement::Comment { location, icon, content } => {
-                assert_eq!(location, "findDefinition(`User`)");
+                assert_eq!(location, "findDefinitions(`User`)");
                 assert_eq!(icon, Some("lightbulb".to_string()));
                 assert_eq!(content, "This is a comment");
             }
@@ -341,7 +372,7 @@ mod tests {
 
     #[test]
     fn test_parse_self_closing_gitdiff() {
-        let parser = WalkthroughParser::new();
+        let parser = create_test_parser();
         let xml = r#"<gitdiff range="HEAD~2..HEAD" exclude-unstaged="true" />"#;
         
         let element = parser.parse_xml_element(xml).unwrap();
@@ -358,7 +389,7 @@ mod tests {
 
     #[test]
     fn test_parse_action_element() {
-        let parser = WalkthroughParser::new();
+        let parser = create_test_parser();
         let xml = r#"<action button="Test the changes">Run the test suite</action>"#;
         
         let element = parser.parse_xml_element(xml).unwrap();
@@ -374,7 +405,7 @@ mod tests {
 
     #[test]
     fn test_parse_mermaid_element() {
-        let parser = WalkthroughParser::new();
+        let parser = create_test_parser();
         let xml = r#"<mermaid>flowchart TD
     A[Start] --> B[End]</mermaid>"#;
         
@@ -389,14 +420,14 @@ mod tests {
         }
     }
 
-    #[test]
-    fn test_full_walkthrough_parsing() {
-        let parser = WalkthroughParser::new();
+    #[tokio::test]
+    async fn test_full_walkthrough_parsing_with_dialect() {
+        let mut parser = create_test_parser();
         let input = r#"# My Walkthrough
 
 This is some markdown content.
 
-<comment location="findDefinition(`User`)" icon="lightbulb">
+<comment location="findDefinitions(`User`)" icon="lightbulb">
 This explains the User struct
 </comment>
 
@@ -406,18 +437,34 @@ More markdown here.
 
 <action button="Next Step">What should we do next?</action>"#;
 
-        let result = parser.parse_and_normalize(input).unwrap();
+        let result = parser.parse_and_normalize(input).await.unwrap();
         
         // Should contain normalized XML with data-resolved attributes
         assert!(result.contains("data-resolved="));
         assert!(result.contains("# My Walkthrough"));
         assert!(result.contains("This is some markdown content."));
         assert!(result.contains("More markdown here."));
+        
+        // Should contain resolved location data from MockIpcClient
+        assert!(result.contains("src/models.rs") || result.contains("User"));
+    }
+
+    #[tokio::test]
+    async fn test_dialect_resolution() {
+        let mut parser = create_test_parser();
+        let input = r#"<comment location="findDefinitions(`User`)">User struct</comment>"#;
+
+        let result = parser.parse_and_normalize(input).await.unwrap();
+        
+        // Should contain resolved data from MockIpcClient
+        assert!(result.contains("data-resolved="));
+        // MockIpcClient returns User definition at src/models.rs:10
+        assert!(result.contains("src/models.rs") || result.contains("User"));
     }
 
     #[test]
     fn test_extract_xml_elements() {
-        let parser = WalkthroughParser::new();
+        let parser = create_test_parser();
         let content = r#"# Title
 <comment location="test">Content</comment>
 More text

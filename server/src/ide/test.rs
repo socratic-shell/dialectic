@@ -8,13 +8,13 @@ use crate::{
 use serde::Deserialize;
 
 // Mock IPC client for testing
-struct MockIpcClient {
+pub struct MockIpcClient {
     symbols: BTreeMap<String, Vec<SymbolDef>>,
     references: BTreeMap<String, Vec<FileRange>>,
 }
 
 impl MockIpcClient {
-    fn new() -> Self {
+    pub fn new() -> Self {
         let mut symbols = BTreeMap::new();
         let mut references = BTreeMap::new();
 

@@ -6,7 +6,7 @@ use serde::{Deserialize, Deserializer, Serialize, Serializer};
 use crate::dialect::{DialectFunction, DialectInterpreter};
 
 pub mod ambiguity;
-mod test;
+pub mod test;
 
 // IPC client trait that the userdata must implement
 pub trait IpcClient: Send {
