@@ -3,6 +3,7 @@ use quick_xml::events::Event as XmlEvent;
 use quick_xml::Reader;
 use serde::{Deserialize, Serialize};
 use std::collections::{HashMap, VecDeque};
+use anyhow::Result;
 
 use crate::dialect::{DialectInterpreter};
 use crate::ide::IpcClient;
@@ -39,23 +40,23 @@ pub struct ResolvedXmlElement {
 }
 
 /// Main walkthrough parser
-pub struct WalkthroughParser<T: IpcClient> {
+pub struct WalkthroughParser<T: IpcClient + Clone + 'static> {
     interpreter: DialectInterpreter<T>,
 }
 
-impl<T: IpcClient> WalkthroughParser<T> {
+impl<T: IpcClient + Clone + 'static> WalkthroughParser<T> {
     pub fn new(interpreter: DialectInterpreter<T>) -> Self {
         Self { interpreter }
     }
 
     /// Parse markdown with embedded XML elements and return normalized output
-    pub async fn parse_and_normalize(&mut self, content: &str) -> Result<String, Box<dyn std::error::Error>> {
+    pub async fn parse_and_normalize(&mut self, content: &str) -> Result<String, anyhow::Error> {
         let processed_events = self.process_events_sequentially(content).await?;
         Self::render_events_to_markdown(processed_events)
     }
 
     /// Process pulldown-cmark event stream sequentially
-    async fn process_events_sequentially<'a>(&mut self, content: &'a str) -> Result<Vec<Event<'a>>, Box<dyn std::error::Error>> {
+    async fn process_events_sequentially<'a>(&mut self, content: &'a str) -> Result<Vec<Event<'a>>, anyhow::Error> {
         let mut input_events: VecDeque<Event<'a>> = Parser::new(content).collect();
         let mut output_events = Vec::new();
         
@@ -109,7 +110,7 @@ impl<T: IpcClient> WalkthroughParser<T> {
         html: CowStr<'a>,
         input_events: &mut VecDeque<Event<'a>>,
         output_events: &mut Vec<Event<'a>>,
-    ) -> Result<(), Box<dyn std::error::Error>> {
+    ) -> Result<(), anyhow::Error> {
         // If this is a self-closing tag, handle it directly
         if html.contains("/>") {
             let xml_content = html.to_string();
@@ -181,7 +182,7 @@ impl<T: IpcClient> WalkthroughParser<T> {
         &mut self,
         input_events: &mut VecDeque<Event<'a>>,
         output_events: &mut Vec<Event<'a>>,
-    ) -> Result<(), Box<dyn std::error::Error>> {
+    ) -> Result<(), anyhow::Error> {
         let mut xml_content = String::new();
         
         // Collect all HTML events until End(HtmlBlock)
@@ -217,14 +218,14 @@ impl<T: IpcClient> WalkthroughParser<T> {
     }
 
     /// Render pulldown-cmark events back to markdown/HTML
-    fn render_events_to_markdown<'a>(events: Vec<Event<'a>>) -> Result<String, Box<dyn std::error::Error>> {
+    fn render_events_to_markdown<'a>(events: Vec<Event<'a>>) -> Result<String, anyhow::Error> {
         let mut output = String::new();
         html::push_html(&mut output, events.into_iter());
         Ok(output)
     }
 
     /// Resolve a single XML element with Dialect evaluation
-    async fn resolve_single_element(&mut self, element: XmlElement) -> Result<ResolvedXmlElement, Box<dyn std::error::Error>> {
+    async fn resolve_single_element(&mut self, element: XmlElement) -> Result<ResolvedXmlElement, anyhow::Error> {
         let (element_type, attributes, resolved_data) = match &element {
             XmlElement::Comment { location, icon, content: _ } => {
                 let mut attrs = HashMap::new();
@@ -234,7 +235,17 @@ impl<T: IpcClient> WalkthroughParser<T> {
                 
                 // Resolve Dialect expression for location
                 let resolved_data = if !location.is_empty() {
-                    match self.interpreter.evaluate(location).await {
+                    // Clone interpreter for thread safety
+                    let mut interpreter = self.interpreter.clone();
+                    let location_clone = location.clone();
+                    
+                    let result = tokio::task::spawn_blocking(move || {
+                        tokio::runtime::Handle::current().block_on(async move {
+                            interpreter.evaluate(&location_clone).await
+                        })
+                    }).await.map_err(|e| anyhow::anyhow!("Task execution failed: {}", e))?;
+                    
+                    match result {
                         Ok(result) => {
                             serde_json::json!({
                                 "locations": result,
@@ -308,7 +319,7 @@ impl<T: IpcClient> WalkthroughParser<T> {
         })
     }
 
-    fn parse_xml_element(&self, xml_text: &str) -> Result<XmlElement, Box<dyn std::error::Error>> {
+    fn parse_xml_element(&self, xml_text: &str) -> Result<XmlElement, anyhow::Error> {
         let mut reader = Reader::from_str(xml_text);
         reader.config_mut().trim_text(true);
         
@@ -369,7 +380,7 @@ impl<T: IpcClient> WalkthroughParser<T> {
                 message: content,
             }),
             "mermaid" => Ok(XmlElement::Mermaid { content }),
-            _ => Err(format!("Unknown XML element: {}", element_name).into()),
+            _ => Err(anyhow::anyhow!("Unknown XML element: {}", element_name)),
         }
     }
 

@@ -8,21 +8,13 @@ use serde::{Deserialize, Serialize};
 
 /// Parameters for the present-walkthrough MCP tool
 ///
-/// Walkthroughs are Dialect programs that execute dynamically to resolve locations
+/// Walkthroughs are markdown documents with embedded XML elements for interactive features
 // ANCHOR: present_walkthrough_params
 #[derive(Debug, Clone, Deserialize, Serialize, JsonSchema)]
 pub struct PresentWalkthroughParams {
-    /// Introduction section - Dialect program that evaluates to List
-    pub introduction: Option<Vec<serde_json::Value>>,
-    
-    /// Highlights section - Dialect program that evaluates to List  
-    pub highlights: Option<Vec<serde_json::Value>>,
-    
-    /// Changes section - Dialect program that evaluates to List
-    pub changes: Option<Vec<serde_json::Value>>,
-    
-    /// Actions section - Dialect program that evaluates to List
-    pub actions: Option<Vec<serde_json::Value>>,
+    /// Markdown content with embedded XML elements (comment, gitdiff, action, mermaid)
+    /// See dialectic guidance for XML element syntax and usage
+    pub content: String,
     
     /// Base directory path for resolving relative file references
     #[serde(rename = "baseUri")]

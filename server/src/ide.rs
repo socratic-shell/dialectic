@@ -516,14 +516,12 @@ impl<U: IpcClient> DialectFunction<U> for Action {
 
 /// Resolved walkthrough output from the `present_walkthrough` MCP tool.
 ///
-/// This is the processed result after executing all Dialect programs in the
-/// walkthrough sections and converting them to their resolved forms.
+/// Contains HTML content with resolved XML elements and Dialect expressions.
 #[derive(Serialize, Debug)]
 pub struct ResolvedWalkthrough {
-    pub introduction: Option<Vec<ResolvedWalkthroughElement>>,
-    pub highlights: Option<Vec<ResolvedWalkthroughElement>>,
-    pub changes: Option<Vec<ResolvedWalkthroughElement>>,
-    pub actions: Option<Vec<ResolvedWalkthroughElement>>,
+    /// HTML content with resolved XML elements (comment, gitdiff, action, mermaid)
+    pub content: String,
+    /// Base directory path for resolving relative file references
     pub base_uri: String,
 }
 

@@ -207,11 +207,17 @@ impl DialecticServer {
     /// Display a code walkthrough in VSCode
     ///
     /// Walkthroughs are structured guides with introduction, highlights, changes, and actions.
-    /// Uses Dialect programs for dynamic location resolution.
+    /// Display a code walkthrough in VSCode using markdown with embedded XML elements.
+    /// Accepts markdown content with special XML tags (comment, gitdiff, action, mermaid)
+    /// as described in the dialectic guidance documentation.
     // ANCHOR: present_walkthrough_tool
-    #[tool(description = "Display a code walkthrough in VSCode. \
-                       Walkthroughs are structured guides with introduction, highlights, changes, and actions. \
-                       Uses Dialect programs for dynamic location resolution.")]
+    #[tool(description = "Display a code walkthrough in VSCode using markdown with embedded XML elements. \
+                       Accepts markdown content with special XML tags: \
+                       <comment location=\"dialect_expr\" icon=\"icon\">content</comment>, \
+                       <gitdiff range=\"commit_range\" />, \
+                       <action button=\"text\">message</action>, \
+                       <mermaid>diagram</mermaid>. \
+                       See dialectic guidance for complete syntax and examples.")]
     async fn present_walkthrough(
         &self,
         Parameters(params): Parameters<PresentWalkthroughParams>,
@@ -222,26 +228,24 @@ impl DialecticServer {
             .send_log(
                 LogLevel::Debug,
                 format!(
-                    "Received present_walkthrough tool call with params: {:?}",
-                    params
+                    "Received present_walkthrough tool call with markdown content ({} chars)",
+                    params.content.len()
                 ),
             )
             .await;
 
-        // Execute Dialect programs to resolve locations and render walkthrough
+        // Parse markdown with XML elements and resolve Dialect expressions
+        let mut parser = crate::walkthrough_parser::WalkthroughParser::new(self.interpreter.clone());
+        let resolved_html = parser.parse_and_normalize(&params.content).await.map_err(|e| {
+            McpError::internal_error(
+                "Failed to parse walkthrough markdown",
+                Some(serde_json::json!({"error": e.to_string()})),
+            )
+        })?;
+
+        // Create resolved walkthrough with HTML content
         let resolved = crate::ide::ResolvedWalkthrough {
-            introduction: self
-                .process_walkthrough_elements(params.introduction.as_ref())
-                .await?,
-            highlights: self
-                .process_walkthrough_elements(params.highlights.as_ref())
-                .await?,
-            changes: self
-                .process_walkthrough_elements(params.changes.as_ref())
-                .await?,
-            actions: self
-                .process_walkthrough_elements(params.actions.as_ref())
-                .await?,
+            content: resolved_html,
             base_uri: params.base_uri.clone(),
         };
 
@@ -264,89 +268,6 @@ impl DialecticServer {
         Ok(CallToolResult::success(vec![Content::text(
             "Walkthrough successfully processed and presented in VSCode",
         )]))
-    }
-
-    /// Process a list of walkthrough elements
-    async fn process_walkthrough_elements(
-        &self,
-        elements: Option<&Vec<serde_json::Value>>,
-    ) -> Result<Option<Vec<crate::ide::ResolvedWalkthroughElement>>, McpError> {
-        match elements {
-            Some(elements) => {
-                let mut resolved_elements = Vec::new();
-                for element in elements {
-                    resolved_elements
-                        .push(self.process_walkthrough_element(element.clone()).await?);
-                }
-                Ok(Some(resolved_elements))
-            }
-            None => Ok(None),
-        }
-    }
-
-    /// Process a single walkthrough element, executing Dialect programs if needed
-    async fn process_walkthrough_element(
-        &self,
-        element: serde_json::Value,
-    ) -> Result<crate::ide::ResolvedWalkthroughElement, McpError> {
-        use crate::ide::ResolvedWalkthroughElement;
-
-        match element {
-            serde_json::Value::String(text) => {
-                // Process dialectic links manually since we're not going through deserializer
-                let processed_content = crate::ide::process_markdown_links(text);
-                Ok(ResolvedWalkthroughElement::Markdown(
-                    crate::ide::ResolvedMarkdownElement {
-                        markdown: processed_content,
-                    },
-                ))
-            }
-            serde_json::Value::Object(_) => {
-                // Clone interpreter and execute Dialect program (same pattern as ide_operation)
-                let mut interpreter = self.interpreter.clone();
-
-                let result = tokio::task::spawn_blocking(move || {
-                    tokio::runtime::Handle::current().block_on(async move {
-                        // Parse and evaluate the Dialect program string
-                        let program_str = element
-                            .as_str()
-                            .ok_or_else(|| anyhow::anyhow!("Expected string program"))?;
-                        interpreter.evaluate(program_str).await
-                    })
-                })
-                .await
-                .map_err(|e| {
-                    McpError::internal_error(
-                        "Task execution failed",
-                        Some(serde_json::json!({"error": e.to_string()})),
-                    )
-                })?
-                .map_err(|e| {
-                    McpError::internal_error(
-                        "Dialect execution failed",
-                        Some(serde_json::json!({"error": e.to_string()})),
-                    )
-                })?;
-
-                // Deserialize directly using serde(untagged)
-                serde_json::from_value(result.clone()).map_err(|e| {
-                    McpError::internal_error(
-                        format!(
-                            "Failed to deserialize as type `ResolvedWalkthroughElement`: {result}"
-                        ),
-                        Some(serde_json::json!({"error": e.to_string()})),
-                    )
-                })
-            }
-            _ => {
-                // Convert other types to markdown
-                Ok(ResolvedWalkthroughElement::Markdown(
-                    crate::ide::ResolvedMarkdownElement {
-                        markdown: element.to_string(),
-                    },
-                ))
-            }
-        }
     }
 
     /// Get the currently selected text from any active editor in VSCode

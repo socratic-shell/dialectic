@@ -8,6 +8,7 @@ use crate::{
 use serde::Deserialize;
 
 // Mock IPC client for testing
+#[derive(Clone)]
 pub struct MockIpcClient {
     symbols: BTreeMap<String, Vec<SymbolDef>>,
     references: BTreeMap<String, Vec<FileRange>>,
