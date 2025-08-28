@@ -1,89 +1,120 @@
-# Dialect language
+# Dialect Language
 
-The "Dialect" language is a variation of the Lambda calculus that is used to express and compose IDE operations. It is written in JSON:
+The Dialect language is a superset of JSON with function call syntax for expressing and composing IDE operations. Any valid JSON is also valid Dialect.
+
+## Design Goals
+
+Dialect is designed to be **LLM-friendly** - the syntax should feel natural and familiar to language models, matching the kind of pseudo-code they would generate intuitively:
+
+- **Function call syntax**: `findDefinitions("MyClass")` reads like natural pseudo-code
+- **JSON superset**: We accept JSON augmented with function calls but we are also tolerant of trailing commas, unquoted field names
+
+The goal is to minimize the gap between "what an LLM wants to express" and "valid Dialect syntax", making code generation more reliable and the language more intuitive.
+
 ## Quick Start
 
-Dialect programs are JSON expressions that compose IDE operations. Here are the most common patterns:
-
 **Find where a symbol is defined:**
-```json
-{"findDefinitions": "MyFunction"}
+```
+findDefinitions("MyFunction")
 ```
 
 **Find all references to a symbol:**
-```json
-{"findReferences": "MyClass"}
+```
+findReferences("MyClass")
 ```
 
 **Get information about a symbol:**
-```json
-{"getSymbolInfo": "methodName"}
+```
+getSymbolInfo("methodName")
 ```
 
-**Basic composition - find references to all definitions:**
-```json
-{"findReferences": {"findDefinitions": "MyFunction"}}
+**Composition - find references to all definitions:**
 ```
-
-These expressions are passed to the `ide_operation` tool, which executes them and returns structured results with file locations and symbol information.
+findReferences(findDefinitions("MyFunction"))
+```
 
 ## Grammar
 
 ```
-Expr = ExprAtomic
-     | `{` Name `:` `{` Name `:` Expr ... `}` `}`
-     | `{` Name `:` ExprAtomic `}`
+Program = Expr
 
-ExprAtomic = number
-           | boolean
-           | `null`
-           | `undefined`
-           | string
-           | `[` Expr... `]`
+Expr = FunctionCall
+     | JsonObject  
+     | JsonArray
+     | JsonAtomic
 
-Name = string
+FunctionCall = Identifier "(" ArgumentList? ")"
 
-// Here: capitalized things are nonterminals.
-//
-// number, boolean, string are JSON terminals.
-//
-// `foo` indicates the text `foo`.
-//
-// And ... indicates a comma-separated list.
+ArgumentList = Expr ("," Expr)* ","?
+
+JsonObject = "{" (JsonProperty ("," JsonProperty)* ","?)? "}"
+JsonProperty = (String | Identifier) ":" Expr
+
+JsonArray = "[" (Expr ("," Expr)* ","?)? "]"
+
+JsonAtomic = Number | String | Boolean | "null" | "undefined"
+
+Identifier = [a-zA-Z_][a-zA-Z0-9_]*
+String = "\"" ... "\""  // JSON string literal
+Number = ...            // JSON number literal  
+Boolean = "true" | "false"
 ```
 
-## Dynamic semantics
+## Function Signatures
+
+Functions are called with positional arguments in a defined order:
+
+### Core IDE Operations
+- `findDefinitions(symbol: string)` - Find where a symbol is defined
+- `findReferences(symbol: string)` - Find all references to a symbol  
+- `getSymbolInfo(symbol: string)` - Get detailed symbol information
+
+### Search Operations  
+- `searchFiles(pattern: string, path?: string)` - Search for text patterns
+- `findFiles(namePattern: string, path?: string)` - Find files by name
+
+## Dynamic Semantics
 
 A Dialect expression `E` evaluates to a JSON value:
 
-* If `E = [ Expr... ]` a list, then
-    * evaluate `Expr...` to values `V...`
-    * and `E` evaluates to `[ V... ]`
-* If `E = { Name_f: { Name_a: Expr ... }}`, then
-    * evaluate `Expr...` to values `V...`
-    * create an object `{ Name_a: V ... }` where each argument name is paired with the value of its expression
-    * lookup the function `Name_f` and call it with the given arguments
-* If `E = { Name_f: ExprAtomic }`, then
-    * lookup the function `Name_f` and check whether it defaults a default argument `Name_a`
-    * if so, evaluate `{ Name_f: { Name_a: ExprAtomic }}` instead
-* If `E = number | string | null | undefined`, evaluate to itself
+### Function Calls
+* If `E = Identifier(Expr...)`, then:
+    * Evaluate each `Expr` to values `V...`
+    * Look up the function `Identifier` 
+    * Call the function with positional arguments `V...`
+    * Return the function's result
 
-The interpreter is defined in `dialect.rs`.
+### JSON Values
+* If `E = [ Expr... ]`, evaluate each `Expr` to `V...` and return `[ V... ]`
+* If `E = { Property... }`, evaluate each property value and return the object
+* If `E = number | string | boolean | null | undefined`, evaluate to itself
 
-## Defining functions
+## Implementation
 
-Functions are defined in Rust by implementing the `DialectFunction` trait:
+The parser is implemented in `dialect/parser.rs`. The interpreter in `dialect.rs` handles function dispatch.
+
+### Defining Functions
+
+Functions implement the `DialectFunction` trait with parameter order specification:
 
 ```rust
 {{#include ../../server/src/dialect.rs:dialect_function_trait}}
 ```
 
-The `Output` will be serialized into JSON and passed along.
-
-Some functions evaluate to instances of themselves, these represent "values"
-(as in the lambda calculus). They can implement `DialectValue` instead:
+Functions that represent values can implement `DialectValue` instead:
 
 ```rust
 {{#include ../../server/src/dialect.rs:dialect_value_trait}}
+```
+
+## Error Handling
+
+The parser provides detailed error messages with source location indicators:
+```
+error: Expected ')'
+  |
+1 | findDefinitions("MyClass"
+  |                          ^
+  |
 ```
 
