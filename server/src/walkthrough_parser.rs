@@ -373,6 +373,7 @@ mod tests {
     use super::*;
     use crate::ide::test::MockIpcClient;
     use crate::ide::{FindDefinitions, FindReferences};
+    use expect_test::{expect, Expect};
 
     fn create_test_parser() -> WalkthroughParser<MockIpcClient> {
         let mut interpreter = DialectInterpreter::new(MockIpcClient::new());
@@ -381,6 +382,89 @@ mod tests {
         WalkthroughParser::new(interpreter)
     }
 
+    fn check(input: &str, expect: Expect) {
+        let rt = tokio::runtime::Runtime::new().unwrap();
+        let mut parser = create_test_parser();
+        let result = rt.block_on(parser.parse_and_normalize(input)).unwrap();
+        expect.assert_eq(&result);
+    }
+
+    #[test]
+    fn test_simple_comment_resolution() {
+        check(
+            r#"<comment location="findDefinitions(`User`)">User struct</comment>"#,
+            expect![[r#"
+                <p><comment data-resolved='{"dialect_expression":"findDefinitions(`User`)","locations":[{"definedAt":{"content":"struct User {","end":{"column":4,"line":10},"path":"src/models.rs","start":{"column":0,"line":10}},"kind":"struct","name":"User"}]}'>User struct</comment></p>
+            "#]],
+        );
+    }
+
+    #[test]
+    fn test_self_closing_gitdiff() {
+        check(
+            r#"<gitdiff range="HEAD~1..HEAD" />"#,
+            expect![[r#"<gitdiff data-resolved='{"range":"HEAD~1..HEAD","type":"gitdiff"}' />"#]],
+        );
+    }
+
+    #[test]
+    fn test_action_element() {
+        check(
+            r#"<action button="Next Step">What should we do next?</action>"#,
+            expect![[r#"
+                <p><action data-resolved='{"button_text":"Next Step"}' button="Next Step">What should we do next?</action></p>
+            "#]],
+        );
+    }
+
+    #[test]
+    fn test_full_walkthrough_with_mixed_content() {
+        check(
+            r#"# My Walkthrough
+
+This is some markdown content.
+
+<comment location="findDefinitions(`User`)" icon="lightbulb">
+This explains the User struct
+</comment>
+
+More markdown here.
+
+<gitdiff range="HEAD~1..HEAD" />
+
+<action button="Next Step">What should we do next?</action>"#,
+            expect![[r#"
+                <h1>My Walkthrough</h1>
+                <p>This is some markdown content.</p>
+                <comment data-resolved='{"dialect_expression":"findDefinitions(`User`)","locations":[{"definedAt":{"content":"struct User {","end":{"column":4,"line":10},"path":"src/models.rs","start":{"column":0,"line":10}},"kind":"struct","name":"User"}]}' icon="lightbulb">This explains the User struct</comment>
+                <p>More markdown here.</p>
+                <gitdiff data-resolved='{"range":"HEAD~1..HEAD","type":"gitdiff"}' />
+                <p><action data-resolved='{"button_text":"Next Step"}' button="Next Step">What should we do next?</action></p>
+            "#]],
+        );
+    }
+
+    #[test]
+    fn test_markdown_structure_preservation() {
+        check(
+            r#"# Title
+Some text before
+<comment location="findDefinitions(`User`)">User comment</comment>
+Some text after
+<gitdiff range="HEAD" />
+More text"#,
+            expect![[r#"
+                <h1>Title</h1>
+                <p>Some text before
+                <comment data-resolved='{"dialect_expression":"findDefinitions(`User`)","locations":[{"definedAt":{"content":"struct User {","end":{"column":4,"line":10},"path":"src/models.rs","start":{"column":0,"line":10}},"kind":"struct","name":"User"}]}'>User comment</comment>
+                Some text after
+                <gitdiff data-resolved='{"range":"HEAD","type":"gitdiff"}' />
+                More text</p>
+            "#]],
+        );
+    }
+
+    // Keep original XML parsing tests
     #[test]
     fn test_parse_comment_element() {
         let parser = create_test_parser();
@@ -446,70 +530,5 @@ mod tests {
             }
             _ => panic!("Expected Mermaid element"),
         }
-    }
-
-    #[tokio::test]
-    async fn test_full_walkthrough_parsing_with_dialect() {
-        let mut parser = create_test_parser();
-        let input = r#"# My Walkthrough
-
-This is some markdown content.
-
-<comment location="findDefinitions(`User`)" icon="lightbulb">
-This explains the User struct
-</comment>
-
-More markdown here.
-
-<gitdiff range="HEAD~1..HEAD" />
-
-<action button="Next Step">What should we do next?</action>"#;
-
-        let result = parser.parse_and_normalize(input).await.unwrap();
-        
-        // Should contain normalized XML with data-resolved attributes
-        assert!(result.contains("data-resolved="));
-        assert!(result.contains("My Walkthrough")); // HTML version: <h1>My Walkthrough</h1>
-        assert!(result.contains("This is some markdown content."));
-        assert!(result.contains("More markdown here."));
-        
-        // Should contain resolved location data from MockIpcClient
-        assert!(result.contains("src/models.rs") || result.contains("User"));
-    }
-
-    #[tokio::test]
-    async fn test_dialect_resolution() {
-        let mut parser = create_test_parser();
-        let input = r#"<comment location="findDefinitions(`User`)">User struct</comment>"#;
-
-        let result = parser.parse_and_normalize(input).await.unwrap();
-        
-        // Should contain resolved data from MockIpcClient
-        assert!(result.contains("data-resolved="));
-        // MockIpcClient returns User definition at src/models.rs:10
-        assert!(result.contains("src/models.rs") || result.contains("User"));
-    }
-
-    #[tokio::test]
-    async fn test_in_place_transformation() {
-        let mut parser = create_test_parser();
-        let input = r#"# Title
-Some text before
-<comment location="findDefinitions(`User`)">User comment</comment>
-Some text after
-<gitdiff range="HEAD" />
-More text"#;
-
-        let result = parser.parse_and_normalize(input).await.unwrap();
-        
-        // Should preserve markdown structure (as HTML)
-        assert!(result.contains("Title")); // HTML version: <h1>Title</h1>
-        assert!(result.contains("Some text before"));
-        assert!(result.contains("Some text after"));
-        assert!(result.contains("More text"));
-        
-        // Should transform XML elements in place
-        assert!(result.contains("data-resolved="));
-        assert!(!result.contains("__XML_PLACEHOLDER_"));
     }
 }
