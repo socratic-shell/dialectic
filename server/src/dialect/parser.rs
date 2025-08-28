@@ -227,7 +227,7 @@ fn tokenize<'a>(input: &'a str) -> Result<Vec<Token<'a>>, ParseError> {
             continue;
         }
 
-        if start_ch == '"' || start_ch == '\'' {
+        if start_ch == '"' || start_ch == '\'' || start_ch == '`' {
             let mut s = String::new();
             let mut end_index = start_index;
             while let Some((next_index, next_ch)) = chars.next() {
@@ -244,6 +244,7 @@ fn tokenize<'a>(input: &'a str) -> Result<Vec<Token<'a>>, ParseError> {
                         Some((_, 'r')) => s.push('\r'),
                         Some((_, '"')) => s.push('"'),
                         Some((_, '\'')) => s.push('\''),
+                        Some((_, '`')) => s.push('`'),
                         Some((_, '\\')) => s.push('\\'),
                         Some((_, c)) => {
                             return Err(ParseError::InvalidEscape {
@@ -377,6 +378,23 @@ mod tests {
                         ),
                         String(
                             "hello",
+                        ),
+                    ],
+                )
+            "#]],
+        );
+    }
+
+    #[test]
+    fn test_backtick_strings() {
+        check_parse(
+            "findDefinition(`validateToken`)",
+            expect![[r#"
+                Call(
+                    "findDefinition",
+                    [
+                        String(
+                            "validateToken",
                         ),
                     ],
                 )
