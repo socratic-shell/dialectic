@@ -8,6 +8,7 @@ mod ide;
 mod ipc;
 mod pid_discovery;
 mod reference_store;
+mod walkthrough_parser;
 mod server;
 mod types;
 pub mod synthetic_pr;
