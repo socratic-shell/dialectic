@@ -79,7 +79,7 @@ flowchart TD
 
 ### Comments
 
-Place contextual comments at specific code locations to highlight important details, decisions, or areas needing attention:
+Place contextual comments at specific code locations to highlight important details, decisions, or areas needing attention. Users can "reply" to comments using the GUI and have those messages forwarded to you in the chat.
 
 ```xml
 <comment location="DIALECT_EXPRESSION" icon="question">
@@ -102,8 +102,8 @@ Can include **formatting** and [links](https://example.com).
 **Use when:** 
 - Explaining complex logic or algorithms
 - Highlighting important design decisions
-- Pointing out potential issues or areas for improvement
-- Providing context that isn't obvious from the code
+- Pointing out areas you were uncertain about how to do something, areas where you see potential flaws, or areas where you deviated from the plan
+- Pointing out "// TODO" items and other placeholders
 
 ### Git Diffs
 
@@ -121,7 +121,7 @@ Embed git diffs showing code changes:
 
 **Content:** Self-closing element that renders as interactive diff tree
 
-**Use when:** Showing what files changed and providing context for the modifications. Keep ranges focused (1-3 commits typically) to avoid overwhelming users.
+**Use when:** The most common use is to show the code that you recently authored. Keep ranges focused on the commits that you created in this case. Can also be used when discussing gitdiffs for any other reason.
 
 ### Actions
 
