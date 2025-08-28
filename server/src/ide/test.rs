@@ -395,14 +395,7 @@ async fn test_nested_composition() {
     interpreter.add_function::<Add>();
     interpreter.add_function::<Uppercase>();
 
-    // Use string concatenation instead of mixing types
-    let input = serde_json::json!({
-        "uppercase": {
-            "text": "hello world"
-        }
-    });
-
-    let result = interpreter.evaluate(input).await.unwrap();
+    let result = interpreter.evaluate("uppercase(\"hello world\")").await.unwrap();
     assert_eq!(result, serde_json::json!("HELLO WORLD"));
 }
 
@@ -413,21 +406,21 @@ async fn test_literal_values() {
     // Test that literal values pass through unchanged
     assert_eq!(
         interpreter
-            .evaluate(serde_json::json!("hello"))
+            .evaluate("\"hello\"")
             .await
             .unwrap(),
         serde_json::json!("hello")
     );
     assert_eq!(
-        interpreter.evaluate(serde_json::json!(42)).await.unwrap(),
+        interpreter.evaluate("42").await.unwrap(),
         serde_json::json!(42)
     );
     assert_eq!(
-        interpreter.evaluate(serde_json::json!(true)).await.unwrap(),
+        interpreter.evaluate("true").await.unwrap(),
         serde_json::json!(true)
     );
     assert_eq!(
-        interpreter.evaluate(serde_json::json!(null)).await.unwrap(),
+        interpreter.evaluate("null").await.unwrap(),
         serde_json::json!(null)
     );
 }
@@ -437,13 +430,7 @@ async fn test_array_evaluation() {
     let mut interpreter = DialectInterpreter::new(());
     interpreter.add_function::<Add>();
 
-    let input = serde_json::json!([
-        {"add": {"a": 1, "b": 2}},
-        {"add": {"a": 3, "b": 4}},
-        "literal"
-    ]);
-
-    let result = interpreter.evaluate(input).await.unwrap();
+    let result = interpreter.evaluate("[add(1, 2), add(3, 4), \"literal\"]").await.unwrap();
     assert_eq!(result, serde_json::json!([3, 7, "literal"]));
 }
 
@@ -451,8 +438,7 @@ async fn test_array_evaluation() {
 async fn test_unknown_function_error() {
     let mut interpreter = DialectInterpreter::new(());
 
-    let input = serde_json::json!({"unknown": {"arg": "value"}});
-    let result = interpreter.evaluate(input).await;
+    let result = interpreter.evaluate("unknown(\"value\")").await;
 
     assert!(result.is_err());
     assert!(
@@ -467,14 +453,12 @@ async fn test_unknown_function_error() {
 async fn test_invalid_function_format() {
     let mut interpreter = DialectInterpreter::new(());
 
-    // Multiple keys in object
-    let input = serde_json::json!({"func1": {}, "func2": {}});
-    let result = interpreter.evaluate(input).await;
+    // Invalid syntax should cause parse errors
+    let result = interpreter.evaluate("func1() func2()").await;  // Invalid: two function calls without array
     assert!(result.is_err());
 
-    // Function with non-object argument
-    let input = serde_json::json!({"func": "not an object"});
-    let result = interpreter.evaluate(input).await;
+    // Function with invalid syntax
+    let result = interpreter.evaluate("func(").await;  // Unclosed parenthesis
     assert!(result.is_err());
 }
 
@@ -488,15 +472,7 @@ async fn test_search_function() {
     interpreter.add_function::<FindReferences>();
     interpreter.add_function::<crate::ide::Search>();
     
-    // Test search for a pattern in a nonexistent file
-    let program = serde_json::json!({
-        "search": {
-            "path": "nonexistent_file.rs", 
-            "regex": "fn\\s+\\w+"
-        }
-    });
-    
-    let result = interpreter.evaluate(program).await;
+    let result = interpreter.evaluate("search(\"nonexistent_file.rs\", \"fn\\\\s+\\\\w+\")").await;
     
     // Should return empty results since file doesn't exist
     expect![[r#"
@@ -531,14 +507,7 @@ async fn test_gitdiff_function() {
     let original_dir = std::env::current_dir().unwrap();
     std::env::set_current_dir(temp_repo.path()).unwrap();
     
-    // Test gitdiff for last commit (HEAD~1 to HEAD)
-    let program = serde_json::json!({
-        "gitdiff": {
-            "commit_range": "HEAD~1..HEAD"
-        }
-    });
-    
-    let result = interpreter.evaluate(program).await;
+    let result = interpreter.evaluate("gitDiff(\"HEAD~1..HEAD\")").await;
     
     // Restore original directory
     std::env::set_current_dir(original_dir).unwrap();
