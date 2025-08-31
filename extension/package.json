@@ -79,6 +79,11 @@
           "id": "dialectic.walkthrough",
           "name": "Walkthrough",
           "type": "webview"
+        },
+        {
+          "id": "dialectic.syntheticPR",
+          "name": "Synthetic PR",
+          "type": "tree"
         }
       ]
     },
@@ -121,6 +126,7 @@
     "ts-loader": "^9.4.0"
   },
   "dependencies": {
-    "markdown-it": "^14.1.0"
+    "markdown-it": "^14.1.0",
+    "mermaid": "^10.9.1"
   }
 }
