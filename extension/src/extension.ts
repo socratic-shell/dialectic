@@ -60,10 +60,7 @@ interface SyntheticPRPayload {
 }
 
 interface PresentWalkthroughPayload {
-    introduction?: WalkthroughElement[];
-    highlights?: WalkthroughElement[];
-    changes?: WalkthroughElement[];
-    actions?: WalkthroughElement[];
+    content: string;  // HTML content with resolved XML elements
     base_uri: string;
 }
 
@@ -269,20 +266,15 @@ export class DaemonClient implements vscode.Disposable {
                 const walkthroughPayload = message.payload as PresentWalkthroughPayload;
 
                 this.outputChannel.appendLine(`Received walkthrough with base_uri: ${walkthroughPayload.base_uri}`);
-                this.outputChannel.appendLine(`Walkthrough sections: ${Object.keys(walkthroughPayload).filter(k => k !== 'base_uri' && walkthroughPayload[k as keyof PresentWalkthroughPayload]).join(', ')}`);
+                this.outputChannel.appendLine(`Content length: ${walkthroughPayload.content.length} chars`);
 
                 // Set base URI for file resolution
                 if (walkthroughPayload.base_uri) {
                     this.walkthroughProvider.setBaseUri(walkthroughPayload.base_uri);
                 }
 
-                // Show walkthrough in webview
-                this.walkthroughProvider.showWalkthrough({
-                    introduction: walkthroughPayload.introduction,
-                    highlights: walkthroughPayload.highlights,
-                    changes: walkthroughPayload.changes,
-                    actions: walkthroughPayload.actions
-                });
+                // Show walkthrough HTML content in webview
+                this.walkthroughProvider.showWalkthroughHtml(walkthroughPayload.content);
 
                 // Send success response back through daemon
                 this.sendResponse(message.id, { success: true });
