@@ -4,6 +4,7 @@ use quick_xml::Reader;
 use serde::{Deserialize, Serialize};
 use std::collections::{HashMap, VecDeque};
 use anyhow::Result;
+use uuid::Uuid;
 
 use crate::dialect::{DialectInterpreter};
 use crate::ide::IpcClient;
@@ -414,27 +415,123 @@ impl<T: IpcClient + Clone + 'static> WalkthroughParser<T> {
         }
     }
 
-    /// Create normalized XML with resolved data
+    /// Create final HTML element with resolved data
     fn create_normalized_xml(&self, resolved: &ResolvedXmlElement) -> String {
-        let mut attrs = String::new();
-        
-        // Add resolved data
-        let resolved_json = serde_json::to_string(&resolved.resolved_data).unwrap_or_default();
-        attrs.push_str(&format!(" data-resolved='{}'", resolved_json));
-        
-        // Add original attributes
-        for (key, value) in &resolved.attributes {
-            attrs.push_str(&format!(" {}=\"{}\"", key, value));
-        }
+        match resolved.element_type.as_str() {
+            "comment" => self.create_comment_html(resolved),
+            "action" => self.create_action_html(resolved),
+            "gitdiff" => self.create_gitdiff_html(resolved),
+            "mermaid" => self.create_mermaid_html(resolved),
+            _ => {
+                // Fallback to original XML format for unknown types
+                let mut attrs = String::new();
+                let resolved_json = serde_json::to_string(&resolved.resolved_data).unwrap_or_default();
+                attrs.push_str(&format!(" data-resolved='{}'", resolved_json));
+                
+                for (key, value) in &resolved.attributes {
+                    attrs.push_str(&format!(" {}=\"{}\"", key, value));
+                }
 
-        if resolved.content.is_empty() {
-            format!("<{}{} />", resolved.element_type, attrs)
-        } else {
-            format!(
-                "<{}{}>{}</{}>",
-                resolved.element_type, attrs, resolved.content, resolved.element_type
-            )
+                if resolved.content.is_empty() {
+                    format!("<{}{} />", resolved.element_type, attrs)
+                } else {
+                    format!(
+                        "<{}{}>{}</{}>",
+                        resolved.element_type, attrs, resolved.content, resolved.element_type
+                    )
+                }
+            }
         }
+    }
+
+    /// Generate HTML for comment elements
+    fn create_comment_html(&self, resolved: &ResolvedXmlElement) -> String {
+        // Extract locations from resolved data
+        let empty_vec = vec![];
+        let locations = resolved.resolved_data.get("locations")
+            .and_then(|v| v.as_array())
+            .unwrap_or(&empty_vec);
+
+        // Generate comment data for click handler
+        let comment_data = serde_json::json!({
+            "id": format!("comment-{}", Uuid::new_v4()),
+            "locations": locations,
+            "comment": [&resolved.content]
+        });
+
+        // Get icon from attributes
+        let default_icon = "comment".to_string();
+        let icon = resolved.attributes.get("icon").unwrap_or(&default_icon);
+        let icon_emoji = match icon.as_str() {
+            "info" => "ℹ️",
+            "lightbulb" => "💡",
+            "gear" => "⚙️",
+            "warning" => "⚠️",
+            "question" => "❓",
+            _ => "💬",
+        };
+
+        // Generate location display
+        let location_display = if locations.len() == 1 {
+            // Single location - show file:line
+            if let Some(loc) = locations[0].as_object() {
+                let path = loc.get("path").and_then(|v| v.as_str()).unwrap_or("unknown");
+                let line = loc.get("start").and_then(|v| v.get("line")).and_then(|v| v.as_u64()).unwrap_or(1);
+                format!("{}:{}", path, line)
+            } else {
+                "unknown location".to_string()
+            }
+        } else if locations.len() > 1 {
+            // Multiple locations - show count
+            format!("({} possible locations) 🔍", locations.len())
+        } else {
+            "no location".to_string()
+        };
+
+        let comment_data_encoded = serde_json::to_string(&comment_data).unwrap_or_default();
+        let comment_data_escaped = comment_data_encoded.replace('"', "&quot;");
+
+        format!(
+            r#"<div class="comment-item" data-comment="{}" style="cursor: pointer; border: 1px solid var(--vscode-panel-border); border-radius: 4px; padding: 8px; margin: 8px 0; background-color: var(--vscode-editor-background);">
+                <div style="display: flex; align-items: flex-start;">
+                    <div class="comment-icon" style="margin-right: 8px; font-size: 16px;">{}</div>
+                    <div class="comment-content" style="flex: 1;">
+                        <div class="comment-locations" style="font-weight: 500; color: var(--vscode-textLink-foreground); margin-bottom: 4px; font-family: var(--vscode-editor-font-family); font-size: 0.9em;">{}</div>
+                        <div class="comment-text" style="color: var(--vscode-foreground); font-size: 0.9em;">{}</div>
+                    </div>
+                </div>
+            </div>"#,
+            comment_data_escaped, icon_emoji, location_display, resolved.content
+        )
+    }
+
+    /// Generate HTML for action elements
+    fn create_action_html(&self, resolved: &ResolvedXmlElement) -> String {
+        let default_button = "Action".to_string();
+        let button_text = resolved.attributes.get("button").unwrap_or(&default_button);
+        let tell_agent = resolved.content.replace('"', "&quot;");
+
+        format!(
+            r#"<button class="action-button" data-tell-agent="{}" style="background-color: var(--vscode-button-background); color: var(--vscode-button-foreground); border: none; padding: 8px 16px; border-radius: 4px; cursor: pointer; margin: 8px 0; font-size: 0.9em;">{}</button>"#,
+            tell_agent, button_text
+        )
+    }
+
+    /// Generate HTML for gitdiff elements
+    fn create_gitdiff_html(&self, resolved: &ResolvedXmlElement) -> String {
+        // For now, return a placeholder - we'll implement this properly later
+        format!(
+            r#"<div class="gitdiff-container" style="border: 1px solid var(--vscode-panel-border); border-radius: 4px; margin: 8px 0; background-color: var(--vscode-editor-background);">
+                <div style="padding: 12px; color: var(--vscode-descriptionForeground);">GitDiff rendering: {}</div>
+            </div>"#,
+            resolved.resolved_data.get("range").and_then(|v| v.as_str()).unwrap_or("unknown")
+        )
+    }
+
+    /// Generate HTML for mermaid elements
+    fn create_mermaid_html(&self, resolved: &ResolvedXmlElement) -> String {
+        // Keep mermaid elements as-is for client-side processing
+        format!("<mermaid>{}</mermaid>", resolved.content)
     }
 }
 

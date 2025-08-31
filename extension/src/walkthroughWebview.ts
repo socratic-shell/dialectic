@@ -72,6 +72,7 @@ export class WalkthroughWebviewProvider implements vscode.WebviewViewProvider {
     private baseUri?: vscode.Uri;
     private diffContentProvider: WalkthroughDiffContentProvider;
     private currentWalkthrough?: WalkthroughData;
+    private offscreenHtmlContent?: string;
     private placementMemory = new Map<string, PlacementState>(); // Unified placement memory
     private commentController?: vscode.CommentController;
     private commentThreads = new Map<string, vscode.CommentThread>(); // Track comment threads by comment ID
@@ -204,6 +205,7 @@ export class WalkthroughWebviewProvider implements vscode.WebviewViewProvider {
                 break;
             case 'ready':
                 console.log('Walkthrough webview ready');
+                this.bus.outputChannel.appendLine(`[WALKTHROUGH] Webview reported ready`);
                 break;
         }
     }
@@ -673,12 +675,20 @@ export class WalkthroughWebviewProvider implements vscode.WebviewViewProvider {
         _token: vscode.CancellationToken,
     ) {
         console.log('WalkthroughWebviewProvider.resolveWebviewView called');
+        this.bus.outputChannel.appendLine('[WALKTHROUGH] resolveWebviewView called');
+        console.log('Current offscreenHtmlContent length:', this.offscreenHtmlContent?.length || 0);
+        this.bus.outputChannel.appendLine(`[WALKTHROUGH] Current offscreenHtmlContent length: ${this.offscreenHtmlContent?.length || 0}`);
+        
         this._view = webviewView;
 
         webviewView.webview.options = {
             enableScripts: true,
             localResourceRoots: [this._extensionUri]
         };
+        
+        // Note: retainContextWhenHidden is not available on WebviewView
+        // The webview will be recreated when hidden/shown, so we rely on
+        // the offscreenHtmlContent mechanism to restore content
 
         // Handle messages from webview
         webviewView.webview.onDidReceiveMessage(
@@ -689,6 +699,50 @@ export class WalkthroughWebviewProvider implements vscode.WebviewViewProvider {
         console.log('Setting webview HTML');
         webviewView.webview.html = this._getHtmlForWebview(webviewView.webview);
         console.log('Webview HTML set, webview should be ready');
+
+        // Send any offscreen HTML content - with small delay to ensure webview is ready
+        if (this.offscreenHtmlContent) {
+            console.log('Sending offscreen HTML content');
+            this.bus.outputChannel.appendLine('[WALKTHROUGH] Sending offscreen HTML content');
+            
+            // Small delay to ensure webview is fully initialized
+            setTimeout(() => {
+                console.log('Posting offscreen content to webview (delayed)');
+                this.bus.outputChannel.appendLine('[WALKTHROUGH] Posting offscreen content to webview (delayed)');
+                webviewView.webview.postMessage({
+                    type: 'showWalkthroughHtml',
+                    content: this.offscreenHtmlContent!
+                });
+            }, 100);
+            // Don't clear offscreenHtmlContent - keep it for future webview recreations
+        } else {
+            console.log('No offscreen HTML content to restore');
+            this.bus.outputChannel.appendLine('[WALKTHROUGH] No offscreen HTML content to restore');
+        }
+    }
+
+    public showWalkthroughHtml(htmlContent: string) {
+        console.log('WalkthroughWebviewProvider.showWalkthroughHtml called with content length:', htmlContent.length);
+        this.bus.outputChannel.appendLine(`[WALKTHROUGH] showWalkthroughHtml called with ${htmlContent.length} chars`);
+
+        // Always store the content so it persists across webview dispose/recreate cycles
+        this.offscreenHtmlContent = htmlContent;
+
+        if (this._view) {
+            console.log('Webview exists, showing and posting HTML content');
+            this.bus.outputChannel.appendLine(`[WALKTHROUGH] Webview exists, posting message to webview`);
+            this._view.show?.(true);
+
+            // Send HTML content directly to webview
+            this._view.webview.postMessage({
+                type: 'showWalkthroughHtml',
+                content: htmlContent
+            });
+            this.bus.outputChannel.appendLine(`[WALKTHROUGH] Message posted to webview successfully`);
+        } else {
+            console.log('No webview available, content stored for when webview becomes available');
+            this.bus.outputChannel.appendLine(`[WALKTHROUGH] No webview available, content stored as pending`);
+        }
     }
 
     public showWalkthrough(walkthrough: WalkthroughData) {
@@ -868,7 +922,7 @@ export class WalkthroughWebviewProvider implements vscode.WebviewViewProvider {
         });
     }
 
-    private _getHtmlForWebview(webview: vscode.Webview) {
+    private _getHtmlForWebview(_webview: vscode.Webview) {
         const nonce = crypto.randomBytes(16).toString('base64');
 
         let html = `<!DOCTYPE html>
@@ -876,7 +930,7 @@ export class WalkthroughWebviewProvider implements vscode.WebviewViewProvider {
             <head>
                 <meta charset="UTF-8">
                 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-                <meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src 'unsafe-inline'; script-src 'nonce-${nonce}';">
+                <meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src 'unsafe-inline'; script-src 'nonce-${nonce}' https://cdn.jsdelivr.net;">
                 <title>Walkthrough</title>
                 <style>
                     body {
@@ -1063,6 +1117,20 @@ export class WalkthroughWebviewProvider implements vscode.WebviewViewProvider {
                     .placement-icon:hover {
                         opacity: 1;
                     }
+                    
+                    /* Mermaid diagram styles */
+                    .mermaid-container {
+                        margin: 16px 0;
+                        text-align: center;
+                        background-color: var(--vscode-editor-background);
+                        border: 1px solid var(--vscode-panel-border);
+                        border-radius: 4px;
+                        padding: 16px;
+                    }
+                    
+                    .mermaid {
+                        background-color: transparent !important;
+                    }
                 </style>
             </head>
             <body>
@@ -1073,10 +1141,160 @@ export class WalkthroughWebviewProvider implements vscode.WebviewViewProvider {
                 <div id="content">
                     <div class="empty-state">No walkthrough loaded</div>
                 </div>
+                <script src="https://cdn.jsdelivr.net/npm/mermaid@10.9.1/dist/mermaid.min.js"></script>
                 <script nonce="${nonce}">
                     console.log('Walkthrough webview JavaScript loaded');
                     const vscode = acquireVsCodeApi();
                     console.log('VSCode API acquired');
+                    
+                    // State management for webview interaction persistence
+                    function saveOffscreenState() {
+                        const state = {
+                            scrollPosition: window.scrollY,
+                            timestamp: Date.now()
+                        };
+                        vscode.setState(state);
+                        console.log('[STATE] Saved offscreen state:', state);
+                    }
+                    
+                    function restoreOffscreenState() {
+                        const state = vscode.getState();
+                        if (state && state.scrollPosition !== undefined) {
+                            console.log('[STATE] Restoring offscreen state:', state);
+                            // Use requestAnimationFrame to ensure content is rendered first
+                            requestAnimationFrame(() => {
+                                window.scrollTo(0, state.scrollPosition);
+                                console.log('[STATE] Scroll position restored to:', state.scrollPosition);
+                            });
+                        } else {
+                            console.log('[STATE] No offscreen state to restore');
+                        }
+                    }
+                    
+                    // Save state on scroll (throttled to avoid excessive saving)
+                    let scrollTimeout;
+                    window.addEventListener('scroll', () => {
+                        if (scrollTimeout) clearTimeout(scrollTimeout);
+                        scrollTimeout = setTimeout(saveOffscreenState, 100);
+                    });
+                    
+                    // Initialize mermaid with VSCode theme colors
+                    function initializeMermaidWithTheme() {
+                        if (typeof mermaid === 'undefined') {
+                            console.warn('Mermaid library not loaded');
+                            return;
+                        }
+                        
+                        // Get current VSCode theme colors
+                        const computedStyles = getComputedStyle(document.body);
+                        const primaryColor = computedStyles.getPropertyValue('--vscode-textLink-foreground').trim() || '#0078d4';
+                        const primaryTextColor = computedStyles.getPropertyValue('--vscode-foreground').trim() || '#1f1f1f';
+                        const primaryBorderColor = computedStyles.getPropertyValue('--vscode-panel-border').trim() || '#e1e1e1';
+                        const lineColor = computedStyles.getPropertyValue('--vscode-panel-border').trim() || '#666666';
+                        const secondaryColor = computedStyles.getPropertyValue('--vscode-editor-background').trim() || '#f3f3f3';
+                        const backgroundColor = computedStyles.getPropertyValue('--vscode-editor-background').trim() || '#ffffff';
+                        
+                        console.log('VSCode theme colors:', {
+                            primaryColor,
+                            primaryTextColor,
+                            primaryBorderColor,
+                            lineColor,
+                            secondaryColor,
+                            backgroundColor
+                        });
+                        
+                        mermaid.initialize({
+                            startOnLoad: false,
+                            theme: 'base',
+                            themeVariables: {
+                                primaryColor: primaryColor,
+                                primaryTextColor: primaryTextColor,
+                                primaryBorderColor: primaryBorderColor,
+                                lineColor: lineColor,
+                                secondaryColor: secondaryColor,
+                                tertiaryColor: backgroundColor,
+                                background: backgroundColor,
+                                mainBkg: backgroundColor,
+                                secondBkg: secondaryColor
+                            }
+                        });
+                        console.log('Mermaid initialized with VSCode theme colors');
+                    }
+                    
+                    initializeMermaidWithTheme();
+                    
+                    // Function to process mermaid diagrams in content
+                    async function processMermaidDiagrams() {
+                        console.log('[MERMAID] Processing mermaid diagrams');
+                        console.log('[MERMAID] Mermaid library available:', typeof mermaid !== 'undefined');
+                        
+                        const mermaidElements = document.querySelectorAll('mermaid');
+                        console.log('[MERMAID] Found', mermaidElements.length, 'mermaid elements');
+                        
+                        if (mermaidElements.length === 0) {
+                            console.log('[MERMAID] No mermaid elements found, skipping');
+                            return;
+                        }
+                        
+                        if (typeof mermaid === 'undefined') {
+                            console.error('[MERMAID] Mermaid library not loaded!');
+                            return;
+                        }
+                        
+                        // Process each mermaid element
+                        mermaidElements.forEach((element, index) => {
+                            try {
+                                const diagramContent = element.textContent || element.innerHTML;
+                                console.log('[MERMAID] Processing diagram', index);
+                                console.log('[MERMAID] Raw content:', diagramContent);
+                                
+                                // Clean and validate the diagram content
+                                const cleanContent = diagramContent.trim();
+                                if (!cleanContent) {
+                                    console.warn('[MERMAID] Empty diagram content, skipping element', index);
+                                    return;
+                                }
+                                
+                                // Basic validation - check if it looks like a mermaid diagram
+                                const validPrefixes = ['flowchart', 'graph', 'sequenceDiagram', 'classDiagram', 'stateDiagram', 'journey', 'gitgraph', 'pie'];
+                                const hasValidPrefix = validPrefixes.some(prefix => cleanContent.toLowerCase().startsWith(prefix.toLowerCase()));
+                                
+                                if (!hasValidPrefix) {
+                                    console.warn('[MERMAID] Content does not appear to be a valid mermaid diagram, skipping:', cleanContent.substring(0, 50) + '...');
+                                    return;
+                                }
+                                
+                                console.log('[MERMAID] Valid diagram content detected:', cleanContent.substring(0, 50) + '...');
+                                
+                                // Create container div
+                                const container = document.createElement('div');
+                                container.className = 'mermaid-container';
+                                
+                                // Create mermaid div
+                                const mermaidDiv = document.createElement('div');
+                                mermaidDiv.className = 'mermaid';
+                                mermaidDiv.textContent = cleanContent;
+                                
+                                container.appendChild(mermaidDiv);
+                                
+                                // Replace original mermaid element
+                                element.parentNode.replaceChild(container, element);
+                                console.log('[MERMAID] Replaced element', index, 'with container');
+                            } catch (error) {
+                                console.error('[MERMAID] Error processing element', index, ':', error);
+                            }
+                        });
+                        
+                        try {
+                            console.log('[MERMAID] About to call mermaid.run()');
+                            // Render all mermaid diagrams
+                            await mermaid.run();
+                            console.log('[MERMAID] All diagrams rendered successfully');
+                        } catch (error) {
+                            console.error('[MERMAID] Error rendering diagrams:', error);
+                            console.error('[MERMAID] Error stack:', error.stack);
+                        }
+                    }
                     
                     // Handle clicks on dialectic URLs and placement icons
                     document.addEventListener('click', function(event) {
@@ -1214,6 +1432,8 @@ export class WalkthroughWebviewProvider implements vscode.WebviewViewProvider {
                             }
                         });
                     }
+                    
+                    // HTML parsing is now done server-side - no client-side parsing needed
                     
                     function renderMarkdown(text) {
                         return text; // Content is already rendered HTML
@@ -1371,6 +1591,12 @@ export class WalkthroughWebviewProvider implements vscode.WebviewViewProvider {
                                 
                                 // Add placement icons to all dialectic links
                                 addPlacementIcons();
+                                
+                                // Process mermaid diagrams
+                                processMermaidDiagrams();
+                                
+                                // Restore user interaction state (scroll position, etc.)
+                                restoreOffscreenState();
                             } else {
                                 console.error('[ERROR] Content element not found!');
                             }
@@ -1380,15 +1606,38 @@ export class WalkthroughWebviewProvider implements vscode.WebviewViewProvider {
                         } else if (message.type === 'updateCommentDisplay') {
                             console.log('[COMMENT] Updating comment display:', message.commentId, message.chosenLocation);
                             updateCommentDisplay(message.commentId, message.chosenLocation);
+                        } else if (message.type === 'showWalkthroughHtml') {
+                            console.log('[HTML] Showing walkthrough HTML content, length:', message.content.length);
+                            console.log('[HTML] Content preview:', message.content.substring(0, 200) + '...');
+                            
+                            const contentElement = document.getElementById('content');
+                            if (contentElement) {
+                                console.log('[HTML] Setting HTML content directly (server-rendered)');
+                                contentElement.innerHTML = message.content;
+                                console.log('[SUCCESS] HTML content set');
+                                
+                                // Add placement icons to all dialectic links
+                                addPlacementIcons();
+                                
+                                // Process mermaid diagrams in the HTML content
+                                processMermaidDiagrams();
+                                
+                                // Restore user interaction state (scroll position, etc.)
+                                restoreOffscreenState();
+                            } else {
+                                console.error('[ERROR] Content element not found!');
+                            }
                         } else {
                             console.log('[IGNORE] Ignoring message type:', message.type);
                         }
                     });
                     
                     // Notify extension that webview is ready
+                    console.log('[WEBVIEW] Sending ready message to extension');
                     vscode.postMessage({
                         command: 'ready'
                     });
+                    console.log('[WEBVIEW] Ready message sent');
                 </script>
             </body>
             </html>`;
